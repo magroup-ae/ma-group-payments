@@ -9,9 +9,7 @@
   # (never re-transformed), keeping deploys identical to the tested build.
   node_bundler = "zisi"
 
-# Route friendly /api/* paths to the bundled function
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
-  force = true
+# NOTE: the api function serves /api/* directly via its own `config.path`
+# (export const config = { path: "/api/*" }). We deliberately DO NOT add a
+# redirect to /.netlify/functions/api/* — that legacy path is not exposed for
+# v2 path-routed functions and force-redirecting to it breaks all /api calls.
