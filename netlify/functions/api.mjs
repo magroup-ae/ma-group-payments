@@ -13346,6 +13346,27 @@ async function projectNames(s) {
   }
   return [...set].sort((a, b) => a.localeCompare(b));
 }
+async function ensureSupplierStub(s, name) {
+  name = String(name || "").trim();
+  if (!name) return null;
+  const { blobs } = await s.list({ prefix: "supplier/" });
+  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v && String(v.name || "").trim().toLowerCase() === name.toLowerCase()) return v.id; }
+  const st = await s.get("settings", { type: "json" });
+  st.supplierSeq = (st.supplierSeq || 0) + 1;
+  const id = "S" + String(st.supplierSeq).padStart(3, "0");
+  const ent = st.entities && st.entities[0] && st.entities[0].short || "Marvellous Art";
+  await s.setJSON("settings", st);
+  await s.setJSON("supplier/" + id, {
+    id, type: "Subcontractor", name, tradeName: "", licenseNo: "", licenseExpiry: "", establishmentCard: "", address: "", poBox: "", emirate: "", website: "",
+    category: "", trade: "", contactName: "", contactDesignation: "", mobile: "", tel: "", contact: "", email: "", trn: "", vatRegistered: false,
+    bank: "", accountName: "", accountNo: "", iban: "", swift: "", entity: ent, project: "", lpoRef: "", contractValue: 0, vatPct: 0.05, retentionPct: 0.1,
+    dlpMonths: 0, retentionRelease: "", advanceAmount: 0, advanceRecoveryRate: 0, advanceDate: "", advanceRef: "",
+    notes: "Auto-created from the cost log — please complete TRN, contact, email and bank details.",
+    status: "Prospect", source: "cost-log", incomplete: true, docs: {}, regNo: "MA-SUP-" + id,
+    createdAt: now(), createdBy: "system", updatedAt: now()
+  });
+  return id;
+}
 async function upsertCertExpense(s, c) {
   // Auto-post an approved/paid supplier IPC as a cost line (idempotent by cert no).
   if (!c || !c.project) return;
@@ -13358,7 +13379,7 @@ async function upsertCertExpense(s, c) {
     date: (c.payment?.date || c.date || now().slice(0, 10)).slice(0, 10),
     area: existing?.area || "General / All", category: existing?.category || (c.trade || "Subcontractor"),
     costType: existing?.costType || "Subcontractor",
-    supplier: c.supplier || "", description: `Supplier IPC ${c.no}${c.invoiceNo ? " — inv " + c.invoiceNo : ""}`,
+    supplier: c.supplier || "", supplierId: c.supplierId || existing?.supplierId || null, invoiceNo: c.invoiceNo || "", description: `Supplier IPC ${c.no}${c.invoiceNo ? " — inv " + c.invoiceNo : ""}`,
     poRef: c.lpoRef || "", boqRef: existing?.boqRef || "",
     budgeted: num(existing?.budgeted), amount, status: c.status === "Paid" ? "Paid" : "Pending", paid,
     notes: existing?.notes || "", supplierCertNo: c.no, source: "supplier-ipc",
@@ -14480,7 +14501,7 @@ var api_default = async (req, context) => {
     return json({ projects: results });
   }
   if (path === "costmeta" && req.method === "GET") {
-    return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects: await projectNames(s) });
+    return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects: await projectNames(s), suppliers: (await listSuppliers()).map((x) => x.name).filter(Boolean).sort() });
   }
   if (path === "expenses" && req.method === "GET") {
     return json(await listExpenses(url.searchParams.get("project") || ""));
@@ -14502,12 +14523,15 @@ var api_default = async (req, context) => {
       // allow editing the classification of an auto-posted line, keep the link/amounts
     }
     const str = (k) => b[k] === void 0 ? ex?.[k] || "" : String(b[k] || "");
+    const supplierName = str("supplier");
+    let supplierId = ex?.supplierId || null;
+    if (supplierName && ex?.source !== "supplier-ipc") { try { supplierId = await ensureSupplierStub(s, supplierName) || supplierId; } catch {} }
     const exp = {
       id, seq: ex?.seq || (Number(String(id).replace(/\D/g, "")) || 0),
       project: String(b.project).trim(),
       date: String(b.date).slice(0, 10),
       area: str("area"), category: str("category") || "General / Other", costType: str("costType") || "Material Supply",
-      supplier: str("supplier"), description: str("description"), poRef: str("poRef"), boqRef: str("boqRef"),
+      supplier: supplierName, supplierId, invoiceNo: str("invoiceNo"), description: str("description"), poRef: str("poRef"), boqRef: str("boqRef"),
       budgeted: b.budgeted === void 0 ? num(ex?.budgeted) : num(b.budgeted),
       amount: b.amount === void 0 ? num(ex?.amount) : num(b.amount),
       status: str("status") || "Pending",
@@ -14541,19 +14565,40 @@ var api_default = async (req, context) => {
       items.push({
         id, seq, project: String(r.project).trim(), date: String(r.date).slice(0, 10),
         area: String(r.area || ""), category: String(r.category || "General / Other"), costType,
-        supplier: String(r.supplier || ""), description: String(r.description || ""),
+        supplier: String(r.supplier || ""), supplierId: null, invoiceNo: String(r.invoiceNo || ""), description: String(r.description || ""),
         poRef: String(r.poRef || ""), boqRef: String(r.boqRef || ""),
         budgeted: num(r.budgeted), amount: num(r.amount), status, paid: num(r.paid),
         notes: String(r.notes || ""), supplierCertNo: null, source: "import",
         createdBy: me.name, createdAt: now(), updatedAt: now()
       });
     }
+    stg.expenseSeq = seq;
+    await s.setJSON("settings", stg);
+    // register supplier stubs for distinct supplier names, then link the expense rows
+    const names = [...new Set(items.map((e) => e.supplier.trim()).filter(Boolean))];
+    const nameToId = {};
+    for (const nm of names) { try { nameToId[nm.toLowerCase()] = await ensureSupplierStub(s, nm); } catch {} }
+    for (const e of items) { const key = e.supplier.trim().toLowerCase(); if (key && nameToId[key]) e.supplierId = nameToId[key]; }
     for (let i = 0; i < items.length; i += 25) {
       await Promise.all(items.slice(i, i + 25).map((e) => s.setJSON("expense/" + e.id, e)));
     }
-    stg.expenseSeq = seq;
-    await s.setJSON("settings", stg);
-    return json({ created: items.length });
+    return json({ created: items.length, suppliersRegistered: names.length });
+  }
+  if (path === "suppliers/sync-costlog" && req.method === "POST") {
+    if (!can("suppliers")) return err("No rights", 403);
+    const { blobs } = await s.list({ prefix: "expense/" });
+    const names = /* @__PURE__ */ new Set();
+    const rows = [];
+    for (const b of blobs) { const e = await s.get(b.key, { type: "json" }); if (e && e.supplier) { names.add(String(e.supplier).trim()); rows.push(e); } }
+    let created = 0;
+    const nameToId = {};
+    for (const nm of names) { if (!nm) continue; const before = nm; const idv = await ensureSupplierStub(s, nm); nameToId[nm.toLowerCase()] = idv; }
+    // link expenses missing supplierId
+    for (const e of rows) { const k = String(e.supplier).trim().toLowerCase(); if (k && nameToId[k] && e.supplierId !== nameToId[k]) { e.supplierId = nameToId[k]; await s.setJSON("expense/" + e.id, e); } }
+    // count how many suppliers now exist that were auto-created
+    const { blobs: sb } = await s.list({ prefix: "supplier/" });
+    for (const b of sb) { const v = await s.get(b.key, { type: "json" }); if (v && v.source === "cost-log") created++; }
+    return json({ ok: true, distinctSuppliers: names.size, costLogSuppliers: created });
   }
   const expGet = path.match(/^expense\/([^/]+)$/);
   if (expGet && req.method === "GET") {

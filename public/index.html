@@ -731,12 +731,12 @@ function vSups(){
   const canEdit=["QS","PM","CEO"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Suppliers / Subcontractors</h2>
     <input id="sq" placeholder="Filter by name…" style="max-width:220px;margin-left:14px">
-    <button class="btn ghost right" id="blankReg">Print blank form</button>${canEdit?`<button class="btn gold" id="newSup">+ Register Supplier</button>`:""}</div><div style="height:10px"></div>
-    <div class="muted" style="margin-bottom:6px">Click a supplier to open their statement (payments, accumulation, pending to pay).</div>
+    <button class="btn ghost right" id="blankReg">Print blank form</button>${canEdit?`<button class="btn ghost" id="syncSup" title="Register any supplier names used in the cost log so you can complete their details">Sync from cost log</button>`:""}${canEdit?`<button class="btn gold" id="newSup">+ Register Supplier</button>`:""}</div><div style="height:10px"></div>
+    <div class="muted" style="margin-bottom:6px">Click a supplier to open their statement (payments, accumulation, pending to pay). Names picked up from the cost log show <span style="color:#b06a00">⚠ to complete</span> until you add their TRN / contact / bank.</div>
     <div id="supList"></div></div>`;
   const draw=(q="")=>{
     const rows=SUPS.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())).map(s=>{ const a=supAgg(s.id);
-      return `<tr class="click" data-sid="${s.id}"><td><b>${esc(s.name)}</b><br><span class="muted" style="font-size:11px">${esc(s.type||"Subcontractor")}</span></td><td>${esc(s.trn||"—")}</td>
+      return `<tr class="click" data-sid="${s.id}"><td><b>${esc(s.name)}</b>${(s.source==="cost-log"||s.incomplete)?` <span style="color:#b06a00;font-size:10px;font-weight:700">⚠ to complete</span>`:""}<br><span class="muted" style="font-size:11px">${esc(s.type||"Subcontractor")}</span></td><td>${esc(s.trn||"—")}</td>
         <td class="num">${fmt(s.contractValue)}</td><td class="num">${fmt(a.paid)}</td>
         <td class="num" style="color:#b06a00;font-weight:700">${fmt(a.pending)}</td>
         <td class="num" style="background:#fff2cc;color:#7a5c00;font-weight:700">${fmt(a.retention)}</td></tr>`;}).join("");
@@ -748,6 +748,8 @@ function vSups(){
   $("#sq").oninput=e=>draw(e.target.value);
   $("#blankReg").onclick=()=>printSupplierReg(null);
   if(canEdit) $("#newSup").onclick=()=>supForm(null);
+  if(canEdit&&$("#syncSup")) $("#syncSup").onclick=async ()=>{ toast("Syncing suppliers from the cost log…");
+    try{ const r=await api("suppliers/sync-costlog",{method:"POST"}); await load(); toast(`Done — ${r.distinctSuppliers} supplier name(s) registered`); vSups(); }catch(e){ toast(e.message); } };
 }
 function supStatement(id){
   const s=supById(id); if(!s){ toast("Not found"); return; }
@@ -1493,8 +1495,8 @@ function renderExpList(){
   const can=ME.role==="CEO";
   if(!list.length){ $("#xList").innerHTML=`<div class="muted">No expenses yet. Click “Add expense” to log a cost, or approve a Supplier IPC and it will appear here automatically.</div>`; return; }
   $("#xList").classList.remove("muted");
-  $("#xList").innerHTML=`<table><tr><th>Date</th><th>Project</th><th>Area</th><th>Category</th><th>Cost Type</th><th>Supplier</th><th>Description</th><th class="num">Cost</th><th>Status</th><th class="num">Paid</th><th>Src</th><th></th></tr>
-    ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td>${esc(e.category)}</td><td>${esc(e.costType)}</td><td>${esc(e.supplier||"—")}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
+  $("#xList").innerHTML=`<table><tr><th>Date</th><th>Project</th><th>Activity / Area</th><th>Supplier</th><th>Invoice No.</th><th>Cost Type</th><th>Description</th><th class="num">Cost</th><th>Status</th><th class="num">Paid</th><th>Src</th><th></th></tr>
+    ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td><b>${esc(e.supplier||"—")}</b></td><td>${esc(e.invoiceNo||e.poRef||"—")}</td><td>${esc(e.costType)}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
   $("#xList").querySelectorAll("[data-x]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del) return; expenseForm(EXP.find(x=>x.id===r.dataset.x)); });
   $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const ex=EXP.find(x=>x.id===a.dataset.del); adminDelete("expense",a.dataset.del,(ex?ex.description||ex.supplier:"")+" — AED "+fmt(ex?ex.amount:0),reloadExp); });
 }
@@ -1514,7 +1516,8 @@ async function expenseForm(x, presetProject){
      <div><label>Category / Trade</label><select id="x_category">${opt(COSTMETA.categories,x.category||"General / Other")}</select></div>
      <div><label>Cost Type</label><select id="x_costType">${opt(COSTMETA.costTypes.map(t=>t.name),x.costType||"Material Supply")}</select></div>
      <div><label>Date</label><input id="x_date" type="date" value="${esc((x.date||"").slice(0,10))}"></div>
-     <div><label>Supplier / Subcontractor</label><input id="x_supplier" value="${esc(x.supplier||"")}" ${linked?"readonly":""}></div>
+     <div><label>Supplier / Subcontractor</label><input id="x_supplier" list="x_sups" value="${esc(x.supplier||"")}" ${linked?"readonly":""} placeholder="pick or type — new names are added to Suppliers"><datalist id="x_sups">${(COSTMETA.suppliers||[]).map(sn=>`<option>${esc(sn)}</option>`).join("")}</datalist></div>
+     <div><label>Supplier Invoice No.</label><input id="x_invoiceNo" value="${esc(x.invoiceNo||"")}" ${linked?"readonly":""}></div>
      <div style="grid-column:1/-1"><label>Description</label><input id="x_description" value="${esc(x.description||"")}"></div>
      <div><label>PO / Ref</label><input id="x_poRef" value="${esc(x.poRef||"")}"></div>
      <div><label>BOQ Ref</label><input id="x_boqRef" value="${esc(x.boqRef||"")}"></div>
@@ -1534,7 +1537,7 @@ async function expenseForm(x, presetProject){
   $("#x_back").onclick=()=>{VIEW="expenses";render();};
   $("#x_save").onclick=async ()=>{ const g=id=>{const el=$("#x_"+id);return el?el.value:"";};
     const body={ project:g("project").trim(), date:g("date"), area:g("area").trim(), category:g("category"), costType:g("costType"),
-      supplier:g("supplier"), description:g("description"), poRef:g("poRef"), boqRef:g("boqRef"),
+      supplier:g("supplier").trim(), invoiceNo:g("invoiceNo").trim(), description:g("description"), poRef:g("poRef"), boqRef:g("boqRef"),
       budgeted:+g("budgeted")||0, amount:+g("amount")||0, status:g("status"), paid:+g("paid")||0, notes:g("notes") };
     if(!isNew) body.id=x.id;
     if(!body.project){ toast("Choose the project first"); return; }
@@ -1570,8 +1573,9 @@ async function importExpensesExcel(){
       const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
       const iType=head.findIndex(h=>h.includes("cost type")||h==="type");
       const iAmt=head.findIndex(h=>h==="cost"||h.includes("invoice")||h.includes("amount")||h.includes("cost ("));
+      const iInv=head.findIndex(h=>h.includes("invoice no")||h.includes("invoice #")||h.includes("invoice number")||h==="inv no"||h==="inv#");
       const ci={ project:find("project"), date:find("date"), area:find("area","building"), category:find("category","trade"),
-        costType:iType, supplier:find("supplier","subcont"), description:find("descr","narrat"), poRef:find("po/","po ","p.o","lpo"),
+        costType:iType, supplier:find("supplier","subcont"), invoiceNo:iInv, description:find("descr","narrat"), poRef:find("po/","po ","p.o","lpo"),
         boqRef:find("boq"), budgeted:find("budget"), amount:iAmt, status:find("status"), paid:find("paid") };
       const toISO=v=>{ if(v instanceof Date){ let y=v.getFullYear(); if(y<2020) y+=20; return `${y}-${String(v.getMonth()+1).padStart(2,"0")}-${String(v.getDate()).padStart(2,"0")}`; } const s=String(v||"").trim(); let m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if(m) return `${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`; m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m?m[0]:""; };
       const at=(r,i)=>i>=0?r[i]:"";
@@ -1581,7 +1585,7 @@ async function importExpensesExcel(){
         const amount=parseFloat(String(at(r,ci.amount)).replace(/[^\d.-]/g,""))||0;
         if(!date||!project||(amount===0 && !String(at(r,ci.supplier)).trim())) continue;
         out.push({ project, date, area:String(at(r,ci.area)||"").trim(), category:String(at(r,ci.category)||"").trim(),
-          costType:String(at(r,ci.costType)||"").trim(), supplier:String(at(r,ci.supplier)||"").trim(),
+          costType:String(at(r,ci.costType)||"").trim(), supplier:String(at(r,ci.supplier)||"").trim(), invoiceNo:String(at(r,ci.invoiceNo)||"").trim(),
           description:String(at(r,ci.description)||"").trim(), poRef:String(at(r,ci.poRef)||"").trim(), boqRef:String(at(r,ci.boqRef)||"").trim(),
           budgeted:parseFloat(String(at(r,ci.budgeted)).replace(/[^\d.-]/g,""))||0, amount,
           status:String(at(r,ci.status)||"").trim(), paid:parseFloat(String(at(r,ci.paid)).replace(/[^\d.-]/g,""))||0 }); }
@@ -1595,8 +1599,8 @@ async function importExpensesExcel(){
 }
 function exportExpensesCsv(){
   const list=expFiltered();
-  const rows=[["Date","Project","Area","Category","CostType","Supplier","Description","PO/Ref","BOQ","Budgeted","Cost","Status","Paid","Source","CertNo"]]
-    .concat(list.map(e=>[e.date,e.project,e.area,e.category,e.costType,e.supplier,e.description,e.poRef,e.boqRef,e.budgeted,e.amount,e.status,e.paid,e.source,e.supplierCertNo||""]));
+  const rows=[["Date","Project","Activity/Area","Category","CostType","Supplier","Invoice No","Description","PO/Ref","BOQ","Budgeted","Cost","Status","Paid","Source","CertNo"]]
+    .concat(list.map(e=>[e.date,e.project,e.area,e.category,e.costType,e.supplier,e.invoiceNo||"",e.description,e.poRef,e.boqRef,e.budgeted,e.amount,e.status,e.paid,e.source,e.supplierCertNo||""]));
   const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cost_Log.csv"; a.click();
 }
