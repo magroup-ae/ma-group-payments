@@ -13088,7 +13088,11 @@ var CAN = {
   admin: ["CEO"],
   suppliers: ["QS", "PM", "CEO", "Secretary"],
   assets: ["CEO", "PM", "Secretary", "QS"],
-  assetsDelete: ["CEO"]
+  assetsDelete: ["CEO"],
+  clients: ["CEO", "PM", "QS", "Secretary"],
+  contracts: ["CEO", "PM", "QS"],
+  clientcert: ["CEO", "PM", "QS"],
+  clientcertIssue: ["CEO", "PM"]
 };
 var DOC_KINDS = ["license", "trn", "bank", "establishment", "other"];
 var ASSET_CATS = [
@@ -13124,6 +13128,72 @@ function assetDepreciation(a) {
   let accum = (a.status && a.status !== "Active") ? depreciable : r2(Math.min(depreciable, depPerYear * age));
   const nbv = r2(cost - accum);
   return { depPerYear, age: r2(age), accumDep: r2(accum), nbv: Math.max(0, nbv) };
+}
+// ===================== CLIENT (RECEIVABLES) MODULE =====================
+async function listClients() {
+  const s = store();
+  const { blobs } = await s.list({ prefix: "client/" });
+  const out = [];
+  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
+  out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  return out;
+}
+async function listContracts() {
+  const s = store();
+  const { blobs } = await s.list({ prefix: "contract/" });
+  const out = [];
+  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
+  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return out;
+}
+async function clientCertsByContract(contractId, excludeNo) {
+  const s = store();
+  const { blobs } = await s.list({ prefix: "clientcert/" });
+  const out = [];
+  for (const b of blobs) {
+    const c = await s.get(b.key, { type: "json" });
+    if (!c || c.no === excludeNo || c.status === "Cancelled") continue;
+    if (c.contractId === contractId) out.push(c);
+  }
+  return out;
+}
+function computeClientCert(c, contract, prevNet, recoveredSoFar) {
+  const cumValue = num(c.grossCum);
+  const mos = num(c.mos);
+  const gross = r2(cumValue + mos);
+  const retentionPct = num(contract?.retentionPct);
+  const retention = r2(gross * retentionPct);
+  const afterRet = r2(gross - retention);
+  let advanceRecovery = 0;
+  const advanceAmount = num(contract?.advanceAmount), advanceRate = num(contract?.recoveryRate);
+  if (advanceAmount > 0 && advanceRate > 0) {
+    const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
+    advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
+  }
+  const contra = num(c.contra);
+  const net = r2(afterRet - advanceRecovery - prevNet - contra);
+  const vatPct = num(contract?.vatPct);
+  const vat = r2(net * vatPct);
+  return {
+    cumValue, mos, gross, retentionPct, retention, afterRet,
+    advanceAmount, advanceRate, advanceRecovery,
+    advanceRecoveredToDate: r2(recoveredSoFar + advanceRecovery),
+    advanceOutstanding: Math.max(0, r2(advanceAmount - recoveredSoFar - advanceRecovery)),
+    retentionHeld: retention,
+    prevCertified: prevNet, contra, net, vatPct, vat, payable: r2(net + vat)
+  };
+}
+async function recomputeClientCert(c, contract) {
+  const priors = await clientCertsByContract(c.contractId, c.no);
+  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
+  const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
+  const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
+  c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar);
+  return c;
+}
+function clientCertNo(contract, seq) {
+  const pfx = (contract?.certPrefix || "PC").trim().replace(/\s+/g, "");
+  return `${pfx}-${String(seq).padStart(3, "0")}`;
 }
 var api_default = async (req, context) => {
   const url = new URL(req.url);
@@ -13267,6 +13337,9 @@ var api_default = async (req, context) => {
     const suppliers = await listSuppliers();
     const assets = { sign: await s.get("asset/sign") || "", stamp: await s.get("asset/stamp") || "" };
     const assetCount = (await s.list({ prefix: "asset/MAG-" })).blobs.length;
+    const clientCount = (await s.list({ prefix: "client/" })).blobs.length;
+    const contractCount = (await s.list({ prefix: "contract/" })).blobs.length;
+    const clientCertCount = (await s.list({ prefix: "clientcert/" })).blobs.length;
     return json({
       me: { id: me.id, name: me.name, role: me.role },
       settings,
@@ -13275,6 +13348,9 @@ var api_default = async (req, context) => {
       suppliers,
       assets,
       assetCount,
+      clientCount,
+      contractCount,
+      clientCertCount,
       users: users.map((u) => ({ id: u.id, name: u.name, role: u.role }))
     });
   }
@@ -13802,6 +13878,194 @@ var api_default = async (req, context) => {
       if (exists) updated++; else created++;
     }
     return json({ ok: true, created, updated, skipped, total: rows.length });
+  }
+  if (path === "clients" && req.method === "GET") {
+    return json(await listClients());
+  }
+  if (path === "client" && req.method === "POST") {
+    if (!can("clients")) return err("No rights to manage clients", 403);
+    const b = await req.json();
+    if (!b.name) return err("Client legal name is required");
+    const stg = await s.get("settings", { type: "json" });
+    let id = b.id;
+    if (!id) { stg.clientSeq = (stg.clientSeq || 0) + 1; id = "C" + String(stg.clientSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
+    const ex = b.id ? await s.get("client/" + b.id, { type: "json" }) : null;
+    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
+    const cl = {
+      id, type: "Client",
+      name: b.name, tradeName: str("tradeName"), trn: str("trn"),
+      address: str("address"), poBox: str("poBox"), emirate: str("emirate"),
+      contactName: str("contactName"), contactDesignation: str("contactDesignation"),
+      mobile: str("mobile"), tel: str("tel"), email: str("email"),
+      notes: str("notes"), status: b.status || ex?.status || "Active",
+      regNo: ex?.regNo || "MA-CLI-" + id,
+      createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
+      updatedAt: now(), updatedBy: me.name
+    };
+    await s.setJSON("client/" + id, cl);
+    return json(cl);
+  }
+  const clGet = path.match(/^client\/([^/]+)$/);
+  if (clGet && req.method === "GET") {
+    const v = await s.get("client/" + decodeURIComponent(clGet[1]), { type: "json" });
+    return v ? json(v) : err("Not found", 404);
+  }
+  if (path === "contracts" && req.method === "GET") {
+    const contracts = await listContracts();
+    const clients = await listClients();
+    const cmap = {}; for (const c of clients) cmap[c.id] = c.name;
+    return json(contracts.map((c) => ({ ...c, clientName: cmap[c.clientId] || "" })));
+  }
+  if (path === "contract" && req.method === "POST") {
+    if (!can("contracts")) return err("No rights to manage contracts", 403);
+    const b = await req.json();
+    if (!b.clientId) return err("Choose the client");
+    if (!b.project) return err("Project name is required");
+    const client = await s.get("client/" + b.clientId, { type: "json" });
+    if (!client) return err("Client not found");
+    const stg = await s.get("settings", { type: "json" });
+    let id = b.id;
+    if (!id) { stg.contractSeq = (stg.contractSeq || 0) + 1; id = "K" + String(stg.contractSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
+    const ex = b.id ? await s.get("contract/" + b.id, { type: "json" }) : null;
+    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
+    const contractSum = b.contractSum === void 0 ? num(ex?.contractSum) : num(b.contractSum);
+    const variations = b.variations === void 0 ? num(ex?.variations) : num(b.variations);
+    const advancePct = b.advancePct === void 0 || b.advancePct === "" ? (ex?.advancePct ?? 0.2) : num(b.advancePct);
+    let advanceAmount = b.advanceAmount === void 0 || b.advanceAmount === "" ? (ex?.advanceAmount ?? null) : num(b.advanceAmount);
+    if (advanceAmount === null || advanceAmount === void 0) advanceAmount = r2(contractSum * advancePct);
+    const ct = {
+      id, clientId: b.clientId,
+      entity: b.entity || ex?.entity || settings.entities[0].short,
+      project: b.project, certPrefix: str("certPrefix") || "PC",
+      subcontractRef: str("subcontractRef"), offerRef: str("offerRef"),
+      mainContractor: str("mainContractor") || client.name,
+      contractSum, variations,
+      advancePct, advanceAmount,
+      retentionPct: b.retentionPct === void 0 || b.retentionPct === "" ? (ex?.retentionPct ?? 0.1) : num(b.retentionPct),
+      recoveryRate: b.recoveryRate === void 0 || b.recoveryRate === "" ? (ex?.recoveryRate ?? 0.2) : num(b.recoveryRate),
+      vatPct: b.vatPct === void 0 || b.vatPct === "" ? (ex?.vatPct ?? 0.05) : num(b.vatPct),
+      retentionRelease: str("retentionRelease"), dlpMonths: b.dlpMonths === void 0 ? num(ex?.dlpMonths) : num(b.dlpMonths),
+      startDate: str("startDate"), notes: str("notes"),
+      status: b.status || ex?.status || "Active",
+      createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
+      updatedAt: now(), updatedBy: me.name
+    };
+    await s.setJSON("contract/" + id, ct);
+    return json(ct);
+  }
+  const ctGet = path.match(/^contract\/([^/]+)$/);
+  if (ctGet && req.method === "GET") {
+    const v = await s.get("contract/" + decodeURIComponent(ctGet[1]), { type: "json" });
+    if (!v) return err("Not found", 404);
+    const certs = await clientCertsByContract(v.id);
+    const certifiedNet = r2(certs.reduce((a, c) => a + (c.calc?.net || 0), 0));
+    const recovered = r2(certs.reduce((a, c) => a + (c.calc?.advanceRecovery || 0), 0));
+    const retentionHeld = r2(certs.reduce((a, c) => Math.max(a, c.calc?.retention || 0), 0));
+    v.summary = {
+      certCount: certs.length,
+      certifiedNet,
+      advanceRecovered: recovered,
+      advanceOutstanding: Math.max(0, r2(num(v.advanceAmount) - recovered)),
+      retentionHeld
+    };
+    const client = await s.get("client/" + v.clientId, { type: "json" });
+    v.clientName = client?.name || "";
+    return json(v);
+  }
+  if (path === "clientcerts" && req.method === "GET") {
+    const { blobs } = await s.list({ prefix: "clientcert/" });
+    const clist = await listContracts();
+    const cmap = {}; for (const c of clist) cmap[c.id] = c;
+    const out = [];
+    for (const b of blobs) {
+      const c = await s.get(b.key, { type: "json" });
+      if (!c) continue;
+      const ct = cmap[c.contractId] || {};
+      out.push({ no: c.no, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status });
+    }
+    out.sort((a, b) => a.no < b.no ? 1 : -1);
+    return json(out);
+  }
+  if (path === "clientcert" && req.method === "POST") {
+    if (!can("clientcert")) return err("No rights to create client certificates", 403);
+    const b = await req.json();
+    if (!b.contractId) return err("Choose the contract");
+    const contract = await s.get("contract/" + b.contractId, { type: "json" });
+    if (!contract) return err("Contract not found");
+    let maxSeq = 0;
+    { const { blobs } = await s.list({ prefix: "clientcert/" }); for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && ec.contractId === b.contractId && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; } }
+    let seq = maxSeq + 1, no = clientCertNo(contract, seq), guard = 0;
+    while (await s.get("clientcert/" + no) && guard++ < 100) { seq++; no = clientCertNo(contract, seq); }
+    const cert = {
+      no, seq, contractId: contract.id, clientId: contract.clientId,
+      createdBy: me.id, createdAt: now(),
+      date: b.date || now().slice(0, 10),
+      periodFrom: b.periodFrom || "", periodTo: b.periodTo || "",
+      grossCum: num(b.grossCum), mos: num(b.mos), contra: num(b.contra),
+      notes: b.notes || "", status: "Draft",
+      audit: [{ at: now(), by: me.name, action: "Created (Draft)" }]
+    };
+    await recomputeClientCert(cert, contract);
+    await s.setJSON("clientcert/" + no, cert);
+    return json(cert);
+  }
+  const ccGet = path.match(/^clientcert\/([^/]+)$/);
+  if (ccGet && req.method === "GET") {
+    const c = await s.get("clientcert/" + decodeURIComponent(ccGet[1]), { type: "json" });
+    if (!c) return err("Not found", 404);
+    const contract = await s.get("contract/" + c.contractId, { type: "json" });
+    const client = await s.get("client/" + c.clientId, { type: "json" });
+    return json({ ...c, contract, client });
+  }
+  const ccPut = path.match(/^clientcert\/([^/]+)$/);
+  if (ccPut && req.method === "PUT") {
+    const key = "clientcert/" + decodeURIComponent(ccPut[1]);
+    const c = await s.get(key, { type: "json" });
+    if (!c) return err("Not found", 404);
+    if (["Issued", "Approved"].includes(c.status) && !can("admin")) return err("Locked after issue", 403);
+    if (!can("clientcert")) return err("No edit rights", 403);
+    const b = await req.json();
+    for (const f of ["date", "periodFrom", "periodTo", "notes"]) if (b[f] !== void 0) c[f] = b[f];
+    for (const f of ["grossCum", "mos", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    const contract = await s.get("contract/" + c.contractId, { type: "json" });
+    await recomputeClientCert(c, contract);
+    c.audit.push({ at: now(), by: me.name, action: "Edited" });
+    await s.setJSON(key, c);
+    return json(c);
+  }
+  const ccTr = path.match(/^clientcert\/([^/]+)\/transition$/);
+  if (ccTr && req.method === "POST") {
+    const key = "clientcert/" + decodeURIComponent(ccTr[1]);
+    const c = await s.get(key, { type: "json" });
+    if (!c) return err("Not found", 404);
+    const { action, comment } = await req.json();
+    if (action === "issue") {
+      if (!can("clientcertIssue")) return err("No rights to issue", 403);
+      if (c.status !== "Draft") return err("Must be Draft");
+      c.status = "Issued"; c.issuedBy = me.name; c.issuedAt = now();
+      c.audit.push({ at: now(), by: me.name, action: "Issued", comment: comment || void 0 });
+      const reg = await s.get("clientregister", { type: "json" }) || [];
+      reg.push({ sr: reg.length + 1, at: now(), no: c.no, contractId: c.contractId, date: c.date, gross: c.calc?.gross, net: c.calc?.net, vat: c.calc?.vat, payable: c.calc?.payable, by: me.name });
+      await s.setJSON("clientregister", reg);
+    } else if (action === "approve") {
+      if (!can("admin")) return err("CEO only", 403);
+      if (c.status !== "Issued") return err("Must be Issued first");
+      c.status = "Approved"; c.approvedBy = me.name; c.approvedAt = now();
+      c.audit.push({ at: now(), by: me.name, action: "Approved", comment: comment || void 0 });
+    } else if (action === "cancel") {
+      if (!can("admin")) return err("CEO only", 403);
+      c.status = "Cancelled";
+      c.audit.push({ at: now(), by: me.name, action: "Cancelled", comment: comment || void 0 });
+    } else if (action === "reopen") {
+      if (!can("admin")) return err("CEO only", 403);
+      c.status = "Draft"; c.issuedBy = null; c.issuedAt = null; c.approvedBy = null; c.approvedAt = null;
+      c.audit.push({ at: now(), by: me.name, action: "Reopened to Draft", comment: comment || void 0 });
+    } else return err("Unknown action");
+    await s.setJSON(key, c);
+    return json(c);
+  }
+  if (path === "clientregister" && req.method === "GET") {
+    return json(await s.get("clientregister", { type: "json" }) || []);
   }
   return err("Not found: " + path, 404);
 };

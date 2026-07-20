@@ -237,7 +237,7 @@ async function unlockSettings(){
   catch(e){ toast(e.message); return false; }
 }
 function render(){
-  const tabs=[["dash","Dashboard"],["certs","Certificates"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["assets","Assets"]];
+  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["assets","Assets"]];
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
   <header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Payment Certificates</div><div class="sp"></div>
@@ -250,7 +250,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, assets:vAssets, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, assets:vAssets, settings:vSettings})[VIEW]();
 }
 
 function supById(id){ return SUPS.find(s=>s.id===id); }
@@ -1013,6 +1013,294 @@ function vReg(){
       .concat(REG.map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; return [r.sr,r.no,r.invoiceNo,r.entity,r.project,r.supplier,r.payee,r.mode,r.ref,r.bank,r.date,r.amount,done?"Received":"Pending",r.by,r.at];}));
     const csv=rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
     const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Payment_Register.csv"; a.click(); };
+}
+
+/* ---------- clients & client certificates (receivables) ---------- */
+let CLIENTS=[], CONTRACTS=[];
+function ccCalc(grossCum,mos,contra,ct,prevNet,recoveredSoFar){
+  const gross=r2(num(grossCum)+num(mos));
+  const retention=r2(gross*num(ct.retentionPct));
+  const afterRet=r2(gross-retention);
+  let advRec=0; const advAmt=num(ct.advanceAmount), advRate=num(ct.recoveryRate);
+  if(advAmt>0&&advRate>0){ const rem=Math.max(0,r2(advAmt-num(recoveredSoFar))); advRec=Math.min(r2(advRate*gross),rem); }
+  const net=r2(afterRet-advRec-num(prevNet)-num(contra));
+  const vat=r2(net*num(ct.vatPct));
+  return {gross,retention,afterRet,advRec,net,vat,payable:r2(net+vat),
+    advRecoveredToDate:r2(num(recoveredSoFar)+advRec), advOutstanding:Math.max(0,r2(advAmt-num(recoveredSoFar)-advRec)),
+    prevCertified:num(prevNet), advAmount:advAmt, retentionHeld:retention};
+}
+function r2(n){ n=num(n); return Math.round((n+Number.EPSILON)*100)/100; }
+function num(x){ return typeof x==="number"&&isFinite(x)?x:parseFloat(x)||0; }
+function sectionB(calc,ct){
+  const R=(l,v,neg)=>`<tr><td class="lab">${l}</td><td style="text-align:right">${neg&&num(v)?"("+fmt(Math.abs(v))+")":fmt(v)}</td></tr>`;
+  // Accept either the client-side calc (ccCalc → advRec) or the backend calc (computeClientCert → advanceRecovery/cumValue/mos).
+  const mos=num(calc.mos);
+  const line1=(calc.cumValue!==undefined&&calc.cumValue!==null)?num(calc.cumValue):r2(num(calc.gross)-mos);
+  const advRec=(calc.advanceRecovery!==undefined)?num(calc.advanceRecovery):num(calc.advRec);
+  const netCum=r2(num(calc.afterRet)-advRec);
+  const contra=num(calc.contra);
+  return `<table>
+   <tr><td class="sec navy" colspan="2">B. CERTIFICATION SUMMARY (AED)</td></tr>
+   ${R("1. Gross value of work executed (cumulative)",line1)}
+   ${R("2. Materials on site",mos)}
+   ${R("Gross value certified (cumulative)",calc.gross)}
+   ${R("3. Less: retention @ "+pct(ct.retentionPct),calc.retention,true)}
+   ${R("4. Less: advance (down payment) recovery",advRec,true)}
+   ${R("5. Net cumulative certified",netCum)}
+   ${R("6. Less: previously certified",calc.prevCertified,true)}
+   ${contra?R("&nbsp;&nbsp;&nbsp;Less: other deductions / contra",contra,true):""}
+   ${R("7. NET AMOUNT DUE — THIS CERTIFICATE",calc.net)}
+   ${R("8. VAT @ "+pct(ct.vatPct),calc.vat)}
+   <tr class="pay"><td>9. TOTAL PAYABLE INCL. VAT</td><td style="text-align:right">${fmt(calc.payable)}</td></tr>
+   <tr><td class="lab" style="font-style:italic">In words</td><td style="font-style:italic">${esc(words(calc.payable))}</td></tr>
+  </table>`;
+}
+async function vClients(){
+  const can=["CEO","PM","QS","Secretary"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Clients</h2>
+    <span class="muted">the parties who pay you (main contractors / clients)</span>
+    ${can?`<button class="btn gold right" id="newClient">+ Add client</button>`:""}</div>
+    <div style="height:8px"></div><div id="clientList" class="muted">Loading…</div></div>`;
+  try{ CLIENTS=await api("clients"); CONTRACTS=await api("contracts"); }catch(e){ $("#clientList").textContent=e.message; return; }
+  if(can) $("#newClient").onclick=()=>clientForm(null);
+  const byC={}; CONTRACTS.forEach(c=>byC[c.clientId]=(byC[c.clientId]||0)+1);
+  if(!CLIENTS.length){ $("#clientList").innerHTML=`<div class="muted">No clients yet. Add your first client, then a contract, then raise certificates.</div>`; return; }
+  $("#clientList").classList.remove("muted");
+  $("#clientList").innerHTML=`<table><tr><th>Reg No.</th><th>Client</th><th>TRN</th><th>Contact</th><th class="num">Contracts</th><th>Status</th></tr>
+    ${CLIENTS.map(c=>`<tr class="click" data-cl="${esc(c.id)}"><td>${esc(c.regNo||c.id)}</td><td><b>${esc(c.name)}</b></td><td>${esc(c.trn||"—")}</td><td>${esc(c.contactName||"—")}</td><td class="num">${byC[c.id]||0}</td><td>${esc(c.status||"Active")}</td></tr>`).join("")}</table>`;
+  $("#clientList").querySelectorAll("[data-cl]").forEach(r=>r.onclick=()=>clientDetail(r.dataset.cl));
+}
+function clientForm(cl){
+  const isNew=!cl; cl=cl||{status:"Active"};
+  $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add client":"Edit "+esc(cl.name)}</h2>
+   <div class="grid" style="margin-top:8px">
+     <div style="grid-column:1/-1"><label>Legal name</label><input id="cl_name" value="${esc(cl.name||"")}"></div>
+     <div><label>Trading name</label><input id="cl_tradeName" value="${esc(cl.tradeName||"")}"></div>
+     <div><label>TRN</label><input id="cl_trn" value="${esc(cl.trn||"")}"></div>
+     <div style="grid-column:1/-1"><label>Address</label><input id="cl_address" value="${esc(cl.address||"")}"></div>
+     <div><label>Emirate</label><input id="cl_emirate" value="${esc(cl.emirate||"")}"></div>
+     <div><label>P.O. Box</label><input id="cl_poBox" value="${esc(cl.poBox||"")}"></div>
+     <div><label>Contact person</label><input id="cl_contactName" value="${esc(cl.contactName||"")}"></div>
+     <div><label>Designation</label><input id="cl_contactDesignation" value="${esc(cl.contactDesignation||"")}"></div>
+     <div><label>Mobile</label><input id="cl_mobile" value="${esc(cl.mobile||"")}"></div>
+     <div><label>Telephone</label><input id="cl_tel" value="${esc(cl.tel||"")}"></div>
+     <div><label>Email</label><input id="cl_email" value="${esc(cl.email||"")}"></div>
+     <div style="grid-column:1/-1"><label>Notes</label><input id="cl_notes" value="${esc(cl.notes||"")}"></div>
+   </div>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="cl_save">${isNew?"Add client":"Save"}</button><button class="btn ghost" id="cl_back">Back</button></div></div>`;
+  $("#cl_back").onclick=()=>{VIEW="clients";render();};
+  $("#cl_save").onclick=async ()=>{ const g=id=>{const el=$("#cl_"+id);return el?el.value:"";};
+    const body={ name:g("name").trim(), tradeName:g("tradeName"), trn:g("trn"), address:g("address"), emirate:g("emirate"), poBox:g("poBox"), contactName:g("contactName"), contactDesignation:g("contactDesignation"), mobile:g("mobile"), tel:g("tel"), email:g("email"), notes:g("notes") };
+    if(!isNew) body.id=cl.id;
+    if(!body.name){ toast("Legal name required"); return; }
+    try{ await api("client",{method:"POST",body}); toast(isNew?"Client added":"Saved"); VIEW="clients"; render(); }catch(e){ toast(e.message); } };
+}
+async function clientDetail(id){
+  let cl; try{ cl=await api("client/"+encodeURIComponent(id)); }catch(e){ toast(e.message); return; }
+  const can=["CEO","PM","QS"].includes(ME.role), canEdit=["CEO","PM","QS","Secretary"].includes(ME.role);
+  const contracts=CONTRACTS.filter(c=>c.clientId===id);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(cl.name)}</h2><span class="muted">${esc(cl.regNo||cl.id)}${cl.trn?" · TRN "+esc(cl.trn):""}</span>
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="clEdit">Edit client</button>`:""}<button class="btn ghost" id="clBack">Back</button></div></div>
+     <div class="muted" style="margin-top:4px">${esc([cl.address,cl.emirate].filter(Boolean).join(", "))}${cl.contactName?" · "+esc(cl.contactName):""}${cl.mobile?" · "+esc(cl.mobile):""}${cl.email?" · "+esc(cl.email):""}</div></div>
+   <div class="card"><div class="flex"><h2 style="margin:0">Contracts / Projects</h2>${can?`<button class="btn gold right" id="newContract">+ Add contract</button>`:""}</div><div style="height:8px"></div>
+     ${contracts.length?`<table><tr><th>Project</th><th>Cert ref</th><th class="num">Contract sum</th><th class="num">Advance</th><th class="num">Retention</th><th></th></tr>
+       ${contracts.map(c=>`<tr class="click" data-ct="${esc(c.id)}"><td><b>${esc(c.project)}</b></td><td>${esc(c.certPrefix)}</td><td class="num">${fmt(c.contractSum)}</td><td class="num">${pct(c.advancePct)}</td><td class="num">${pct(c.retentionPct)}</td><td><a href="#">open →</a></td></tr>`).join("")}</table>`:`<div class="muted">No contracts yet for this client.</div>`}
+   </div>`;
+  $("#clBack").onclick=()=>{VIEW="clients";render();};
+  if(canEdit) $("#clEdit").onclick=()=>clientForm(cl);
+  if(can) $("#newContract").onclick=()=>contractForm(null,id);
+  $("#main").querySelectorAll("[data-ct]").forEach(r=>r.onclick=()=>contractDetail(r.dataset.ct));
+}
+function contractForm(ct,clientId){
+  const isNew=!ct;
+  ct=ct||{clientId,advancePct:0.2,retentionPct:0.1,recoveryRate:0.2,vatPct:0.05,entity:S.entities[0].short,certPrefix:"PC",retentionRelease:"5% at handover + 5% after DLP"};
+  const opt=(arr,sel)=>arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add contract":"Edit contract — "+esc(ct.project)}</h2>
+   <h3>Project &amp; contract</h3><div class="grid">
+     <div><label>Our entity (claimant)</label><select id="k_entity">${opt(S.entities.map(e=>e.short),ct.entity)}</select></div>
+     <div style="grid-column:1/-1"><label>Project name</label><input id="k_project" value="${esc(ct.project||"")}"></div>
+     <div><label>Certificate ref prefix</label><input id="k_certPrefix" value="${esc(ct.certPrefix||"PC")}" placeholder="e.g. AFAQ/PS/ASG"></div>
+     <div><label>Client name (as on certificate)</label><input id="k_mainContractor" value="${esc(ct.mainContractor||"")}"></div>
+     <div><label>Subcontract / contract ref</label><input id="k_subcontractRef" value="${esc(ct.subcontractRef||"")}"></div>
+     <div><label>Offer letter ref</label><input id="k_offerRef" value="${esc(ct.offerRef||"")}"></div>
+     <div><label>Start date</label><input id="k_startDate" type="date" value="${esc(ct.startDate||"")}"></div>
+   </div>
+   <h3>Financial terms</h3><div class="grid">
+     <div><label>Contract sum (excl VAT)</label><input id="k_contractSum" type="number" step="0.01" value="${ct.contractSum??""}"></div>
+     <div><label>Approved variations</label><input id="k_variations" type="number" step="0.01" value="${ct.variations??0}"></div>
+     <div><label>Down payment / advance %</label><input id="k_advancePct" type="number" step="0.1" value="${Math.round((ct.advancePct??.2)*1000)/10}"></div>
+     <div><label>Advance amount (blank = auto)</label><input id="k_advanceAmount" type="number" step="0.01" value="${ct.advanceAmount??""}"></div>
+     <div><label>Retention %</label><input id="k_retentionPct" type="number" step="0.1" value="${Math.round((ct.retentionPct??.1)*1000)/10}"></div>
+     <div><label>Advance recovery rate %</label><input id="k_recoveryRate" type="number" step="0.1" value="${Math.round((ct.recoveryRate??.2)*1000)/10}"></div>
+     <div><label>VAT %</label><input id="k_vatPct" type="number" step="0.1" value="${Math.round((ct.vatPct??.05)*1000)/10}"></div>
+     <div><label>DLP (months)</label><input id="k_dlpMonths" type="number" step="1" value="${ct.dlpMonths??""}"></div>
+     <div style="grid-column:1/-1"><label>Retention release terms</label><input id="k_retentionRelease" value="${esc(ct.retentionRelease||"")}"></div>
+   </div>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="k_save">${isNew?"Add contract":"Save"}</button><button class="btn ghost" id="k_back">Back</button></div></div>`;
+  $("#k_back").onclick=()=>clientDetail(ct.clientId);
+  $("#k_save").onclick=async ()=>{ const g=id=>{const el=$("#k_"+id);return el?el.value:"";};
+    const body={ clientId:ct.clientId, entity:g("entity"), project:g("project").trim(), certPrefix:g("certPrefix").trim()||"PC",
+      mainContractor:g("mainContractor"), subcontractRef:g("subcontractRef"), offerRef:g("offerRef"), startDate:g("startDate"),
+      contractSum:+g("contractSum")||0, variations:+g("variations")||0,
+      advancePct:(+g("advancePct")||0)/100, advanceAmount:g("advanceAmount")===""?"":+g("advanceAmount"),
+      retentionPct:(+g("retentionPct")||0)/100, recoveryRate:(+g("recoveryRate")||0)/100, vatPct:(+g("vatPct")||0)/100,
+      dlpMonths:g("dlpMonths")===""?"":+g("dlpMonths"), retentionRelease:g("retentionRelease") };
+    if(!isNew) body.id=ct.id;
+    if(!body.project){ toast("Project name required"); return; }
+    try{ const saved=await api("contract",{method:"POST",body}); CONTRACTS=await api("contracts"); toast("Saved"); contractDetail(saved.id); }catch(e){ toast(e.message); } };
+}
+async function contractDetail(id){
+  let ct; try{ ct=await api("contract/"+encodeURIComponent(id)); }catch(e){ toast(e.message); return; }
+  const can=["CEO","PM","QS"].includes(ME.role), sm=ct.summary||{};
+  let certs=[]; try{ certs=(await api("clientcerts")).filter(c=>c.contractId===id); }catch(e){}
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(ct.project)}</h2><span class="muted">${esc(ct.clientName||"")} · ${esc(ct.certPrefix)}</span>
+    <div class="right flex">${can?`<button class="btn ghost" id="ctEdit">Edit contract</button>`:""}<button class="btn ghost" id="ctBack">Back</button></div></div>
+    <div class="kpis" style="margin-top:10px">
+      <div class="kpi"><div class="v">AED ${fmt(ct.contractSum)}</div><div class="l">Contract sum</div></div>
+      <div class="kpi"><div class="v">AED ${fmt(ct.advanceAmount)}</div><div class="l">Advance (${pct(ct.advancePct)})</div></div>
+      <div class="kpi"><div class="v">AED ${fmt(sm.advanceOutstanding)}</div><div class="l">Advance to recover</div></div>
+      <div class="kpi"><div class="v">AED ${fmt(sm.certifiedNet)}</div><div class="l">Net certified to date</div></div>
+      <div class="kpi"><div class="v">AED ${fmt(sm.retentionHeld)}</div><div class="l">Retention held</div></div>
+    </div>
+    <div class="muted" style="margin-top:6px">Retention ${pct(ct.retentionPct)} · Recovery ${pct(ct.recoveryRate)} · VAT ${pct(ct.vatPct)} · Ref ${esc(ct.subcontractRef||"—")}</div></div>
+   <div class="card"><div class="flex"><h2 style="margin:0">Payment certificates</h2>${can?`<button class="btn gold right" id="newCC">+ New certificate</button>`:""}</div><div style="height:8px"></div>
+     ${certs.length?`<table><tr><th>No.</th><th>Date</th><th>Period</th><th class="num">Gross cum.</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
+       ${certs.map(c=>`<tr class="click" data-cc="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.gross)}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`:`<div class="muted">No certificates yet.</div>`}
+   </div>`;
+  $("#ctBack").onclick=()=>clientDetail(ct.clientId);
+  if(can) $("#ctEdit").onclick=()=>contractForm(ct,ct.clientId);
+  if(can) $("#newCC").onclick=()=>clientCertForm(ct.id);
+  $("#main").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
+}
+async function vClientCerts(){
+  const can=["CEO","PM","QS"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Client Payment Certificates</h2>
+    <span class="muted">interim payment certificates you issue to clients (before the proforma invoice)</span>
+    ${can?`<button class="btn gold right" id="newCC2">+ New certificate</button>`:""}</div>
+    <div style="height:8px"></div><div id="ccList" class="muted">Loading…</div></div>`;
+  let list; try{ list=await api("clientcerts"); CONTRACTS=await api("contracts"); }catch(e){ $("#ccList").textContent=e.message; return; }
+  const cmap={}; CONTRACTS.forEach(c=>cmap[c.id]=c);
+  if(can) $("#newCC2").onclick=()=>{ if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; } clientCertForm(null); };
+  if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates yet. Add a client and contract, then create your first certificate.</div>`; return; }
+  $("#ccList").classList.remove("muted");
+  $("#ccList").innerHTML=`<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Period</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
+    ${list.map(c=>`<tr class="click" data-cc="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
+  $("#ccList").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
+}
+async function clientCertForm(contractId){
+  if(!CONTRACTS.length){ try{ CONTRACTS=await api("contracts"); }catch(e){} }
+  if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; }
+  const opt=CONTRACTS.map(c=>`<option value="${esc(c.id)}" ${c.id===contractId?"selected":""}>${esc(c.project)} — ${esc(c.clientName||"")} (${esc(c.certPrefix)})</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><h2>New client payment certificate</h2>
+   <div class="note">Enter the <b>cumulative</b> gross value of work executed (from the site / project team). The system computes Section B — retention, advance recovery, VAT and the net amount due.</div>
+   <div class="grid" style="margin-top:10px">
+     <div style="grid-column:1/-1"><label>Contract / project</label><select id="q_contract">${opt}</select></div>
+     <div><label>Certificate date</label><input id="q_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+     <div><label>Period from</label><input id="q_from" placeholder="21/06/26"></div>
+     <div><label>Period to</label><input id="q_to" placeholder="20/07/26"></div>
+     <div><label>Gross value of work executed (cumulative)</label><input id="q_gross" type="number" step="0.01" value="0"></div>
+     <div><label>Materials on site (cumulative)</label><input id="q_mos" type="number" step="0.01" value="0"></div>
+     <div><label>Other deductions / contra</label><input id="q_contra" type="number" step="0.01" value="0"></div>
+     <div style="grid-column:1/-1"><label>Notes</label><input id="q_notes"></div>
+   </div>
+   <div id="q_preview" style="margin-top:12px"></div>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="q_save">Create certificate</button><button class="btn ghost" id="q_back">Back</button></div></div>`;
+  $("#q_back").onclick=()=>{VIEW="ccerts";render();};
+  let PREV={prevNet:0,recovered:0,ct:null};
+  const loadPrev=async ()=>{ const id=$("#q_contract").value; try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),ct:c}; }catch(e){ PREV={prevNet:0,recovered:0,ct:CONTRACTS.find(x=>x.id===id)}; } preview(); };
+  const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
+    const calc=ccCalc($("#q_gross").value,$("#q_mos").value,$("#q_contra").value,ct,PREV.prevNet,PREV.recovered);
+    $("#q_preview").innerHTML=`<div class="cert" style="max-width:520px">${sectionB(calc,ct)}</div>
+      <div class="muted" style="font-size:11px;margin-top:4px">Advance recovered to date: ${fmt(calc.advRecoveredToDate)} · Advance still to recover: ${fmt(calc.advOutstanding)} · Retention held: ${fmt(calc.retentionHeld)}</div>`; };
+  ["q_gross","q_mos","q_contra"].forEach(id=>$("#"+id).addEventListener("input",preview));
+  $("#q_contract").onchange=loadPrev; loadPrev();
+  $("#q_save").onclick=async ()=>{ const g=id=>$("#q_"+id).value;
+    const body={ contractId:$("#q_contract").value, date:g("date"), periodFrom:g("from"), periodTo:g("to"), grossCum:+g("gross")||0, mos:+g("mos")||0, contra:+g("contra")||0, notes:g("notes") };
+    try{ const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.no); }catch(e){ toast(e.message); } };
+}
+async function openClientCert(no){
+  let c; try{ c=await api("clientcert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
+  const ct=c.contract||{}, K=c.calc||{};
+  const can=["CEO","PM","QS"].includes(ME.role), canIssue=["CEO","PM"].includes(ME.role);
+  const acts=[];
+  if(c.status==="Draft"&&canIssue) acts.push(["issue","Issue certificate","btn green"]);
+  if(c.status==="Issued"&&ME.role==="CEO") acts.push(["approve","Approve","btn green"]);
+  if(["Issued","Approved"].includes(c.status)&&ME.role==="CEO") acts.push(["reopen","Reopen","btn ghost"]);
+  if(c.status!=="Cancelled"&&ME.role==="CEO") acts.push(["cancel","Cancel","btn red"]);
+  const canEdit=c.status==="Draft"&&can;
+  const row=(l,v)=>`<tr><td class="lab">${l}</td><td class="num">${v}</td></tr>`;
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(c.no)}</h2><span class="pill st-${c.status}">${c.status}</span>
+     <span class="muted">${esc(ct.project||"")} · ${esc(c.client?.name||"")}</span>
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
+       ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}<button class="btn ghost" id="ccBack">Back</button></div></div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+     <div><h3>Certificate</h3><table>
+       ${row("Certificate date",dmy(c.date))}${row("Period",(c.periodFrom||"")+(c.periodTo?" – "+c.periodTo:""))}
+       ${row("Contract sum",fmt(ct.contractSum))}${row("Advance ("+pct(ct.advancePct)+")",fmt(ct.advanceAmount))}
+       ${row("Gross work executed (cum.)",fmt(K.cumValue))}${row("Materials on site",fmt(K.mos))}</table>
+       <div class="cert" style="margin-top:10px">${sectionB(K,ct)}</div>
+       <table style="margin-top:8px"><tr><td class="sec navy" colspan="2">C. ADVANCE &amp; RETENTION STATUS</td></tr>
+         ${row("Advance received ("+pct(ct.advancePct)+")",fmt(K.advanceAmount!==void 0?K.advanceAmount:ct.advanceAmount))}
+         ${row("Advance recovered to date",fmt(K.advanceRecoveredToDate))}
+         ${row("Advance still to recover",fmt(K.advanceOutstanding))}
+         ${row("Retention held to date",fmt(K.retention))}</table>
+     </div>
+     <div><h3>History</h3><ul class="audit">${(c.audit||[]).slice().reverse().map(a=>`<li>${dmy(a.at)} — <b>${esc(a.by)}</b>: ${esc(a.action)}${a.comment?" — <i>"+esc(a.comment)+"</i>":""}</li>`).join("")}</ul></div>
+   </div></div>`;
+  $("#ccBack").onclick=()=>{VIEW="ccerts";render();};
+  $("#ccPrint").onclick=()=>printClientIPC(c);
+  if(canEdit) $("#ccEdit").onclick=()=>clientCertEdit(c);
+  $("#main").querySelectorAll("[data-a]").forEach(b=>b.onclick=async ()=>{ let comment;
+    if(b.dataset.a==="cancel"||b.dataset.a==="reopen"){ comment=prompt("Comment (optional):")||""; }
+    try{ await api("clientcert/"+encodeURIComponent(c.no)+"/transition",{method:"POST",body:{action:b.dataset.a,comment}}); toast("Done"); openClientCert(c.no); }catch(e){ toast(e.message); } });
+}
+function clientCertEdit(c){
+  const ct=c.contract||{};
+  $("#main").innerHTML=`<div class="card"><h2>Edit ${esc(c.no)}</h2><div class="grid" style="margin-top:8px">
+     <div><label>Certificate date</label><input id="e_date" type="date" value="${esc((c.date||'').slice(0,10))}"></div>
+     <div><label>Period from</label><input id="e_from" value="${esc(c.periodFrom||"")}"></div>
+     <div><label>Period to</label><input id="e_to" value="${esc(c.periodTo||"")}"></div>
+     <div><label>Gross value of work executed (cumulative)</label><input id="e_gross" type="number" step="0.01" value="${c.grossCum??0}"></div>
+     <div><label>Materials on site (cumulative)</label><input id="e_mos" type="number" step="0.01" value="${c.mos??0}"></div>
+     <div><label>Other deductions / contra</label><input id="e_contra" type="number" step="0.01" value="${c.contra??0}"></div>
+     <div style="grid-column:1/-1"><label>Notes</label><input id="e_notes" value="${esc(c.notes||"")}"></div>
+   </div><div style="height:12px"></div><div class="flex"><button class="btn green" id="e_save">Save</button><button class="btn ghost" id="e_back">Back</button></div></div>`;
+  $("#e_back").onclick=()=>openClientCert(c.no);
+  $("#e_save").onclick=async ()=>{ const g=id=>$("#e_"+id).value;
+    try{ await api("clientcert/"+encodeURIComponent(c.no),{method:"PUT",body:{date:g("date"),periodFrom:g("from"),periodTo:g("to"),grossCum:+g("gross")||0,mos:+g("mos")||0,contra:+g("contra")||0,notes:g("notes")}}); toast("Saved"); openClientCert(c.no); }catch(e){ toast(e.message); } };
+}
+function printClientIPC(c){
+  const ct=c.contract||{}, cl=c.client||{}, K=c.calc||{};
+  const ent=S.entities.find(e=>e.short===ct.entity)||{name:"MA GROUP",line2:"",line3:""};
+  const revised=r2(num(ct.contractSum)+num(ct.variations));
+  const approved=["Issued","Approved"].includes(c.status);
+  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:46px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  $("#printArea").innerHTML=`<div class="cert">
+   <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
+   <div class="title">INTERIM PAYMENT CERTIFICATE</div>
+   <div style="text-align:center;font-weight:700;font-size:11px;margin-bottom:4px">${esc(ct.project||"")}</div>
+   <table>
+     <tr><td class="lab">Certificate Ref.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+     <tr><td class="lab">Period Covered</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="lab">Certificate No.</td><td>No. ${c.seq}</td></tr>
+     <tr><td class="lab">Client / Main Contractor</td><td>${esc(ct.mainContractor||cl.name||"")}</td><td class="lab">Claimant (Subcontractor)</td><td>${esc(ent.name)}</td></tr>
+     <tr><td class="lab">Contract / Subcontract Ref.</td><td>${esc(ct.subcontractRef||"—")}</td><td class="lab">Contract Sum (excl. VAT)</td><td>${fmt(ct.contractSum)}</td></tr>
+     <tr><td class="lab">Approved Variations</td><td>${fmt(ct.variations)}</td><td class="lab">Revised Contract Sum</td><td>${fmt(revised)}</td></tr>
+   </table>
+   <table><tr><td class="sec" colspan="2">A. VALUE OF WORK EXECUTED (cumulative, per site measurement)</td></tr>
+     <tr><td class="lab">Gross value of work executed to date</td><td style="text-align:right">${fmt(K.cumValue)}</td></tr>
+     <tr><td class="lab">Materials on site</td><td style="text-align:right">${fmt(K.mos)}</td></tr>
+     <tr class="tot"><td>Total gross value certified</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
+   ${sectionB(K,ct)}
+   <table><tr><td class="sec navy" colspan="4">C. ADVANCE (DOWN PAYMENT) &amp; RETENTION STATUS</td></tr>
+     <tr><td class="lab">Advance / down payment (${pct(ct.advancePct)})</td><td style="text-align:right">${fmt(ct.advanceAmount)}</td><td class="lab">Advance recovered to date</td><td style="text-align:right">${fmt(K.advanceRecoveredToDate)}</td></tr>
+     <tr><td class="lab">Advance balance to recover</td><td style="text-align:right">${fmt(K.advanceOutstanding)}</td><td class="lab">Retention held to date (${pct(ct.retentionPct)})</td><td style="text-align:right">${fmt(K.retention)}</td></tr>
+     <tr><td class="lab">Retention release</td><td colspan="3">${esc(ct.retentionRelease||"—")}</td></tr></table>
+   <div style="position:relative"><table class="sig"><tr>
+     <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
+     <tr><td>Prepared by — MA Group (QS)</td><td>Checked by — Client (PM)</td><td>Certified by — Client (Authorised Signatory)</td></tr></table></div>
+   <div class="foot">MA Group Payment Certificate System — interim payment certificate (client) — ${esc(c.no)} — status: ${esc(c.status)} — printed ${dmy(new Date())}</div>
+  </div>`;
+  doPrint();
 }
 
 /* ---------- asset registry ---------- */
