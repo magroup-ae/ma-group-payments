@@ -13265,6 +13265,30 @@ function clientCertNo(contract, client, seq, dateStr) {
 function clientCertKey(contractId, seq) {
   return `${contractId}-${String(seq).padStart(3, "0")}`;
 }
+async function resolveClientCert(s, param) {
+  const p = decodeURIComponent(param);
+  // Fast path: certs stored under their slash-free key
+  let c = await s.get("clientcert/" + p, { type: "json" });
+  if (c) return { c, storeKey: "clientcert/" + p, derivedKey: c.key || clientCertKey(c.contractId, c.seq) };
+  // Fallback: scan (handles legacy certs stored under a slash-containing "no",
+  // and lookups by cert number). Self-heals by migrating to the clean key path.
+  const { blobs } = await s.list({ prefix: "clientcert/" });
+  for (const bl of blobs) {
+    const cc = await s.get(bl.key, { type: "json" });
+    if (!cc) continue;
+    const k = cc.key || clientCertKey(cc.contractId, cc.seq);
+    if (k === p || cc.no === p || bl.key === "clientcert/" + p) {
+      const cleanKey = "clientcert/" + k;
+      if (bl.key !== cleanKey) {
+        cc.key = k;
+        try { await s.setJSON(cleanKey, cc); await s.delete(bl.key); } catch {}
+        return { c: cc, storeKey: cleanKey, derivedKey: k };
+      }
+      return { c: cc, storeKey: bl.key, derivedKey: k };
+    }
+  }
+  return null;
+}
 var api_default = async (req, context) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/(?:api|\.netlify\/functions\/api)\/?/, "");
@@ -14085,17 +14109,18 @@ var api_default = async (req, context) => {
   }
   const ccGet = path.match(/^clientcert\/([^/]+)$/);
   if (ccGet && req.method === "GET") {
-    const c = await s.get("clientcert/" + decodeURIComponent(ccGet[1]), { type: "json" });
-    if (!c) return err("Not found", 404);
+    const r = await resolveClientCert(s, ccGet[1]);
+    if (!r) return err("Not found", 404);
+    const c = r.c;
     const contract = await s.get("contract/" + c.contractId, { type: "json" });
     const client = await s.get("client/" + c.clientId, { type: "json" });
-    return json({ ...c, contract, client });
+    return json({ ...c, key: r.derivedKey, contract, client });
   }
   const ccPut = path.match(/^clientcert\/([^/]+)$/);
   if (ccPut && req.method === "PUT") {
-    const key = "clientcert/" + decodeURIComponent(ccPut[1]);
-    const c = await s.get(key, { type: "json" });
-    if (!c) return err("Not found", 404);
+    const r = await resolveClientCert(s, ccPut[1]);
+    if (!r) return err("Not found", 404);
+    const c = r.c, key = r.storeKey;
     if (["Issued", "Approved"].includes(c.status) && !can("admin")) return err("Locked after issue", 403);
     if (!can("clientcert")) return err("No edit rights", 403);
     const b = await req.json();
@@ -14109,9 +14134,9 @@ var api_default = async (req, context) => {
   }
   const ccTr = path.match(/^clientcert\/([^/]+)\/transition$/);
   if (ccTr && req.method === "POST") {
-    const key = "clientcert/" + decodeURIComponent(ccTr[1]);
-    const c = await s.get(key, { type: "json" });
-    if (!c) return err("Not found", 404);
+    const r = await resolveClientCert(s, ccTr[1]);
+    if (!r) return err("Not found", 404);
+    const c = r.c, key = r.storeKey;
     const { action, comment } = await req.json();
     if (action === "issue") {
       if (!can("clientcertIssue")) return err("No rights to issue", 403);
