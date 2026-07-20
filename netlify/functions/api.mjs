@@ -14386,66 +14386,87 @@ var api_default = async (req, context) => {
   }
   if (path === "project/seed" && req.method === "POST") {
     if (!can("contracts")) return err("No rights to set up projects", 403);
-    const b = await req.json();
-    const stg = await s.get("settings", { type: "json" });
-    const clients = await listClients();
-    const cb = b.client || {};
-    let client = clients.find((c) => c.name.toLowerCase() === String(cb.name || "").toLowerCase());
-    if (!client) {
-      stg.clientSeq = (stg.clientSeq || 0) + 1;
-      const id = "C" + String(stg.clientSeq).padStart(3, "0");
-      client = {
-        id, type: "Client", name: cb.name || "Client", tradeName: cb.tradeName || "", trn: cb.trn || "",
-        address: cb.address || "", poBox: cb.poBox || "", emirate: cb.emirate || "",
-        contactName: cb.contactName || "", contactDesignation: cb.contactDesignation || "",
-        mobile: cb.mobile || "", tel: cb.tel || "", email: cb.email || "", notes: cb.notes || "",
-        status: "Active", regNo: "MA-CLI-" + id, createdAt: now(), createdBy: me.name, updatedAt: now()
-      };
-      await s.setJSON("client/" + id, client);
-      await s.setJSON("settings", stg);
-    }
-    const contracts = await listContracts();
-    const kb = b.contract || {};
-    let contract = contracts.find((c) => c.clientId === client.id && String(c.project).toLowerCase() === String(kb.project || "").toLowerCase());
-    if (!contract) {
-      stg.contractSeq = (stg.contractSeq || 0) + 1;
-      const id = "K" + String(stg.contractSeq).padStart(3, "0");
+    const body = await req.json();
+    const list = Array.isArray(body.projects) ? body.projects : [body];
+    const results = [];
+    for (const P of list) {
+      const cb = P.client || {}, kb = P.contract || {};
+      if (!kb.project) continue;
+      // client: upsert by name (update details in place)
+      const clients = await listClients();
+      let client = clients.find((c) => c.name.toLowerCase() === String(cb.name || "").toLowerCase());
+      const setIf = (o, k, v) => { if (v !== void 0 && v !== "") o[k] = v; };
+      if (client) {
+        const cur = await s.get("client/" + client.id, { type: "json" });
+        for (const f of ["trn", "address", "poBox", "emirate", "contactName", "contactDesignation", "mobile", "tel", "email"]) setIf(cur, f, cb[f]);
+        cur.updatedAt = now();
+        await s.setJSON("client/" + client.id, cur); client = cur;
+      } else {
+        const stg = await s.get("settings", { type: "json" });
+        stg.clientSeq = (stg.clientSeq || 0) + 1;
+        const id = "C" + String(stg.clientSeq).padStart(3, "0");
+        client = {
+          id, type: "Client", name: cb.name || "Client", tradeName: cb.tradeName || "", trn: cb.trn || "",
+          address: cb.address || "", poBox: cb.poBox || "", emirate: cb.emirate || "",
+          contactName: cb.contactName || "", contactDesignation: cb.contactDesignation || "",
+          mobile: cb.mobile || "", tel: cb.tel || "", email: cb.email || "", notes: cb.notes || "",
+          status: "Active", regNo: "MA-CLI-" + id, createdAt: now(), createdBy: me.name, updatedAt: now()
+        };
+        await s.setJSON("client/" + id, client);
+        await s.setJSON("settings", stg);
+      }
+      // contract: upsert by project name (any client)
+      const contracts = await listContracts();
       const contractSum = num(kb.contractSum), advancePct = kb.advancePct == null ? 0.2 : num(kb.advancePct);
-      let advanceAmount = kb.advanceAmount == null || kb.advanceAmount === "" ? r2(contractSum * advancePct) : num(kb.advanceAmount);
-      contract = {
-        id, clientId: client.id, entity: kb.entity || settings.entities[0].short,
+      const advanceAmount = kb.advanceAmount == null || kb.advanceAmount === "" ? r2(contractSum * advancePct) : num(kb.advanceAmount);
+      const fields = {
+        clientId: client.id, entity: kb.entity || settings.entities[0].short,
         project: kb.project, certPrefix: "PC", projShort: String(kb.projShort || kb.project || "PRJ").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3),
         subcontractRef: kb.subcontractRef || "", offerRef: kb.offerRef || "", mainContractor: kb.mainContractor || client.name,
-        contractSum, variations: num(kb.variations),
-        advancePct, advanceAmount,
+        contractSum, variations: num(kb.variations), advancePct, advanceAmount,
         retentionPct: kb.retentionPct == null ? 0.1 : num(kb.retentionPct),
         recoveryRate: kb.recoveryRate == null ? 0.2 : num(kb.recoveryRate),
         vatPct: kb.vatPct == null ? 0.05 : num(kb.vatPct),
-        retentionRelease: kb.retentionRelease || "", dlpMonths: num(kb.dlpMonths),
-        startDate: kb.startDate || "", notes: kb.notes || "", status: "Active",
-        createdAt: now(), createdBy: me.name, updatedAt: now()
+        retentionRelease: kb.retentionRelease || "", dlpMonths: num(kb.dlpMonths), startDate: kb.startDate || "", status: "Active"
       };
-      await s.setJSON("contract/" + id, contract);
-      await s.setJSON("settings", stg);
+      let contract = contracts.find((c) => String(c.project).toLowerCase() === String(kb.project).toLowerCase());
+      if (contract) {
+        const cur = await s.get("contract/" + contract.id, { type: "json" });
+        Object.assign(cur, fields, { updatedAt: now(), updatedBy: me.name });
+        await s.setJSON("contract/" + contract.id, cur); contract = cur;
+      } else {
+        const stg = await s.get("settings", { type: "json" });
+        stg.contractSeq = (stg.contractSeq || 0) + 1;
+        const id = "K" + String(stg.contractSeq).padStart(3, "0");
+        contract = { id, ...fields, notes: kb.notes || "", createdAt: now(), createdBy: me.name, updatedAt: now() };
+        await s.setJSON("contract/" + id, contract);
+        await s.setJSON("settings", stg);
+      }
+      // certs: create only if provided AND the contract has none (avoid duplicates on re-run)
+      let created = 0;
+      const provided = P.certs || [];
+      if (provided.length) {
+        const existing = await clientCertsByContract(contract.id);
+        if (!existing.length) {
+          for (const cc of provided) {
+            const seq = created + 1, date = (cc.date || now().slice(0, 10)).slice(0, 10);
+            const key = clientCertKey(contract.id, seq), no = clientCertNo(contract, client, seq, date);
+            const cert = {
+              no, key, seq, contractId: contract.id, clientId: client.id, createdBy: me.id, createdAt: now(),
+              date, periodFrom: cc.periodFrom || "", periodTo: cc.periodTo || "",
+              grossCum: num(cc.grossCum), mos: num(cc.mos), contra: num(cc.contra), notes: cc.notes || "",
+              status: "Draft", audit: [{ at: now(), by: me.name, action: "Imported (Draft)" }]
+            };
+            await recomputeClientCert(cert, contract);
+            if (cc.issue) { cert.status = "Issued"; cert.issuedBy = me.name; cert.issuedAt = now(); cert.audit.push({ at: now(), by: me.name, action: "Issued (import)" }); }
+            await s.setJSON("clientcert/" + key, cert);
+            created++;
+          }
+        }
+      }
+      results.push({ clientName: client.name, project: contract.project, contractId: contract.id, certsCreated: created });
     }
-    let created = 0;
-    for (const cc of b.certs || []) {
-      let maxSeq = 0;
-      { const { blobs } = await s.list({ prefix: "clientcert/" }); for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && ec.contractId === contract.id && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; } }
-      const seq = maxSeq + 1, date = (cc.date || now().slice(0, 10)).slice(0, 10);
-      const key = clientCertKey(contract.id, seq), no = clientCertNo(contract, client, seq, date);
-      const cert = {
-        no, key, seq, contractId: contract.id, clientId: client.id, createdBy: me.id, createdAt: now(),
-        date, periodFrom: cc.periodFrom || "", periodTo: cc.periodTo || "",
-        grossCum: num(cc.grossCum), mos: num(cc.mos), contra: num(cc.contra), notes: cc.notes || "",
-        status: "Draft", audit: [{ at: now(), by: me.name, action: "Imported (Draft)" }]
-      };
-      await recomputeClientCert(cert, contract);
-      if (cc.issue) { cert.status = "Issued"; cert.issuedBy = me.name; cert.issuedAt = now(); cert.audit.push({ at: now(), by: me.name, action: "Issued (import)" }); }
-      await s.setJSON("clientcert/" + key, cert);
-      created++;
-    }
-    return json({ clientId: client.id, clientName: client.name, contractId: contract.id, project: contract.project, certsCreated: created });
+    return json({ projects: results });
   }
   if (path === "costmeta" && req.method === "GET") {
     return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects: await projectNames(s) });

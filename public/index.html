@@ -1251,10 +1251,11 @@ function importProjectJson(){
   const inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
   inp.onchange=async ()=>{ const f=inp.files[0]; if(!f) return;
     let payload; try{ payload=JSON.parse(await f.text()); }catch(e){ toast("Not a valid JSON file"); return; }
-    const cName=payload.client?.name||"(client)", proj=payload.contract?.project||"(project)", nCerts=(payload.certs||[]).length;
-    if(!confirm(`Import project setup?\n\nClient: ${cName}\nProject: ${proj}\nCertificates: ${nCerts}\n\nExisting client/contract with the same name are reused (not duplicated).`)) return;
-    toast("Importing project…");
-    try{ const r=await api("project/seed",{method:"POST",body:payload}); toast(`Imported: ${esc(r.project)} · ${r.certsCreated} certificate(s)`); CONTRACTS=await api("contracts"); vClientCerts(); }catch(e){ toast(e.message); }
+    const arr=Array.isArray(payload.projects)?payload.projects:[payload];
+    const summary=arr.map(p=>`• ${p.contract?.project||"(project)"} — ${p.client?.name||"(client)"}`).join("\n");
+    if(!confirm(`Import ${arr.length} project setup(s)?\n\n${summary}\n\nExisting projects (matched by name) are updated, not duplicated.`)) return;
+    toast("Importing…");
+    try{ const r=await api("project/seed",{method:"POST",body:payload}); const n=(r.projects||[]).length; toast(`Imported/updated ${n} project(s)`); CONTRACTS=await api("contracts"); vClientCerts(); }catch(e){ toast(e.message); }
   };
   inp.click();
 }
