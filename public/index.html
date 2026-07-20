@@ -1224,16 +1224,28 @@ async function vClientCerts(){
   const can=["CEO","PM","QS"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Client Payment Certificates</h2>
     <span class="muted">interim payment certificates you issue to clients (before the proforma invoice)</span>
-    ${can?`<button class="btn gold right" id="newCC2">+ New certificate</button>`:""}</div>
+    <div class="right flex">${can?`<button class="btn ghost" id="impProj">Import project (JSON)</button>`:""}${can?`<button class="btn gold" id="newCC2">+ New certificate</button>`:""}</div></div>
     <div style="height:8px"></div><div id="ccList" class="muted">Loading…</div></div>`;
   let list; try{ list=await api("clientcerts"); CONTRACTS=await api("contracts"); }catch(e){ $("#ccList").textContent=e.message; return; }
   const cmap={}; CONTRACTS.forEach(c=>cmap[c.id]=c);
   if(can) $("#newCC2").onclick=()=>{ if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; } clientCertForm(null); };
+  if(can) $("#impProj").onclick=importProjectJson;
   if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates yet. Add a client and contract, then create your first certificate.</div>`; return; }
   $("#ccList").classList.remove("muted");
   $("#ccList").innerHTML=`<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Period</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
     ${list.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
   $("#ccList").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
+}
+function importProjectJson(){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
+  inp.onchange=async ()=>{ const f=inp.files[0]; if(!f) return;
+    let payload; try{ payload=JSON.parse(await f.text()); }catch(e){ toast("Not a valid JSON file"); return; }
+    const cName=payload.client?.name||"(client)", proj=payload.contract?.project||"(project)", nCerts=(payload.certs||[]).length;
+    if(!confirm(`Import project setup?\n\nClient: ${cName}\nProject: ${proj}\nCertificates: ${nCerts}\n\nExisting client/contract with the same name are reused (not duplicated).`)) return;
+    toast("Importing project…");
+    try{ const r=await api("project/seed",{method:"POST",body:payload}); toast(`Imported: ${esc(r.project)} · ${r.certsCreated} certificate(s)`); CONTRACTS=await api("contracts"); vClientCerts(); }catch(e){ toast(e.message); }
+  };
+  inp.click();
 }
 async function clientCertForm(contractId){
   if(!CONTRACTS.length){ try{ CONTRACTS=await api("contracts"); }catch(e){} }
