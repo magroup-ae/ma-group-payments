@@ -1,0 +1,17 @@
+[build]
+  publish = "public"
+  # No build step — the site is static and the functions are pre-bundled.
+  command = ""
+
+[functions]
+  directory = "netlify/functions"
+  # Use the file-trace bundler so our pre-bundled functions are shipped as-is
+  # (never re-transformed), keeping deploys identical to the tested build.
+  node_bundler = "zisi"
+
+# Route friendly /api/* paths to the bundled function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true

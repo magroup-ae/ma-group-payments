@@ -1,0 +1,11 @@
+{
+  "name": "ma-group-payments",
+  "private": true,
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "@netlify/functions": "^2.8.2",
+    "jsbarcode": "^3.12.3",
+    "nodemailer": "^9.0.3",
+    "xlsx": "^0.18.5"
+  }
+}

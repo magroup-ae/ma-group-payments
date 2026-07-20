@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MA Group — Payment Certificates</title>
+<style>
+  :root { --navy:#1F3864; --blue:#2E75B6; --gold:#BF9000; --green:#375623; --red:#C00000; --grey:#f4f5f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Segoe UI',Calibri,Arial,sans-serif; background:var(--grey); color:#222; font-size:14px; }
+  header.app { background:var(--navy); color:#fff; display:flex; align-items:center; gap:14px; padding:8px 18px; position:sticky; top:0; z-index:10; }
+  header.app img { height:34px; background:#fff; border-radius:6px; padding:3px 6px; }
+  header.app .t { font-weight:700; font-size:16px; letter-spacing:.4px; }
+  header.app .sp { flex:1; }
+  header.app .u { font-size:12px; opacity:.9; text-align:right; }
+  nav { background:#fff; border-bottom:1px solid #ddd; display:flex; gap:2px; padding:0 12px; position:sticky; top:50px; z-index:9; overflow-x:auto; }
+  nav button { border:0; background:none; padding:11px 15px; cursor:pointer; font-size:13px; font-weight:600; color:#555; border-bottom:3px solid transparent; white-space:nowrap; }
+  nav button.on { color:var(--navy); border-bottom-color:var(--gold); }
+  main { max-width:1180px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:16px 18px; margin-bottom:14px; }
+  h2 { margin:2px 0 12px; font-size:16px; color:var(--navy); }
+  h3 { margin:14px 0 8px; font-size:13px; color:var(--blue); text-transform:uppercase; letter-spacing:.5px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th { background:var(--navy); color:#fff; padding:7px 8px; text-align:left; font-size:12px; white-space:nowrap; }
+  td { border-bottom:1px solid #eee; padding:7px 8px; }
+  tr.click { cursor:pointer; } tr.click:hover { background:#f0f4fa; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px 14px; }
+  label { display:block; font-size:11px; font-weight:700; color:#666; margin-bottom:3px; text-transform:uppercase; letter-spacing:.3px; }
+  input,select,textarea { width:100%; padding:8px 9px; border:1px solid #ccc; border-radius:6px; font-size:14px; font-family:inherit; background:#fff; }
+  input:focus,select:focus { outline:2px solid var(--blue); border-color:transparent; }
+  input[readonly] { background:#f3f4f6; color:#555; }
+  .btn { border:0; border-radius:7px; padding:9px 16px; font-size:13px; font-weight:700; cursor:pointer; color:#fff; background:var(--navy); }
+  .btn.gold { background:var(--gold); } .btn.green { background:var(--green); } .btn.red { background:var(--red); }
+  .btn.ghost { background:#fff; color:var(--navy); border:1.5px solid var(--navy); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; color:#fff; }
+  .st-Draft{background:#8a8a8a}.st-Certified{background:var(--blue)}.st-Checked{background:var(--gold)}
+  .st-Approved{background:var(--green)}.st-Paid{background:var(--navy)}.st-Cancelled{background:var(--red)}
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+  .kpi { background:#fff; border-radius:10px; padding:14px; box-shadow:0 1px 4px rgba(0,0,0,.08); border-top:4px solid var(--gold); }
+  .kpi .v { font-size:20px; font-weight:800; color:var(--navy); }
+  .kpi .l { font-size:11px; color:#777; text-transform:uppercase; letter-spacing:.4px; margin-top:2px; }
+  .flex { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .right { margin-left:auto; }
+  .muted { color:#888; font-size:12px; }
+  .note { background:#fff8e6; border:1px solid var(--gold); border-radius:8px; padding:10px 12px; font-size:12.5px; }
+  .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,var(--navy),#2a4a80); }
+  .login { background:#fff; border-radius:14px; padding:34px 36px; width:340px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.35); }
+  .login img { height:70px; margin-bottom:6px; }
+  .login h1 { font-size:18px; color:var(--navy); margin:4px 0 18px; }
+  .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:10px 20px; border-radius:8px; font-size:13px; opacity:0; transition:.3s; z-index:99; }
+  .toast.show { opacity:1; }
+  .audit { font-size:12px; color:#555; } .audit li { margin-bottom:3px; }
+  /* ------- printable areas ------- */
+  #printArea, #chequeArea, #labelArea { display:none; }
+  @media print {
+    #toast { display:none !important; }
+    /* certificate: hide everything else so no blank trailing pages */
+    body.printing-cert #root, body.printing-cert #chequeArea, body.printing-cert #labelArea { display:none !important; }
+    body.printing-cert #printArea { display:block; }
+    body.printing-cert #printArea .cert { page-break-inside:avoid; }
+    body.printing-cert #printArea .pagebreak { page-break-before:always; height:0; }
+    /* cheque: only the leaf prints, on exactly one page */
+    body.printing-cheque #root, body.printing-cheque #printArea, body.printing-cheque #labelArea { display:none !important; }
+    body.printing-cheque #chequeArea { display:block; }
+    body.printing-cheque #chequeArea .leaf { overflow:hidden; page-break-after:avoid; page-break-inside:avoid; }
+    body.printing-cheque .fld { page-break-inside:avoid; }
+    /* asset labels: each label on its own thermal page */
+    body.printing-labels #root, body.printing-labels #printArea, body.printing-labels #chequeArea { display:none !important; }
+    body.printing-labels { margin:0; }
+    body.printing-labels #labelArea { display:block; }
+    body.printing-labels .lbl { margin:0; page-break-inside:avoid; break-inside:avoid; }
+    body.printing-labels .lbl:not(:last-child) { page-break-after:always; break-after:page; }
+  }
+  /* ---- MUNBYN thermal asset label (monochrome) ---- */
+  #labelArea { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .lbl { box-sizing:border-box; border:0.5mm solid #000; overflow:hidden; background:#fff; color:#000; font-family:Arial,Helvetica,sans-serif; }
+  .lbl .lh { background:#000; display:flex; align-items:center; }
+  .lbl .lh .lg { background:#fff; display:flex; align-items:center; justify-content:center; }
+  .lbl .lh .lg img { width:90%; height:90%; object-fit:contain; }
+  .lbl .lh .lt b { display:block; color:#fff; font-weight:800; letter-spacing:.2mm; line-height:1.1; }
+  .lbl .lh .lt small { display:block; color:#fff; line-height:1.25; }
+  .lbl .lb { text-align:center; }
+  .lbl .lb .code { font-family:'Courier New',monospace; font-weight:800; color:#000; }
+  .lbl .lb .item { font-weight:700; color:#000; }
+  .lbl .lb .plate { font-weight:700; color:#000; }
+  .lbl .lb .sub { color:#000; }
+  /* 3x2 in (76.2x50.8mm) landscape — MA Group default */
+  .lbl.t3x2 { width:76.2mm; height:50.8mm; }
+  .lbl.t3x2 .lh { height:13mm; gap:2mm; padding:0 2mm; }
+  .lbl.t3x2 .lh .lg { width:12.5mm; height:10.5mm; }
+  .lbl.t3x2 .lh .lt b { font-size:5mm; } .lbl.t3x2 .lh .lt small { font-size:2.3mm; }
+  .lbl.t3x2 .lb { padding-top:1.6mm; } .lbl.t3x2 .lb svg.bc { height:13mm; max-width:66mm; }
+  .lbl.t3x2 .lb .code { font-size:5mm; margin-top:.5mm; } .lbl.t3x2 .lb .item { font-size:2.9mm; margin-top:.8mm; }
+  .lbl.t3x2 .lb .plate { font-size:3.4mm; margin-top:.4mm; } .lbl.t3x2 .lb .sub { font-size:2.1mm; margin-top:1mm; line-height:1.3; }
+  /* 2x3 in (50.8x76.2mm) portrait */
+  .lbl.t2x3 { width:50.8mm; height:76.2mm; }
+  .lbl.t2x3 .lh { height:15mm; gap:1.5mm; padding:0 2mm; }
+  .lbl.t2x3 .lh .lg { width:12mm; height:12mm; }
+  .lbl.t2x3 .lh .lt b { font-size:5mm; } .lbl.t2x3 .lh .lt small { font-size:2.3mm; }
+  .lbl.t2x3 .lb { padding-top:5mm; } .lbl.t2x3 .lb svg.bc { height:20mm; max-width:44mm; }
+  .lbl.t2x3 .lb .code { font-size:5.2mm; margin-top:3mm; } .lbl.t2x3 .lb .item { font-size:3mm; margin-top:4mm; }
+  .lbl.t2x3 .lb .plate { font-size:3.6mm; margin-top:2mm; } .lbl.t2x3 .lb .sub { font-size:2.3mm; margin-top:4mm; line-height:1.4; }
+  /* 4x6 in (100x150mm) portrait */
+  .lbl.t4x6 { width:100mm; height:150mm; }
+  .lbl.t4x6 .lh { height:30mm; gap:3mm; padding:0 3mm; }
+  .lbl.t4x6 .lh .lg { width:26mm; height:24mm; }
+  .lbl.t4x6 .lh .lt b { font-size:9mm; } .lbl.t4x6 .lh .lt small { font-size:4mm; }
+  .lbl.t4x6 .lb { padding-top:8mm; } .lbl.t4x6 .lb svg.bc { height:32mm; max-width:88mm; }
+  .lbl.t4x6 .lb .code { font-size:9mm; margin-top:3mm; } .lbl.t4x6 .lb .item { font-size:5mm; margin-top:6mm; }
+  .lbl.t4x6 .lb .plate { font-size:6.5mm; margin-top:3mm; } .lbl.t4x6 .lb .sub { font-size:3.4mm; margin-top:4mm; line-height:1.6; }
+  /* 100x50 mm landscape */
+  .lbl.t100x50 { width:100mm; height:50mm; }
+  .lbl.t100x50 .lh { height:13mm; gap:2.5mm; padding:0 2.5mm; }
+  .lbl.t100x50 .lh .lg { width:12mm; height:10.5mm; }
+  .lbl.t100x50 .lh .lt b { font-size:5.5mm; } .lbl.t100x50 .lh .lt small { font-size:2.8mm; }
+  .lbl.t100x50 .lb { padding-top:2mm; } .lbl.t100x50 .lb svg.bc { height:14mm; max-width:88mm; }
+  .lbl.t100x50 .lb .code { font-size:5.5mm; } .lbl.t100x50 .lb .item { font-size:3mm; }
+  .lbl.t100x50 .lb .plate { font-size:3.6mm; } .lbl.t100x50 .lb .sub { display:none; }
+  /* 60x40 mm landscape */
+  .lbl.t60x40 { width:60mm; height:40mm; }
+  .lbl.t60x40 .lh { height:10mm; gap:1.5mm; padding:0 2mm; }
+  .lbl.t60x40 .lh .lg { width:9mm; height:8mm; }
+  .lbl.t60x40 .lh .lt b { font-size:3.8mm; } .lbl.t60x40 .lh .lt small { font-size:2mm; }
+  .lbl.t60x40 .lb { padding-top:1.5mm; } .lbl.t60x40 .lb svg.bc { height:11mm; max-width:52mm; }
+  .lbl.t60x40 .lb .code { font-size:4mm; } .lbl.t60x40 .lb .item { font-size:2.4mm; }
+  .lbl.t60x40 .lb .plate { font-size:2.8mm; } .lbl.t60x40 .lb .sub { display:none; }
+  .cert { font-family:Calibri,Arial,sans-serif; color:#000; font-size:11px; }
+  .cert .hd { text-align:center; position:relative; }
+  .cert .hd img { position:absolute; left:0; top:0; height:46px; }
+  .cert .hd .n1 { font-size:15px; font-weight:800; color:var(--navy); }
+  .cert .hd .n2 { font-size:9px; color:#555; }
+  .cert .title { background:var(--navy); color:#fff; text-align:center; font-weight:800; font-size:14px; padding:5px; margin:6px 0; }
+  .cert table { width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px; }
+  .cert td { border:1px solid #bbb; padding:3.5px 6px; }
+  .cert .sec { background:var(--blue); color:#fff; font-weight:700; padding:3.5px 6px; }
+  .cert .sec.navy { background:var(--navy); }
+  .cert .tot { background:#d9d9d9; font-weight:700; }
+  .cert .pay { background:var(--green); color:#fff; font-weight:800; font-size:12px; }
+  .cert .lab { font-weight:700; width:34%; }
+  .cert .sig td { border:0; border-top:1.5px solid var(--navy); text-align:center; font-size:9.5px; font-weight:700; padding-top:4px; }
+  .cert .sig .nm { border:0; font-weight:400; color:#777; font-size:8.5px; padding-top:34px; }
+  .cert .foot { text-align:center; font-size:8px; color:#888; margin-top:8px; font-style:italic; }
+  /* cheque overlay — positioned in mm on the leaf */
+  #chequeArea .leaf { position:relative; background:#fff; overflow:hidden; }
+  #chequeArea .fld { position:absolute; font-family:Arial,sans-serif; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="printArea"></div>
+<div id="labelArea"></div>
+<style id="labelPage"></style>
+<div class="toast" id="toast"></div>
+<script src="jspdf.umd.min.js"></script>
+<script src="jsbarcode.min.js"></script>
+
+<script>
+"use strict";
+const $ = (s, el=document) => el.querySelector(s);
+const root = $("#root");
+let TOKEN = sessionStorage.getItem("tok") || "";
+let ME=null, S=null, CERTS=[], REG=[], USERS=[], SUPS=[], ASSETS={sign:"",stamp:""}, ASSETC=0;
+let VIEW="dash", CUR=null, settingsUnlocked=false;
+
+const fmt = n => (n===undefined||n===null||isNaN(n)) ? "—" : Number(n).toLocaleString("en-AE",{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct = v => (Math.round((v||0)*1000)/10)+"%";
+const dmy = d => { if(!d) return "—"; const x=new Date(d); return isNaN(x)?d:String(x.getDate()).padStart(2,"0")+"/"+String(x.getMonth()+1).padStart(2,"0")+"/"+x.getFullYear(); };
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2800); }
+
+async function api(path, opts={}){
+  const r = await fetch("/api/"+path, { ...opts,
+    headers:{ "content-type":"application/json", ...(TOKEN?{authorization:"Bearer "+TOKEN}:{}), ...(opts.headers||{}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const d = await r.json().catch(()=>({}));
+  if (r.status===401 && path!=="login"){ TOKEN=""; sessionStorage.removeItem("tok"); renderLogin(); throw new Error("Session expired"); }
+  if (!r.ok) throw new Error(d.error || "Request failed");
+  return d;
+}
+
+const ONES=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+const TENS=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+function grp(n){ let s=""; if(n>=100){ s=ONES[Math.floor(n/100)]+" Hundred "; n%=100; } if(n>=20){ s+=TENS[Math.floor(n/10)]; if(n%10) s+=" "+ONES[n%10]; } else if(n>0) s+=ONES[n]; return s.trim(); }
+function words(amount){ if(!amount) return ""; const d=Math.floor(amount), f=Math.round((amount-d)*100), m=Math.floor(d/1e6), t=Math.floor(d%1e6/1e3), u=d%1e3;
+  let w=[m?grp(m)+" Million":"",t?grp(t)+" Thousand":"",u?grp(u):""].filter(Boolean).join(" ")||"Zero";
+  return "UAE Dirhams "+w+(f?" and "+grp(f)+" Fils":"")+" Only"; }
+
+// compress images before upload (PDFs pass through unchanged). png=true keeps transparency (signature/stamp).
+function fileToDataUrl(file, cb, opts={}){
+  if(!file){ toast("Choose a file"); return; }
+  if(file.type==="application/pdf" || !file.type.startsWith("image/")){
+    const r=new FileReader(); r.onload=()=>cb(r.result); r.readAsDataURL(file); return;
+  }
+  const maxPx=opts.png?700:1700, q=opts.q||0.72;
+  const fr=new FileReader();
+  fr.onload=()=>{ const img=new Image();
+    img.onload=()=>{ let w=img.width,h=img.height; const sc=Math.min(1,maxPx/Math.max(w,h)); w=Math.round(w*sc); h=Math.round(h*sc);
+      const cv=document.createElement("canvas"); cv.width=w; cv.height=h; const ctx=cv.getContext("2d");
+      if(!opts.png){ ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h); }
+      ctx.drawImage(img,0,0,w,h);
+      try{ cb(opts.png?cv.toDataURL("image/png"):cv.toDataURL("image/jpeg",q)); }catch(e){ cb(fr.result); } };
+    img.onerror=()=>cb(fr.result); img.src=fr.result; };
+  fr.readAsDataURL(file);
+}
+function renderLogin(){
+  document.body.style.background="";
+  root.innerHTML = `<div class="login-wrap"><div class="login">
+    <img src="logo.png" alt="MA Group"><h1>MA GROUP<br><span style="font-size:12px;font-weight:400;color:#777">Payment Certificate System</span></h1>
+    <div style="text-align:left"><label>User</label><select id="lu"></select>
+    <div style="height:10px"></div><label>PIN</label><input id="lp" type="password" inputmode="numeric" placeholder="••••"></div>
+    <div style="height:16px"></div><button class="btn gold" style="width:100%" id="lb">Sign in</button>
+    <div class="muted" id="lerr" style="margin-top:10px"></div></div></div>`;
+  api("userlist").then(us=>{ $("#lu").innerHTML = us.map(u=>`<option value="${u.id}">${esc(u.name)} — ${u.role}</option>`).join(""); })
+    .catch(e=>{ $("#lerr").textContent = "Backend not reachable: "+e.message; });
+  const go = async ()=>{ try{
+      const d = await api("login",{method:"POST",body:{userId:$("#lu").value,pin:$("#lp").value}});
+      TOKEN=d.token; sessionStorage.setItem("tok",TOKEN); ME=d.user;
+      if(d.user.mustChangePin) toast("Please change your PIN from the top-right menu");
+      await load(); render();
+    }catch(e){ $("#lerr").textContent=e.message; } };
+  $("#lb").onclick=go; $("#lp").onkeydown=e=>{ if(e.key==="Enter") go(); };
+}
+
+async function load(){ const d=await api("bootstrap"); ME=d.me; S=d.settings; CERTS=d.certs; REG=d.register; USERS=d.users; SUPS=d.suppliers||[]; ASSETS=d.assets||{sign:"",stamp:""}; ASSETC=d.assetCount||0; }
+
+async function unlockSettings(){
+  if(ME.role!=="CEO"){ toast("Settings is for the CEO only"); return false; }
+  if(settingsUnlocked) return true;
+  const pin=prompt("Settings is protected. Enter CEO PIN to open:");
+  if(pin===null) return false;
+  try{ const d=await api("verifypin",{method:"POST",body:{pin}}); if(d.ok){ settingsUnlocked=true; return true; } toast("Wrong PIN"); return false; }
+  catch(e){ toast(e.message); return false; }
+}
+function render(){
+  const tabs=[["dash","Dashboard"],["certs","Certificates"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["assets","Assets"]];
+  if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
+  root.innerHTML = `
+  <header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Payment Certificates</div><div class="sp"></div>
+    <div class="u">${esc(ME.name)} · ${ME.role}<br><a href="#" id="pinBtn" style="color:#ffd">change PIN</a> · <a href="#" id="outBtn" style="color:#ffd">sign out</a></div></header>
+  <nav>${tabs.map(([k,l])=>`<button class="${VIEW===k?"on":""}" data-v="${k}">${l}</button>`).join("")}</nav>
+  <main id="main"></main>`;
+  root.querySelectorAll("nav button").forEach(b=>b.onclick=async ()=>{
+    if(b.dataset.v==="settings"){ if(!(await unlockSettings())) return; }
+    VIEW=b.dataset.v;CUR=null;render(); });
+  $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
+  $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
+    try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, assets:vAssets, settings:vSettings})[VIEW]();
+}
+
+function supById(id){ return SUPS.find(s=>s.id===id); }
+
+/* ---------- dashboard ---------- */
+function vDash(){
+  const live=CERTS.filter(c=>c.status!=="Cancelled");
+  const sum=f=>live.reduce((a,c)=>a+(f(c)||0),0);
+  const due=live.filter(c=>c.status==="Approved");
+  const pend=live.filter(c=>["Certified","Checked"].includes(c.status));
+  const rcPend=live.filter(c=>c.status==="Paid"&&!c.receiptDone);
+  $("#main").innerHTML = `
+  <div class="kpis">
+    <div class="kpi"><div class="v">${live.length}</div><div class="l">Certificates</div></div>
+    <div class="kpi"><div class="v">${SUPS.length}</div><div class="l">Suppliers</div></div>
+    <div class="kpi" id="kpiAssets" style="cursor:pointer"><div class="v">${ASSETC}</div><div class="l">Registered assets →</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(sum(c=>c.payable))}</div><div class="l">Total certified (incl VAT)</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(due.reduce((a,c)=>a+(c.payable||0),0))}</div><div class="l">Approved — awaiting payment</div></div>
+    <div class="kpi"><div class="v">${pend.length}</div><div class="l">Awaiting check/approval</div></div>
+    <div class="kpi"${rcPend.length?' style="border-color:#C0392B"':''}><div class="v"${rcPend.length?' style="color:#C0392B"':''}>${rcPend.length}</div><div class="l">Receipts pending</div></div>
+  </div>
+  ${rcPend.length?`<div class="card"><h2>Receipts pending <span class="muted" style="font-size:12px;font-weight:400">— signed receipt copy + collector Emirates ID required</span></h2>${certTable(rcPend)}</div>`:""}
+  <div class="card"><h2>Needs action</h2>${certTable(live.filter(c=>c.status!=="Paid"))}</div>
+  <div class="card"><h2>Advance recovery by supplier</h2>${advTable()}</div>`;
+  bindRows();
+  const ka=$("#kpiAssets"); if(ka) ka.onclick=()=>{VIEW="assets";render();};
+}
+function advTable(){
+  const rows=SUPS.filter(s=>(+s.advanceAmount)>0).map(s=>{
+    const rec=CERTS.filter(c=>c.supplierId===s.id&&c.status!=="Cancelled").reduce((a,c)=>a+(c.advanceRecovery||0),0);
+    const out=Math.max(0,(+s.advanceAmount)-rec);
+    return `<tr><td>${esc(s.name)}</td><td class="num">${fmt(s.advanceAmount)}</td><td class="num">${pct(s.advanceRecoveryRate)}</td><td class="num">${fmt(rec)}</td><td class="num"><b>${fmt(out)}</b></td></tr>`;
+  }).join("");
+  if(!rows) return `<div class="muted">No suppliers with an advance yet.</div>`;
+  return `<table><tr><th>Supplier</th><th class="num">Advance</th><th class="num">Recovery rate</th><th class="num">Recovered</th><th class="num">Outstanding</th></tr>${rows}</table>`;
+}
+
+/* ---------- certificates ---------- */
+function certTable(list){
+  if(!list.length) return `<div class="muted">Nothing here yet.</div>`;
+  return `<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Supplier</th><th>Invoice</th><th class="num">Payable (AED)</th><th>Status</th></tr>
+  ${list.map(c=>`<tr class="click" data-no="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.project)}</td>
+   <td>${esc(c.supplier)}</td><td>${esc(c.invoiceNo||"—")}</td><td class="num">${fmt(c.payable)}</td>
+   <td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
+}
+function bindRows(){ document.querySelectorAll("tr.click[data-no]").forEach(r=>r.onclick=()=>openCert(r.dataset.no)); }
+
+function vCerts(){
+  const canCreate=["QS","CEO"].includes(ME.role);
+  $("#main").innerHTML = `<div class="card"><div class="flex"><h2 style="margin:0">Certificates</h2>
+    <input id="q" placeholder="Search…" style="max-width:220px;margin-left:14px">
+    ${canCreate?`<button class="btn gold right" id="newBtn">+ New Certificate</button>`:""}</div>
+    <div style="height:10px"></div><div id="list">${certTable(CERTS)}</div></div>`;
+  bindRows();
+  $("#q").oninput=e=>{ const q=e.target.value.toLowerCase(); $("#list").innerHTML=certTable(CERTS.filter(c=>JSON.stringify(c).toLowerCase().includes(q))); bindRows(); };
+  if(canCreate) $("#newBtn").onclick=()=>{ if(!SUPS.length){ toast("Add a supplier first"); VIEW="sups"; render(); return; } certForm(null); };
+}
+
+function certForm(c){
+  const isNew=!c;
+  c = c || { variations:0, workPct:0, materialsOnSite:0, contra:0, date:new Date().toISOString().slice(0,10) };
+  const sup = supById(c.supplierId) || SUPS[0];
+  const opt=(arr,sel,val,lab)=>arr.map(x=>`<option value="${esc(val?val(x):x)}" ${(val?val(x):x)===sel?"selected":""}>${esc(lab?lab(x):x)}</option>`).join("");
+  $("#main").innerHTML = `<div class="card"><h2>${isNew?"New Certificate":"Edit "+esc(c.no)}</h2>
+  <h3>Supplier & project</h3><div class="grid">
+    <div><label>Supplier / Subcontractor</label><select id="f_supplierId" ${isNew?"":"disabled"}>${opt(SUPS,c.supplierId||sup.id,x=>x.id,x=>x.name)}</select></div>
+    <div><label>Project</label><select id="f_project">${opt(S.projects.map(p=>p.name),c.project||sup.project)}</select></div>
+    <div><label>Paying entity</label><select id="f_entity">${opt(S.entities.map(e=>e.short),c.entity||sup.entity)}</select></div>
+    <div><label>Supplier invoice no.</label><input id="f_invoiceNo" value="${esc(c.invoiceNo||"")}"></div>
+    <div><label>Certificate date</label><input id="f_date" type="date" value="${esc(c.date||"")}"></div>
+    <div><label>Period from</label><input id="f_periodFrom" type="date" value="${esc(c.periodFrom||"")}"></div>
+    <div><label>Period to</label><input id="f_periodTo" type="date" value="${esc(c.periodTo||"")}"></div>
+  </div>
+  <div class="note" id="supInfo" style="margin-top:8px"></div>
+  <h3>Progress this certificate</h3><div class="grid">
+    <div><label>Approved variations (net, AED)</label><input id="f_variations" type="number" step="0.01" value="${c.variations??0}"></div>
+    <div><label>Cumulative work done %</label><input id="f_workPct" type="number" step="0.1" value="${c.workPct!==undefined?Math.round(c.workPct*1000)/10:""}" placeholder="e.g. 45"></div>
+    <div><label>Materials on site (AED)</label><input id="f_materialsOnSite" type="number" step="0.01" value="${c.materialsOnSite??0}"></div>
+    <div><label>Contra / back-charges (AED)</label><input id="f_contra" type="number" step="0.01" value="${c.contra??0}"></div>
+  </div>
+  <div class="note" style="margin-top:8px">Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance.</div>
+  <div style="height:14px"></div><div class="flex">
+    <button class="btn green" id="saveBtn">${isNew?"Create draft":"Save changes"}</button>
+    <button class="btn ghost" id="backBtn">Back</button></div></div>`;
+  const showSup=()=>{ const sp=supById($("#f_supplierId").value)||sup;
+    $("#supInfo").innerHTML = sp?`Contract: <b>AED ${fmt(sp.contractValue)}</b> · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · Advance AED ${fmt(sp.advanceAmount)} @ ${pct(sp.advanceRecoveryRate)} · LPO ${esc(sp.lpoRef||"—")} (signed ${dmy(sp.signDate)})`:""; };
+  showSup(); $("#f_supplierId").onchange=showSup;
+  $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
+  $("#saveBtn").onclick=async ()=>{ const g=id=>$("#f_"+id).value;
+    const body={ supplierId:g("supplierId"), project:g("project"), entity:g("entity"), invoiceNo:g("invoiceNo"),
+      date:g("date"), periodFrom:g("periodFrom"), periodTo:g("periodTo"),
+      variations:+g("variations")||0, workPct:(+g("workPct")||0)/100, materialsOnSite:+g("materialsOnSite")||0, contra:+g("contra")||0 };
+    try{ const d = isNew ? await api("cert",{method:"POST",body}) : await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body});
+      toast(isNew?("Created "+d.no):"Saved"); await load(); openCert(d.no);
+    }catch(e){ toast(e.message); } };
+}
+
+async function openCert(no){
+  VIEW="certs";
+  let c; try{ c=await api("cert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
+  CUR=c; const K=c.calc||{};
+  const row=(l,v,cls="")=>`<tr><td class="lab">${l}</td><td class="num ${cls}">${v}</td></tr>`;
+  const canEdit = !["Approved","Paid","Cancelled"].includes(c.status) && ["QS","PM","CEO"].includes(ME.role);
+  const acts=[];
+  if(c.status==="Draft" && ["QS","CEO"].includes(ME.role)) acts.push(["submit","Submit for check","btn"]);
+  if(c.status==="Certified" && ["PM","CEO"].includes(ME.role)) acts.push(["check","Confirm check","btn"]);
+  if(c.status==="Checked" && ME.role==="CEO") acts.push(["approve","APPROVE","btn green"]);
+  if(["Certified","Checked","Approved"].includes(c.status) && ["PM","CEO"].includes(ME.role)) acts.push(["reject","Reject","btn red"]);
+  if(c.status==="Approved" && ["Accounts","CEO"].includes(ME.role)) acts.push(["pay","Record payment","btn gold"]);
+  if(c.status!=="Paid" && c.status!=="Cancelled" && ME.role==="CEO") acts.push(["cancel","Cancel","btn ghost"]);
+  const pm = c.payment ? c.payment.mode : "";
+  const chequeBtn = pm==="Cheque" ? `<button class="btn gold" id="chqBtn">Print cheque</button>` : "";
+  const cashBtn = pm==="Cash" ? `<button class="btn gold" id="pcvBtn">Petty cash voucher</button>` : "";
+  const rvBtn = c.payment ? `<button class="btn ghost" id="rvBtn">Receipt voucher</button>` : "";
+  const canPay=["Accounts","CEO"].includes(ME.role);
+  const proofBtn = pm==="Bank Transfer" ? (
+    (c.payment.proof?`<button class="btn ghost" id="proofView">View proof</button>`:"") +
+    (canPay?`<button class="btn ghost" id="proofAdd">${c.payment.proof?"Replace":"Attach"} proof</button>`:"")
+  ) : "";
+  $("#main").innerHTML = `<div class="card">
+    <div class="flex"><h2 style="margin:0">${esc(c.no)}</h2><span class="pill st-${c.status}">${c.status}</span>
+      <span class="muted">${esc(c.supplier)} · ${esc(c.project)} · Inv: ${esc(c.invoiceNo||"—")}</span>
+      <div class="right flex">
+        ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
+        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${cashBtn}${rvBtn}${proofBtn}
+        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}
+      </div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+      <div><h3>Certificate calculation (AED)</h3><table>
+        ${row("Adjusted order value",fmt(K.adjusted))}
+        ${row("Cumulative work done",pct(c.workPct))}
+        ${row("Cumulative value of work",fmt(K.cumValue))}
+        ${row("Materials on site",fmt(c.materialsOnSite))}
+        ${row("Total gross to date",fmt(K.gross),"tot")}
+        ${row("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}
+        ${row("Less: advance recovery (auto)","("+fmt(K.advanceRecovery)+")")}
+        ${row("Less: previously certified","("+fmt(K.prevCertified)+")")}
+        ${row("Less: contra / back-charges","("+fmt(c.contra)+")")}
+        ${row("NET this certificate (excl VAT)",fmt(K.net),"tot")}
+        ${row("VAT @ "+pct(c.vatPct),fmt(K.vat))}
+        ${row("<b>NET PAYABLE (incl VAT)</b>","<b>"+fmt(K.payable)+"</b>")}
+      </table><div class="muted" style="margin-top:6px">${esc(words(K.payable))}</div>
+      ${(+K.advanceAmount)>0?`<div class="note" style="margin-top:8px">Advance: AED ${fmt(K.advanceAmount)} · recovered to date incl. this ${fmt(K.advanceRecoveredToDate)} · outstanding <b>${fmt(K.advanceOutstanding)}</b></div>`:""}</div>
+      <div>
+        ${c.payment?`<h3>Payment</h3><table>
+          ${row("Mode",esc(c.payment.mode))}${row("Reference",esc(c.payment.ref||"—"))}
+          ${row("Bank",esc(c.payment.bank||"—"))}${row("Date",dmy(c.payment.date))}
+          ${row("Payee",esc(c.payment.payee))}${row("Amount",fmt(c.payment.amount),"tot")}</table>${receiptHtml(c)}`:""}
+        <h3>Attachments</h3>${attachHtml(c)}
+        <h3>History</h3><ul class="audit">${(c.audit||[]).slice().reverse().map(a=>`<li>${dmy(a.at)} — <b>${esc(a.by)}</b>: ${esc(a.action)}${a.comment?" — <i>"+esc(a.comment)+"</i>":""}</li>`).join("")}</ul>
+      </div></div></div>`;
+  if(canEdit) $("#editBtn").onclick=()=>certForm(c);
+  bindAttach(c);
+  bindReceipt(c);
+  $("#printBtn").onclick=()=>printCert(c);
+  if(chequeBtn) $("#chqBtn").onclick=()=>printCheque(c);
+  if(cashBtn) $("#pcvBtn").onclick=()=>printPettyCash(c);
+  if(rvBtn) $("#rvBtn").onclick=()=>printReceiptVoucher(c);
+  if(pm==="Bank Transfer"){
+    const pv=$("#proofView"); if(pv) pv.onclick=async ()=>{ try{ const d=await api("cert/"+encodeURIComponent(c.no)+"/proof"); if(!d.dataUrl){toast("No proof on file");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(e){ toast(e.message); } };
+    const pa=$("#proofAdd"); if(pa) pa.onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept="image/png,image/jpeg,application/pdf";
+      inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; if(f.size>8000000){toast("Under ~8 MB");return;} fileToDataUrl(f,async d=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/proof",{method:"POST",body:{dataUrl:d,name:f.name}}); toast("Proof attached"); openCert(c.no);}catch(e){toast(e.message);} }); }; inp.click(); };
+  }
+  document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>doAction(c,b.dataset.a));
+}
+
+const ATT_LABELS={proforma:"Proforma invoice",invoice:"Supplier invoice",lpo:"LPO / Purchase order",delivery:"Delivery note",quotation:"Quotation",other:"Other document"};
+function attachHtml(c){
+  const canAtt=["QS","PM","CEO","Accounts"].includes(ME.role);
+  const at=c.attachments||{};
+  return Object.keys(ATT_LABELS).map(k=>{ const has=at[k];
+    return `<div class="flex" style="gap:8px;margin-bottom:5px;font-size:13px"><div style="min-width:150px">${esc(ATT_LABELS[k])} ${has?'<span style="color:#375623">✓</span>':'<span class="muted">—</span>'}</div>
+      ${has?`<a href="#" data-attview="${k}">view</a>`:""}
+      ${canAtt?`<a href="#" data-attadd="${k}" style="color:#2E75B6">${has?"replace":"attach"}</a>`:""}</div>`; }).join("")
+    + `<div class="muted" style="font-size:11px;margin-top:4px">Attach proforma invoice, supplier invoice, LPO, delivery note or any supporting document (image/PDF).</div>`;
+}
+function bindAttach(c){
+  document.querySelectorAll("[data-attview]").forEach(a=>a.onclick=async e=>{ e.preventDefault();
+    try{ const d=await api("cert/"+encodeURIComponent(c.no)+"/attachment?kind="+a.dataset.attview); if(!d.dataUrl){toast("Not found");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(x){toast(x.message);} });
+  document.querySelectorAll("[data-attadd]").forEach(a=>a.onclick=e=>{ e.preventDefault(); const inp=document.createElement("input"); inp.type="file"; inp.accept="image/png,image/jpeg,application/pdf";
+    inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; if(f.size>8000000){toast("Under ~8 MB");return;} fileToDataUrl(f,async d=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/attachment",{method:"POST",body:{kind:a.dataset.attadd,dataUrl:d,name:f.name}}); toast("Attached"); openCert(c.no);}catch(x){toast(x.message);} }); }; inp.click(); });
+}
+function receiptHtml(c){
+  if(!c.payment) return "";
+  const canPay=["Accounts","CEO"].includes(ME.role);
+  const rc=c.payment.receipt||{received:false};
+  if(rc.received){
+    return `<div class="note" style="margin-top:8px;border-left:4px solid #2E7D32;background:#eef7ee">
+      <b style="color:#2E7D32">✓ Receipt on file</b><table style="margin-top:4px">
+      ${row("Collected by",esc(rc.collectorName||"—"))}${row("Emirates ID",esc(rc.collectorEID||"—"))}
+      ${row("Collection date",dmy(rc.collectionDate))}${row("Recorded by",esc(rc.by||"—"))}</table>
+      <div class="flex" style="margin-top:6px"><a href="#" id="rcView">view receipt copy</a>${canPay?`<a href="#" id="rcAdd" style="color:#2E75B6">replace</a>`:""}</div></div>`;
+  }
+  return `<div class="note" style="margin-top:8px;border-left:4px solid #C0392B;background:#fdecea">
+    <b style="color:#C0392B">● Receipt pending</b> — a signed receipt copy + collector Emirates ID is mandatory for every payment.
+    ${(c.payment.mode==="Cash"||c.payment.mode==="Cheque")?'<div class="muted" style="font-size:11px;margin-top:3px">Collection: Tuesdays 2:00–5:00 PM, by an authorised representative with original Emirates ID.</div>':""}
+    ${canPay?`<div style="margin-top:6px"><button class="btn gold" id="rcRecord">Record receipt</button></div>`:""}</div>`;
+}
+function bindReceipt(c){
+  if(!c.payment) return;
+  const view=$("#rcView"); if(view) view.onclick=async e=>{ e.preventDefault();
+    try{ const d=await api("cert/"+encodeURIComponent(c.no)+"/receipt"); if(!d.dataUrl){toast("No receipt on file");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(x){toast(x.message);} };
+  const rec=$("#rcRecord")||$("#rcAdd");
+  if(rec) rec.onclick=e=>{ e.preventDefault(); openReceiptDialog(c); };
+}
+function openReceiptDialog(c){
+  const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(480px,92vw)";
+  const rc=(c.payment&&c.payment.receipt)||{};
+  dlg.innerHTML=`<h2 style="margin-top:0">Record receipt — ${esc(c.no)}</h2>
+    <div class="note" style="margin-bottom:10px">Signed &amp; stamped receipt copy is mandatory for all payments. Cash &amp; cheque collection: <b>Tuesdays 2:00–5:00 PM</b>, authorised staff only, original Emirates ID recorded.</div>
+    <div class="grid">
+      <div style="grid-column:1/-1"><label>Collector full name (authorised staff)</label><input id="r_name"></div>
+      <div><label>Emirates ID no. (784-...)</label><input id="r_eid" placeholder="784-1990-1234567-8" inputmode="numeric"></div>
+      <div><label>Collection date</label><input id="r_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div style="grid-column:1/-1"><label>Signed receipt copy (image or PDF)</label><input type="file" id="r_file" accept="image/png,image/jpeg,application/pdf"></div>
+    </div>
+    <div style="height:12px"></div><div class="flex"><button class="btn green" id="r_ok">Save receipt</button><button class="btn ghost" id="r_no">Cancel</button></div>`;
+  document.body.appendChild(dlg); dlg.showModal();
+  $("#r_no",dlg).onclick=()=>dlg.remove();
+  $("#r_ok",dlg).onclick=()=>{
+    const name=$("#r_name",dlg).value.trim();
+    const eid=$("#r_eid",dlg).value.replace(/\D/g,"");
+    const date=$("#r_date",dlg).value;
+    const f=$("#r_file",dlg).files&&$("#r_file",dlg).files[0];
+    if(!name){ toast("Collector name required"); return; }
+    if(eid.length!==15||!eid.startsWith("784")){ toast("Enter a valid 15-digit Emirates ID (784-...)"); return; }
+    if(!f){ toast("Attach the signed receipt copy"); return; }
+    if(f.size>8000000){ toast("File too big — under ~8 MB"); return; }
+    fileToDataUrl(f,async d=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/receipt",{method:"POST",body:{collectorName:name,collectorEID:eid,collectionDate:date,dataUrl:d,name:f.name}}); toast("Receipt recorded"); dlg.remove(); await load(); openCert(c.no); }catch(x){ toast(x.message); } });
+  };
+}
+async function doAction(c,a){
+  let body={action:a};
+  if(a==="reject"||a==="cancel"){ const m=prompt(a==="reject"?"Rejection comment (required):":"Reason (optional):"); if(a==="reject"&&!m) return; body.comment=m||""; }
+  if(a==="pay"){
+    const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(500px,92vw)";
+    dlg.innerHTML=`<h2 style="margin-top:0">Record payment — ${esc(c.no)}</h2><div class="grid">
+      <div><label>Mode</label><select id="p_mode">${S.modes.map(m=>`<option>${m}</option>`).join("")}</select></div>
+      <div><label id="p_refL">Cheque no. / transfer ref</label><input id="p_ref"></div>
+      <div><label>Bank / account</label><select id="p_bank">${S.banks.map(b=>`<option>${esc(b)}</option>`).join("")}</select></div>
+      <div><label>Payment date</label><input id="p_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div><label>Amount (blank = full ${fmt(c.calc.payable)})</label><input id="p_amount" type="number" step="0.01"></div>
+      <div><label>Payee (blank = supplier)</label><input id="p_payee" placeholder="${esc(c.supplier)}"></div>
+      <div style="grid-column:1/-1"><label>Purpose / description</label><input id="p_purpose" placeholder="e.g. IPC ${esc(c.no)} — ${esc(c.project)}"></div></div>
+      <div id="p_modehint" class="note" style="margin-top:10px"></div>
+      <div id="p_proofrow" style="margin-top:10px;display:none"><label>Attach transfer proof (image or PDF)</label><input type="file" id="p_proof" accept="image/png,image/jpeg,application/pdf"></div>
+      <div style="height:14px"></div><div class="flex"><button class="btn green" id="p_ok">Record payment</button><button class="btn ghost" id="p_no">Cancel</button></div>`;
+    document.body.appendChild(dlg); dlg.showModal();
+    const modeSel=$("#p_mode",dlg);
+    const syncMode=()=>{ const m=modeSel.value;
+      $("#p_refL",dlg).textContent = m==="Cheque"?"Cheque no.":(m==="Bank Transfer"?"Transfer reference":"Voucher / reference no.");
+      $("#p_proofrow",dlg).style.display = m==="Bank Transfer"?"block":"none";
+      $("#p_modehint",dlg).innerHTML = m==="Cheque"?"✔ After recording, print the cheque from the Cheques page — the cheque no. & date you enter here show on the certificate."
+        : m==="Cash"?"✔ After recording, print the Petty Cash Voucher from this certificate for signature."
+        : "✔ Attach the bank transfer proof below — it stays on file with the certificate."; };
+    modeSel.onchange=syncMode; syncMode();
+    $("#p_no",dlg).onclick=()=>dlg.remove();
+    $("#p_ok",dlg).onclick=async ()=>{
+      const pay={ mode:modeSel.value, ref:$("#p_ref",dlg).value, bank:$("#p_bank",dlg).value,
+        date:$("#p_date",dlg).value, amount:+$("#p_amount",dlg).value||undefined, payee:$("#p_payee",dlg).value||undefined, purpose:$("#p_purpose",dlg).value };
+      const finish=async ()=>{ body.payment=pay; dlg.remove(); await send(); };
+      const pf=$("#p_proof",dlg).files&&$("#p_proof",dlg).files[0];
+      if(pay.mode==="Bank Transfer" && pf){
+        if(pf.size>8000000){ toast("File too big — keep under ~8 MB"); return; }
+        fileToDataUrl(pf,d=>{ pay.proof=d; pay.proofName=pf.name; finish(); });
+      } else await finish();
+    };
+    return;
+  }
+  await send();
+  async function send(){ try{ await api("cert/"+encodeURIComponent(c.no)+"/transition",{method:"POST",body}); toast("Done"); await load(); openCert(c.no); }catch(e){ toast(e.message); } }
+}
+
+/* ---------- printable certificate ---------- */
+function printCert(c){
+  const K=c.calc||{}, ent=S.entities.find(e=>e.short===c.entity)||{name:"MA GROUP",line2:"",line3:""};
+  const r2r=(l,v)=>`<tr><td class="lab">${l}</td><td style="text-align:right">${v}</td></tr>`;
+  const approved=["Approved","Paid"].includes(c.status);
+  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" alt="signature" style="height:50px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const stampImg=(approved&&ASSETS.stamp)?`<img src="${ASSETS.stamp}" alt="stamp" style="position:absolute;height:88px;opacity:.82;left:60%;top:-8px;pointer-events:none">`:"";
+  const approvedTag=(approved&&c.approvedBy)?`<br><span style="font-weight:400;font-size:8px;color:#555">${esc(c.approvedBy)} · ${dmy(c.approvedAt)}</span>`:"";
+  $("#printArea").innerHTML=`<div class="cert">
+   <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
+   <div class="title">SUPPLIER / SUBCONTRACTOR PAYMENT CERTIFICATE</div>
+   <table><tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+   <tr><td class="lab">Project</td><td>${esc(c.project)}</td><td class="lab">Trade / Package</td><td>${esc(c.trade||"—")}</td></tr>
+   <tr><td class="lab">Supplier / Subcontractor</td><td><b>${esc(c.supplier)}</b></td><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td></tr>
+   <tr><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td><td class="lab">Period</td><td>${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
+   <table><tr><td class="sec" colspan="2">1. VALUATION OF WORK / SUPPLY TO DATE (AED)</td></tr>
+   ${r2r("Original order value (excl VAT)",fmt(c.originalValue))}${r2r("Approved variations (net)",fmt(c.variations))}
+   ${r2r("Adjusted order value",fmt(K.adjusted))}${r2r("Cumulative work done",pct(c.workPct))}
+   ${r2r("Cumulative value of work executed",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
+   <tr class="tot"><td>TOTAL GROSS VALUE TO DATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
+   <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>
+   ${r2r("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}${r2r("Less: advance / mobilisation recovery","("+fmt(K.advanceRecovery)+")")}
+   ${r2r("Less: previously certified (excl VAT)","("+fmt(K.prevCertified)+")")}${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}
+   <tr class="tot"><td>NET CERTIFIED THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.net)}</td></tr>
+   ${r2r("Add: VAT @ "+pct(c.vatPct),fmt(K.vat))}
+   <tr class="pay"><td>★★ NET PAYABLE THIS CERTIFICATE (incl VAT) ★★</td><td style="text-align:right">${fmt(K.payable)}</td></tr>
+   <tr><td class="lab" style="font-style:italic">Amount payable in words</td><td style="font-style:italic">${esc(words(K.payable))}</td></tr></table>
+   ${c.payment?`<table><tr><td class="sec" colspan="4">3. PAYMENT DETAILS</td></tr>
+     <tr><td class="lab">Mode</td><td>${esc(c.payment.mode)}</td><td class="lab">Date</td><td>${dmy(c.payment.date)}</td></tr>
+     <tr><td class="lab">Reference</td><td>${esc(c.payment.ref||"—")}</td><td class="lab">Bank</td><td>${esc(c.payment.bank||"—")}</td></tr>
+     <tr><td class="lab">Payee</td><td>${esc(c.payment.payee)}</td><td class="lab">Amount paid</td><td><b>${fmt(c.payment.amount)}</b></td></tr>
+     ${c.payment.receipt&&c.payment.receipt.received?`<tr><td class="lab">Collected by</td><td>${esc(c.payment.receipt.collectorName||"—")}</td><td class="lab">Emirates ID</td><td>${esc(c.payment.receipt.collectorEID||"—")}</td></tr>
+     <tr><td class="lab">Collection date</td><td>${dmy(c.payment.receipt.collectionDate)}</td><td class="lab">Receipt</td><td>On file ✓</td></tr>`:`<tr><td class="lab">Receipt</td><td colspan="3" style="color:#C0392B">Pending — signed receipt copy &amp; collector Emirates ID to be obtained</td></tr>`}</table>`:""}
+   <table><tr><td class="sec navy" colspan="2">CERTIFICATION</td></tr>
+   <tr><td colspan="2" style="font-style:italic;font-size:9.5px">We certify that the value of work properly executed / goods supplied by the above party to the date of valuation, after deduction of retention, advance recovery, previous certificates and contra-charges, amounts to the net sum stated above, recommended for payment under the terms of the Subcontract / LPO.</td></tr></table>
+   <div style="position:relative">
+   <table class="sig"><tr>
+     <td class="nm">&nbsp;</td><td class="nm"></td>
+     <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td>
+     <td class="nm"></td></tr>
+   <tr><td>Prepared by (QS / Site)</td><td>Checked by (PM / Commercial)</td><td>Approved by (CEO)${approvedTag}</td><td>Received by (Supplier)</td></tr></table>
+   ${stampImg}
+   </div>
+   <div class="foot">Generated by the MA Group Payment Certificate System — ${esc(c.no)} — status: ${esc(c.status)}${approved?" — approved & signed electronically":""} — printed ${dmy(new Date())}</div>
+  </div>${(c.payment&&c.payment.mode==="Cash")?`<div class="pagebreak"></div>`+voucherHtml(c):""}`;
+  doPrint();
+}
+function doPrint(){
+  document.body.classList.add("printing-cert");
+  const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
+  window.addEventListener("afterprint",done); window.print();
+}
+
+/* ---------- petty cash voucher (A5-ish, prints on A4) ---------- */
+function voucherHtml(c){
+  const ent=S.entities.find(e=>e.short===c.entity)||{name:"MA GROUP",line2:"",line3:""};
+  const p=c.payment||{}; const amt=p.amount||0;
+  return `<div class="cert" style="max-width:185mm;margin:0 auto">
+    <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
+    <div class="title">PETTY CASH VOUCHER</div>
+    <table><tr><td class="lab">Voucher No.</td><td>${esc(c.no)}-CASH</td><td class="lab">Date</td><td>${dmy(p.date)}</td></tr>
+    <tr><td class="lab">Paid to</td><td><b>${esc(p.payee||c.supplier)}</b></td><td class="lab">Project</td><td>${esc(c.project)}</td></tr>
+    <tr><td class="lab">Being payment for</td><td colspan="3">${esc(p.purpose||("Certificate "+c.no+" — "+(c.trade||"works")))}</td></tr>
+    <tr><td class="lab">Supplier invoice</td><td>${esc(c.invoiceNo||"—")}</td><td class="lab">Reference</td><td>${esc(p.ref||"—")}</td></tr></table>
+    <table><tr><td class="sec" colspan="2">AMOUNT</td></tr>
+    <tr class="pay"><td>TOTAL PAID (AED)</td><td style="text-align:right">${fmt(amt)}</td></tr>
+    <tr><td class="lab" style="font-style:italic">In words</td><td style="font-style:italic">${esc(words(amt))}</td></tr></table>
+    <table><tr><td class="sec" colspan="4">COLLECTION &amp; RECEIPT</td></tr>
+    <tr><td class="lab">Collected by</td><td>${esc((p.receipt&&p.receipt.collectorName)||"")||"&nbsp;"}</td><td class="lab">Emirates ID no.</td><td>${esc((p.receipt&&p.receipt.collectorEID)||"")||"&nbsp;"}</td></tr>
+    <tr><td class="lab">Collection date</td><td>${p.receipt&&p.receipt.received?dmy(p.receipt.collectionDate):"&nbsp;"}</td><td class="lab">Receipt copy</td><td>${p.receipt&&p.receipt.received?"On file ✓":"Attached ☐"}</td></tr></table>
+    <div class="muted" style="font-size:8.5px;margin:4px 0">Collection is on Tuesdays only, 2:00–5:00 PM, by an authorised representative presenting original Emirates ID. A signed &amp; stamped receipt copy is mandatory.</div>
+    <table class="sig" style="margin-top:12px"><tr><td class="nm">&nbsp;</td><td class="nm"></td><td class="nm"></td></tr>
+    <tr><td>Received by (Payee) — sign, stamp &amp; EID</td><td>Paid by (Cash Custodian)</td><td>Approved by</td></tr></table>
+    <div class="foot">MA Group Payment Certificate System — petty cash voucher — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
+}
+function printPettyCash(c){ $("#printArea").innerHTML=voucherHtml(c); doPrint(); }
+/* ---------- payment receipt / acknowledgement voucher ---------- */
+function receiptVoucherHtml(c){
+  const ent=S.entities.find(e=>e.short===c.entity)||{name:"MA GROUP",line2:"",line3:""};
+  const p=c.payment||{}; const amt=p.amount||0; const rc=p.receipt||{};
+  const modeLine = p.mode==="Cheque" ? `Cheque no. ${esc(p.ref||"—")} · ${esc(p.bank||"")}` : p.mode==="Bank Transfer" ? `Bank transfer ref. ${esc(p.ref||"—")} · ${esc(p.bank||"")}` : `Cash · voucher ${esc(p.ref||c.no+"-CASH")}`;
+  return `<div class="cert" style="max-width:185mm;margin:0 auto">
+    <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
+    <div class="title">PAYMENT RECEIPT &amp; ACKNOWLEDGEMENT</div>
+    <table><tr><td class="lab">Receipt No.</td><td>${esc(c.no)}-RCPT</td><td class="lab">Date</td><td>${dmy(p.date||new Date())}</td></tr>
+    <tr><td class="lab">Received from</td><td colspan="3"><b>${esc(ent.name)}</b></td></tr>
+    <tr><td class="lab">Paid to (Payee)</td><td><b>${esc(p.payee||c.supplier)}</b></td><td class="lab">Project</td><td>${esc(c.project||"—")}</td></tr>
+    <tr><td class="lab">Certificate No.</td><td>${esc(c.no)}</td><td class="lab">Supplier invoice</td><td>${esc(c.invoiceNo||"—")}</td></tr>
+    <tr><td class="lab">Payment method</td><td colspan="3">${modeLine}</td></tr></table>
+    <table><tr><td class="sec" colspan="2">AMOUNT RECEIVED</td></tr>
+    <tr class="pay"><td>TOTAL (AED)</td><td style="text-align:right">${fmt(amt)}</td></tr>
+    <tr><td class="lab" style="font-style:italic">In words</td><td style="font-style:italic">${esc(words(amt))}</td></tr></table>
+    <table><tr><td colspan="4" style="font-style:italic;font-size:9.5px">I/We acknowledge receipt of the above sum in full and final settlement of the referenced payment certificate. I confirm I am authorised by the payee to collect this payment.</td></tr></table>
+    <table><tr><td class="sec navy" colspan="4">COLLECTED BY (AUTHORISED REPRESENTATIVE)</td></tr>
+    <tr><td class="lab">Full name</td><td>${esc(rc.collectorName||"")||"&nbsp;"}</td><td class="lab">Emirates ID no.</td><td>${esc(rc.collectorEID||"")||"784-____-_______-_"}</td></tr>
+    <tr><td class="lab">Collection date</td><td>${rc.received?dmy(rc.collectionDate):"&nbsp;"}</td><td class="lab">Contact no.</td><td>&nbsp;</td></tr></table>
+    <div class="note" style="font-size:9px;border-left:3px solid var(--gold);padding:6px 10px;background:#fff8e6;margin:6px 0">Collection of cash &amp; cheques is on <b>Tuesdays only, 2:00–5:00 PM</b>, by an authorised representative presenting their <b>original Emirates ID</b>. A signed &amp; stamped receipt copy is mandatory for every payment.</div>
+    <table class="sig" style="margin-top:16px"><tr><td class="nm">&nbsp;</td><td class="nm">&nbsp;</td></tr>
+    <tr><td>Receiver’s signature &amp; company stamp</td><td>Released by (MA Group Accounts)</td></tr></table>
+    <div class="foot">MA Group Payment Certificate System — payment receipt &amp; acknowledgement — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
+}
+function printReceiptVoucher(c){ $("#printArea").innerHTML=receiptVoucherHtml(c); doPrint(); }
+
+/* ---------- cheque words (bank style: "Three thousand ... and 10/100 only.") ---------- */
+function chequeWords(amount){
+  if(!amount) return "";
+  const d=Math.floor(amount), f=Math.round((amount-d)*100), m=Math.floor(d/1e6), t=Math.floor(d%1e6/1e3), u=d%1e3;
+  let w=[m?grp(m).toLowerCase()+" million":"",t?grp(t).toLowerCase()+" thousand":"",u?grp(u).toLowerCase():""].filter(Boolean).join(" ")||"zero";
+  w = w + (f?" and "+String(f).padStart(2,"0")+"/100":"") + " only.";
+  return w.charAt(0).toUpperCase()+w.slice(1);
+}
+/* ---------- cheque PDF (exact size, single page, prints at 100%) ---------- */
+function chequePDF(c){
+  const ch=S.cheque, f=ch.fields, ox=+ch.offsetXmm||0, oy=+ch.offsetYmm||0;
+  const W=+ch.widthMm||205, H=+ch.heightMm||95, fs=+ch.fontPt||11, wrap=+ch.wordsWrapMm||120;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: W>=H?"landscape":"portrait", unit:"mm", format:[W,H] });
+  doc.setFont("helvetica","normal"); doc.setFontSize(fs);
+  const put=(k,txt)=>{ const p=f[k]; if(!p||txt==null||txt==="") return; doc.text(String(txt), p.x+ox, p.y+oy); };
+  const amt=c.payment.amount;
+  // amount in words, wrapped to at most 2 lines
+  const wparts = doc.splitTextToSize(chequeWords(amt), wrap);
+  put("date", dmy(c.payment.date));
+  put("payee", c.payment.payee);
+  if(wparts[0]) put("words1", wparts[0]);
+  if(wparts[1]) put("words2", wparts.slice(1).join(" "));
+  put("figures", "*"+fmt(amt)+"/-*");
+  return doc;
+}
+function printCheque(c){
+  try{
+    const doc=chequePDF(c);
+    doc.autoPrint();
+    const url=doc.output("bloburl");
+    const w=window.open(url,"_blank");
+    if(!w){ doc.save("cheque-"+(c.no||"test")+".pdf"); toast("Pop-up blocked — cheque PDF downloaded; open and print at 100%"); }
+  }catch(e){ toast("Cheque error: "+e.message); }
+}
+
+/* ---------- suppliers ---------- */
+function supAgg(id){
+  const list=CERTS.filter(c=>c.supplierId===id&&c.status!=="Cancelled");
+  const sum=(f,pred)=>list.filter(pred||(()=>true)).reduce((a,c)=>a+(f(c)||0),0);
+  return {
+    list,
+    certified: sum(c=>c.payable),
+    paid: sum(c=>c.payable, c=>c.status==="Paid"),
+    pending: sum(c=>c.payable, c=>c.status==="Approved"),
+    pipeline: sum(c=>c.payable, c=>["Draft","Certified","Checked"].includes(c.status)),
+    retention: sum(c=>c.retention),
+    advanceRec: sum(c=>c.advanceRecovery),
+    certifiedNet: sum(c=>c.net),
+  };
+}
+function vSups(){
+  const canEdit=["QS","PM","CEO"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Suppliers / Subcontractors</h2>
+    <input id="sq" placeholder="Filter by name…" style="max-width:220px;margin-left:14px">
+    <button class="btn ghost right" id="blankReg">Print blank form</button>${canEdit?`<button class="btn gold" id="newSup">+ Register Supplier</button>`:""}</div><div style="height:10px"></div>
+    <div class="muted" style="margin-bottom:6px">Click a supplier to open their statement (payments, accumulation, pending to pay).</div>
+    <div id="supList"></div></div>`;
+  const draw=(q="")=>{
+    const rows=SUPS.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())).map(s=>{ const a=supAgg(s.id);
+      return `<tr class="click" data-sid="${s.id}"><td><b>${esc(s.name)}</b><br><span class="muted" style="font-size:11px">${esc(s.type||"Subcontractor")}</span></td><td>${esc(s.trn||"—")}</td>
+        <td class="num">${fmt(s.contractValue)}</td><td class="num">${fmt(a.paid)}</td>
+        <td class="num" style="color:#b06a00;font-weight:700">${fmt(a.pending)}</td>
+        <td class="num" style="background:#fff2cc;color:#7a5c00;font-weight:700">${fmt(a.retention)}</td></tr>`;}).join("");
+    $("#supList").innerHTML=`<table><tr><th>Name</th><th>TRN</th><th class="num">Contract (AED)</th><th class="num">Paid</th><th class="num">Pending to Pay</th><th class="num">Retention Held</th></tr>
+      ${rows||`<tr><td colspan="6" class="muted">No suppliers.</td></tr>`}</table>`;
+    document.querySelectorAll("tr[data-sid]").forEach(r=>r.onclick=()=>supStatement(r.dataset.sid));
+  };
+  draw();
+  $("#sq").oninput=e=>draw(e.target.value);
+  $("#blankReg").onclick=()=>printSupplierReg(null);
+  if(canEdit) $("#newSup").onclick=()=>supForm(null);
+}
+function supStatement(id){
+  const s=supById(id); if(!s){ toast("Not found"); return; }
+  const canEdit=["QS","PM","CEO"].includes(ME.role);
+  const a=supAgg(id);
+  const advOut=Math.max(0,(+s.advanceAmount||0)-a.advanceRec);
+  const adjusted=(+s.contractValue||0); // base; variations tracked per cert
+  const balance=Math.max(0, adjusted - a.certifiedNet);
+  const kpi=(v,l,style="")=>`<div class="kpi" style="${style}"><div class="v">AED ${fmt(v)}</div><div class="l">${l}</div></div>`;
+  const ordered=a.list.slice().sort((x,y)=>(x.no>y.no?1:-1));
+  let cum=0, cumPaid=0;
+  const rows=ordered.map(c=>{ cum+=c.payable||0; if(c.status==="Paid") cumPaid+=c.payable||0;
+    return `<tr class="click" data-no="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.project)}</td>
+      <td class="num">${fmt(c.payable)}</td><td class="num">${fmt(cum)}</td>
+      <td class="num" style="background:#fff2cc">${fmt(c.retention)}</td>
+      <td><span class="pill st-${c.status}">${c.status}</span></td></tr>`;}).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(s.name)}</h2>
+     <span class="muted">${esc(s.trn?"TRN "+s.trn:"")} ${s.lpoRef?"· LPO "+esc(s.lpoRef):""}</span>
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="editSup">Edit supplier</button>`:""}
+       <button class="btn ghost" id="stCsv">Export CSV</button><button class="btn" id="stPrint">Print statement</button>
+       <button class="btn ghost" id="backSup2">← All suppliers</button></div></div>
+   <div class="kpis" style="margin-top:12px">
+     ${kpi(a.certified,"Total certified (incl VAT)")}
+     ${kpi(a.paid,"Paid")}
+     ${kpi(a.pending,"Pending to pay (approved)","border-top-color:#b06a00")}
+     ${kpi(a.pipeline,"In approval pipeline")}
+     ${kpi(a.retention,"Retention held","border-top-color:#7a5c00")}
+     ${kpi(advOut,"Advance outstanding")}
+   </div>
+   <div class="note" style="margin-top:10px"><b>${esc(s.type||"Subcontractor")}</b> · Contract AED ${fmt(s.contractValue)} · Retention ${(+s.retentionPct)===0?"none":pct(s.retentionPct)}${s.dlpMonths?` · DLP ${s.dlpMonths}m`:""}${s.retentionRelease?` · Release: ${esc(s.retentionRelease)}`:""}${(+s.advanceAmount)>0?` · Advance AED ${fmt(s.advanceAmount)} @ ${pct(s.advanceRecoveryRate)} (outstanding ${fmt(advOut)})`:""}</div>
+   <h3 style="margin-top:14px">Certificates & accumulation</h3>
+   <table><tr><th>Cert No.</th><th>Date</th><th>Project</th><th class="num">This Cert (incl VAT)</th><th class="num">Cumulative</th><th class="num">Retention</th><th>Status</th></tr>
+   ${rows||`<tr><td colspan="7" class="muted">No certificates yet.</td></tr>`}</table>
+   </div>`;
+  document.querySelectorAll("tr[data-no]").forEach(r=>r.onclick=()=>openCert(r.dataset.no));
+  $("#backSup2").onclick=vSups;
+  if(canEdit) $("#editSup").onclick=()=>supForm(s);
+  $("#stPrint").onclick=()=>printSupplierStatement(s,a,ordered);
+  $("#stCsv").onclick=()=>{ let cc=0; const rows2=[["Cert No.","Date","Project","This Cert incl VAT","Cumulative","Retention","Status"]]
+     .concat(ordered.map(c=>{cc+=c.payable||0;return [c.no,c.date,c.project,c.payable,cc,c.retention,c.status];}));
+    const csv=rows2.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a2=document.createElement("a"); a2.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a2.download="Statement_"+s.name.replace(/[^a-z0-9]+/gi,"_")+".csv"; a2.click(); };
+}
+function printSupplierStatement(s,a,ordered){
+  let cum=0;
+  const rows=ordered.map(c=>{cum+=c.payable||0;return `<tr><td>${esc(c.no)}</td><td>${dmy(c.date)}</td><td>${esc(c.project)}</td><td style="text-align:right">${fmt(c.payable)}</td><td style="text-align:right">${fmt(cum)}</td><td style="text-align:right;background:#fff2cc">${fmt(c.retention)}</td><td>${esc(c.status)}</td></tr>`;}).join("");
+  const advOut=Math.max(0,(+s.advanceAmount||0)-a.advanceRec);
+  $("#printArea").innerHTML=`<div class="cert">
+    <div class="hd"><img src="logo.png"><div class="n1">MA GROUP</div><div class="n2">Supplier / Subcontractor Statement of Account</div><div class="n2">Generated ${dmy(new Date())}</div></div>
+    <div class="title">STATEMENT — ${esc(s.name).toUpperCase()}</div>
+    <table><tr><td class="lab">Supplier</td><td>${esc(s.name)}</td><td class="lab">TRN</td><td>${esc(s.trn||"—")}</td></tr>
+    <tr><td class="lab">LPO / Subcontract</td><td>${esc(s.lpoRef||"—")}</td><td class="lab">Contract (excl VAT)</td><td style="text-align:right">${fmt(s.contractValue)}</td></tr>
+    <tr><td class="lab">Retention</td><td>${(+s.retentionPct)===0?"None":pct(s.retentionPct)+(s.dlpMonths?" · DLP "+s.dlpMonths+"m":"")}</td><td class="lab">Advance</td><td style="text-align:right">${fmt(s.advanceAmount)} (out. ${fmt(advOut)})</td></tr></table>
+    <table><tr><td class="sec" colspan="4">Position (AED)</td></tr>
+    <tr><td class="lab">Total certified (incl VAT)</td><td style="text-align:right">${fmt(a.certified)}</td><td class="lab">Paid</td><td style="text-align:right">${fmt(a.paid)}</td></tr>
+    <tr><td class="lab">Pending to pay (approved)</td><td style="text-align:right">${fmt(a.pending)}</td><td class="lab">In approval pipeline</td><td style="text-align:right">${fmt(a.pipeline)}</td></tr>
+    <tr class="tot"><td>Retention held</td><td style="text-align:right;background:#fff2cc">${fmt(a.retention)}</td><td>Advance outstanding</td><td style="text-align:right">${fmt(advOut)}</td></tr></table>
+    <table><tr><td class="sec" colspan="7">Certificates & accumulation</td></tr>
+    <tr class="tot"><td>Cert No.</td><td>Date</td><td>Project</td><td style="text-align:right">This Cert</td><td style="text-align:right">Cumulative</td><td style="text-align:right">Retention</td><td>Status</td></tr>
+    ${rows}</table>
+    <div style="font-size:9px;font-style:italic;margin-top:6px">Retention is released after completion / taking-over or on expiry of the DLP per contract. ${esc(s.retentionRelease||"")}</div>
+    <div class="foot">MA Group Payment Certificate System — supplier statement — printed ${dmy(new Date())}</div></div>`;
+  document.body.classList.add("printing-cert");
+  const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
+  window.addEventListener("afterprint",done); window.print();
+}
+const DOC_LABELS={license:"Trade Licence",trn:"TRN / VAT Certificate",bank:"Bank Letter / IBAN Certificate",establishment:"Establishment Card",other:"Other document"};
+function supForm(s){
+  const isNew=!s; s=s||{retentionPct:.10,vatPct:.05,entity:S.entities[0].short,dlpMonths:12};
+  const opt=(arr,sel)=>arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join("");
+  const emirates=["Dubai","Abu Dhabi","Sharjah","Ajman","Ras Al Khaimah","Umm Al Quwain","Fujairah"];
+  const docsHtml = isNew ? `<div class="note">Save the registration first, then re-open it to attach documents (trade licence, TRN certificate, bank letter, etc.).</div>`
+    : DOC_KINDS_LIST().map(k=>{ const has=s.docs&&s.docs[k];
+      return `<div class="flex" style="gap:8px;margin-bottom:6px"><div style="min-width:210px">${esc(DOC_LABELS[k])} ${has?'<span style="color:#375623;font-weight:700">✓ on file</span>':'<span class="muted">—</span>'}</div>
+        ${has?`<button class="btn ghost" data-docview="${k}" style="padding:5px 10px">View</button>`:""}
+        <button class="btn ghost" data-docadd="${k}" style="padding:5px 10px">${has?"Replace":"Upload"}</button></div>`; }).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${isNew?"New Supplier / Subcontractor Registration":"Edit — "+esc(s.name)}</h2>
+     <div class="right flex"><button class="btn ghost" id="printReg">Print registration form</button><button class="btn ghost" id="backSup">Back</button></div></div>
+  ${!isNew?`<div class="muted" style="margin-top:4px">Registration No. <b>${esc(s.regNo||("MA-SUP-"+s.id))}</b>${s.createdBy?" · registered by "+esc(s.createdBy):""}</div>`:""}
+  <h3>Party type</h3><div class="grid">
+    <div><label>Type *</label><select id="s_type"><option ${s.type!=="Supplier"?"selected":""}>Subcontractor</option><option ${s.type==="Supplier"?"selected":""}>Supplier</option></select></div>
+    <div style="grid-column:2/-1;align-self:end"><div class="note" id="typeHint" style="margin:0"></div></div>
+  </div>
+  <h3>Company / Trade Licence</h3><div class="grid">
+    <div><label>Legal name (as per licence) *</label><input id="s_name" value="${esc(s.name||"")}"></div>
+    <div><label>Trading name / brand</label><input id="s_tradeName" value="${esc(s.tradeName||"")}"></div>
+    <div><label>Trade licence no.</label><input id="s_licenseNo" value="${esc(s.licenseNo||"")}"></div>
+    <div><label>Licence expiry</label><input id="s_licenseExpiry" type="date" value="${esc(s.licenseExpiry||"")}"></div>
+    <div><label>Establishment card no.</label><input id="s_establishmentCard" value="${esc(s.establishmentCard||"")}"></div>
+    <div><label>Category / trade</label><select id="s_trade">${opt(S.trades,s.trade||s.category)}</select></div>
+    <div><label>Emirate</label><select id="s_emirate"><option value=""></option>${opt(emirates,s.emirate)}</select></div>
+    <div><label>P.O. Box</label><input id="s_poBox" value="${esc(s.poBox||"")}"></div>
+    <div style="grid-column:1/-1"><label>Address</label><input id="s_address" value="${esc(s.address||"")}"></div>
+    <div><label>Website</label><input id="s_website" value="${esc(s.website||"")}"></div>
+  </div>
+  <h3>Contact</h3><div class="grid">
+    <div><label>Contact person</label><input id="s_contactName" value="${esc(s.contactName||"")}"></div>
+    <div><label>Designation</label><input id="s_contactDesignation" value="${esc(s.contactDesignation||"")}"></div>
+    <div><label>Mobile</label><input id="s_mobile" value="${esc(s.mobile||"")}"></div>
+    <div><label>Telephone</label><input id="s_tel" value="${esc(s.tel||"")}"></div>
+    <div><label>Email <span style="color:#c0392b">*</span> <span class="muted" style="font-size:10px">(mandatory — used for all notifications)</span></label><input id="s_email" type="email" required value="${esc(s.email||"")}"></div>
+  </div>
+  <h3>Tax &amp; Bank</h3><div class="grid">
+    <div><label>TRN</label><input id="s_trn" value="${esc(s.trn||"")}"></div>
+    <div><label>VAT registered</label><select id="s_vatRegistered"><option value="yes" ${s.vatRegistered?"selected":""}>Yes</option><option value="no" ${!s.vatRegistered?"selected":""}>No</option></select></div>
+    <div><label>Bank name</label><input id="s_bank" value="${esc(s.bank||"")}"></div>
+    <div><label>Account name</label><input id="s_accountName" value="${esc(s.accountName||"")}"></div>
+    <div><label>Account no.</label><input id="s_accountNo" value="${esc(s.accountNo||"")}"></div>
+    <div><label>IBAN</label><input id="s_iban" value="${esc(s.iban||"")}"></div>
+    <div><label>SWIFT / BIC</label><input id="s_swift" value="${esc(s.swift||"")}"></div>
+  </div>
+  <h3>Contract &amp; commercial terms</h3><div class="grid">
+    <div><label>Default paying entity</label><select id="s_entity">${opt(S.entities.map(e=>e.short),s.entity)}</select></div>
+    <div><label>Default project</label><select id="s_project"><option value=""></option>${opt(S.projects.map(p=>p.name),s.project)}</select></div>
+    <div><label>Subcontract / LPO ref</label><input id="s_lpoRef" value="${esc(s.lpoRef||"")}"></div>
+    <div><label>Sign date</label><input id="s_signDate" type="date" value="${esc(s.signDate||"")}"></div>
+    <div><label>Contract value (excl VAT)</label><input id="s_contractValue" type="number" step="0.01" value="${s.contractValue??""}"></div>
+    <div><label>VAT %</label><input id="s_vatPct" type="number" step="0.1" value="${Math.round((s.vatPct??.05)*1000)/10}"></div>
+  </div>
+  <h3 id="retH">Retention <span class="muted" style="font-weight:400;font-size:11px">(subcontractors only)</span></h3><div class="grid" id="retGrid">
+    <div><label>Retention % (0 = none)</label><input id="s_retentionPct" type="number" step="0.1" value="${Math.round((s.retentionPct??.1)*1000)/10}"></div>
+    <div><label>DLP (months)</label><input id="s_dlpMonths" type="number" step="1" value="${s.dlpMonths??12}"></div>
+    <div style="grid-column:1/-1"><label>Retention release terms</label><input id="s_retentionRelease" value="${esc(s.retentionRelease||"50% on completion / taking-over, 50% on expiry of DLP")}"></div>
+  </div>
+  <h3>Advance / down payment</h3><div class="grid">
+    <div><label>Advance amount paid (AED)</label><input id="s_advanceAmount" type="number" step="0.01" value="${s.advanceAmount??0}"></div>
+    <div><label>Recovery rate (% of each cert's gross)</label><input id="s_advanceRecoveryRate" type="number" step="0.1" value="${Math.round((s.advanceRecoveryRate??0)*1000)/10}" placeholder="e.g. 15.3"></div>
+    <div><label>Advance paid date</label><input id="s_advanceDate" type="date" value="${esc(s.advanceDate||"")}"></div>
+    <div><label>Advance ref / voucher</label><input id="s_advanceRef" value="${esc(s.advanceRef||"")}"></div>
+    <div style="grid-column:1/-1"><label>Notes</label><input id="s_notes" value="${esc(s.notes||"")}"></div>
+  </div>
+  <h3>Documents</h3><div id="docBox">${docsHtml}</div>
+  <div class="note" style="margin-top:8px">Retention 0% = none. Advance recovery is deducted automatically on every certificate (rate × gross) until recovered.</div>
+  <div style="height:14px"></div><div class="flex"><button class="btn green" id="saveSup">${isNew?"Register supplier":"Save changes"}</button><button class="btn ghost" id="backSup2">Back</button></div></div>`;
+  $("#backSup").onclick=vSups; $("#backSup2").onclick=vSups;
+  const applyType=()=>{ const isSup=$("#s_type").value==="Supplier";
+    ["s_retentionPct","s_dlpMonths","s_retentionRelease"].forEach(id=>{ const el=$("#"+id); if(!el) return; el.disabled=isSup; if(isSup&&id==="s_retentionPct") el.value=0; el.style.background=isSup?"#eee":""; });
+    $("#typeHint").innerHTML=isSup?"<b>Supplier</b> — material/goods. No retention is withheld (retention forced to 0)."
+      :"<b>Subcontractor</b> — retention applies only if their contract requires it (set 0% if none)."; };
+  applyType(); $("#s_type").onchange=applyType;
+  $("#printReg").onclick=()=>printSupplierReg(collectSup(s));
+  if(!isNew){
+    document.querySelectorAll("[data-docview]").forEach(b=>b.onclick=async ()=>{ try{ const d=await api("supplier/"+encodeURIComponent(s.id)+"/doc?kind="+b.dataset.docview); if(!d.dataUrl){toast("Not found");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(e){toast(e.message);} });
+    document.querySelectorAll("[data-docadd]").forEach(b=>b.onclick=()=>{ const inp=document.createElement("input"); inp.type="file"; inp.accept="image/png,image/jpeg,application/pdf";
+      inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; if(f.size>8000000){toast("Under ~8 MB");return;} fileToDataUrl(f,async d=>{ try{ await api("supplier/"+encodeURIComponent(s.id)+"/doc",{method:"POST",body:{kind:b.dataset.docadd,dataUrl:d,name:f.name}}); toast("Uploaded"); await load(); supForm(SUPS.find(x=>x.id===s.id)); }catch(e){toast(e.message);} }); }; inp.click(); });
+  }
+  $("#saveSup").onclick=async ()=>{ if(!$("#s_name").value){ toast("Legal name required"); return; }
+    const em=($("#s_email").value||"").trim();
+    if(!em||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ toast("A valid email is required (mandatory for notifications)"); $("#s_email").focus(); return; }
+    const body=collectSup(s);
+    try{ const saved=await api("supplier",{method:"POST",body}); toast("Registered"); await load(); supForm(SUPS.find(x=>x.id===saved.id)||saved); }catch(e){ toast(e.message); } };
+}
+function DOC_KINDS_LIST(){ return ["license","trn","bank","establishment","other"]; }
+function collectSup(s){ const g=id=>{const el=$("#s_"+id); return el?el.value:"";};
+  return { id:s.id, type:g("type")||"Subcontractor", name:g("name"), tradeName:g("tradeName"), licenseNo:g("licenseNo"), licenseExpiry:g("licenseExpiry"),
+    establishmentCard:g("establishmentCard"), trade:g("trade"), category:g("trade"), emirate:g("emirate"), poBox:g("poBox"),
+    address:g("address"), website:g("website"), contactName:g("contactName"), contactDesignation:g("contactDesignation"),
+    mobile:g("mobile"), tel:g("tel"), email:g("email"), trn:g("trn"), vatRegistered:g("vatRegistered")==="yes",
+    bank:g("bank"), accountName:g("accountName"), accountNo:g("accountNo"), iban:g("iban"), swift:g("swift"),
+    entity:g("entity"), project:g("project"), lpoRef:g("lpoRef"), signDate:g("signDate"),
+    contractValue:+g("contractValue")||0, vatPct:(+g("vatPct")||0)/100, retentionPct:(+g("retentionPct")||0)/100,
+    dlpMonths:+g("dlpMonths")||0, retentionRelease:g("retentionRelease"),
+    advanceAmount:+g("advanceAmount")||0, advanceRecoveryRate:(+g("advanceRecoveryRate")||0)/100,
+    advanceDate:g("advanceDate"), advanceRef:g("advanceRef"), notes:g("notes") };
+}
+function printSupplierReg(s){
+  s=s||{}; const L=(l,v)=>`<tr><td class="lab" style="width:26%">${l}</td><td>${v||"&nbsp;"}</td></tr>`;
+  const co=S.entities[0];
+  $("#printArea").innerHTML=`<div class="cert">
+    <div class="hd"><img src="logo.png"><div class="n1">${esc(co.name)}</div><div class="n2">${esc(co.line2)}</div><div class="n2">${esc(co.line3)}</div></div>
+    <div class="title">SUPPLIER / SUBCONTRACTOR REGISTRATION FORM</div>
+    <table><tr><td class="lab">Registration No.</td><td>${esc(s.regNo||(s.id?("MA-SUP-"+s.id):"________"))}</td><td class="lab">Date</td><td>${dmy(new Date())}</td></tr></table>
+    <table><tr><td class="sec" colspan="4">A. Company / Trade Licence</td></tr>
+    ${L("Party type",esc(s.type||"Subcontractor"))}${L("Legal name",esc(s.name))}${L("Trading name",esc(s.tradeName))}
+    ${L("Trade licence no.",esc(s.licenseNo))}${L("Licence expiry",s.licenseExpiry?dmy(s.licenseExpiry):"")}
+    ${L("Establishment card",esc(s.establishmentCard))}${L("Category / trade",esc(s.trade||s.category))}
+    ${L("Address",esc(s.address))}${L("Emirate / P.O. Box",esc((s.emirate||"")+(s.poBox?"  ·  P.O. Box "+s.poBox:"")))}
+    ${L("Website",esc(s.website))}</table>
+    <table><tr><td class="sec" colspan="4">B. Contact</td></tr>
+    ${L("Contact person",esc(s.contactName))}${L("Designation",esc(s.contactDesignation))}
+    ${L("Mobile",esc(s.mobile))}${L("Telephone",esc(s.tel))}${L("Email",esc(s.email))}</table>
+    <table><tr><td class="sec" colspan="4">C. Tax &amp; Bank</td></tr>
+    ${L("TRN",esc(s.trn))}${L("VAT registered",s.vatRegistered?"Yes":"No")}
+    ${L("Bank name",esc(s.bank))}${L("Account name",esc(s.accountName))}
+    ${L("Account no.",esc(s.accountNo))}${L("IBAN",esc(s.iban))}${L("SWIFT / BIC",esc(s.swift))}</table>
+    <table><tr><td class="sec" colspan="4">D. Commercial terms</td></tr>
+    ${L("Contract value (excl VAT)",s.contractValue?fmt(s.contractValue):"")}${L("Retention",(+s.retentionPct)===0?"None":pct(s.retentionPct)+(s.dlpMonths?" · DLP "+s.dlpMonths+"m":""))}
+    ${L("Retention release",esc(s.retentionRelease))}${L("Advance / down payment",(+s.advanceAmount)>0?fmt(s.advanceAmount)+" @ "+pct(s.advanceRecoveryRate)+" recovery":"None")}</table>
+    <table><tr><td class="sec navy" colspan="4">Declaration</td></tr>
+    <tr><td colspan="4" style="font-size:9.5px;font-style:italic">We confirm the above information is correct and attach copies of our trade licence, TRN certificate and bank letter. We agree to MA Group's payment and retention terms.</td></tr></table>
+    <table class="sig" style="margin-top:22px"><tr><td class="nm">&nbsp;</td><td class="nm"></td></tr>
+    <tr><td>Supplier — Name / Signature / Stamp / Date</td><td>MA Group — Registered by / Date</td></tr></table>
+    <div class="foot">MA Group Payment Certificate System — supplier registration — printed ${dmy(new Date())}</div></div>`;
+  document.body.classList.add("printing-cert");
+  const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
+  window.addEventListener("afterprint",done); window.print();
+}
+
+/* ---------- projects monitoring ---------- */
+function projectStats(){
+  const live=CERTS.filter(c=>c.status!=="Cancelled");
+  const byProj={};
+  live.forEach(c=>{
+    const k=c.project||"—";
+    const p=byProj[k]||(byProj[k]={project:k, certs:0, suppliers:new Set(), certifiedNet:0, payable:0, paid:0, retention:0, advance:0});
+    p.certs++; if(c.supplierId) p.suppliers.add(c.supplierId);
+    p.certifiedNet+=c.net||0; p.payable+=c.payable||0; p.retention+=c.retention||0; p.advance+=c.advanceRecovery||0;
+    if(c.status==="Paid") p.paid+=c.payable||0;
+  });
+  return Object.values(byProj).map(p=>({...p, suppliers:p.suppliers.size}));
+}
+function vProjects(){
+  const stats=projectStats().sort((a,b)=>b.payable-a.payable);
+  const T=stats.reduce((a,p)=>({certs:a.certs+p.certs,payable:a.payable+p.payable,paid:a.paid+p.paid,retention:a.retention+p.retention,advance:a.advance+p.advance}),{certs:0,payable:0,paid:0,retention:0,advance:0});
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Project Monitoring</h2>
+     <span class="muted">Paid, certified and retention held per project.</span>
+     <button class="btn ghost right" id="pvCsv">Export CSV</button><button class="btn" id="pvPrint">Print report</button></div>
+   <div style="height:10px"></div>
+   <table><tr><th>Project</th><th class="num">Certs</th><th class="num">Suppliers</th><th class="num">Certified (excl VAT)</th><th class="num">Total Payable (incl VAT)</th><th class="num">Paid</th><th class="num" style="background:#7a5c00">Retention Held</th><th class="num">Advance Recovered</th></tr>
+   ${stats.map(p=>`<tr class="click" data-proj="${esc(p.project)}"><td><b>${esc(p.project)}</b></td><td class="num">${p.certs}</td><td class="num">${p.suppliers}</td>
+     <td class="num">${fmt(p.certifiedNet)}</td><td class="num">${fmt(p.payable)}</td><td class="num">${fmt(p.paid)}</td>
+     <td class="num" style="background:#fff2cc;font-weight:700;color:#7a5c00">${fmt(p.retention)}</td><td class="num">${fmt(p.advance)}</td></tr>`).join("")||`<tr><td colspan="8" class="muted">No certificates yet.</td></tr>`}
+   ${stats.length?`<tr style="border-top:2px solid #333"><td><b>TOTAL</b></td><td class="num"><b>${T.certs}</b></td><td></td><td></td><td class="num"><b>${fmt(T.payable)}</b></td><td class="num"><b>${fmt(T.paid)}</b></td><td class="num" style="background:#fff2cc;font-weight:800;color:#7a5c00">${fmt(T.retention)}</td><td class="num"><b>${fmt(T.advance)}</b></td></tr>`:""}
+   </table>
+   <div class="note" style="margin-top:12px"><b>Retention held</b> (highlighted) is money withheld from suppliers, released after completion / taking-over or on expiry of the DLP per each supplier's terms. Click a project for the supplier-by-supplier breakdown.</div>
+   </div>`;
+  document.querySelectorAll("[data-proj]").forEach(r=>r.onclick=()=>projectDetail(r.dataset.proj));
+  $("#pvCsv").onclick=()=>{ const rows=[["Project","Certificates","Suppliers","Certified excl VAT","Total Payable incl VAT","Paid","Retention Held","Advance Recovered"]]
+     .concat(stats.map(p=>[p.project,p.certs,p.suppliers,p.certifiedNet,p.payable,p.paid,p.retention,p.advance]));
+    const csv=rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Project_Monitoring.csv"; a.click(); };
+  $("#pvPrint").onclick=()=>printProjectReport(stats,T);
+}
+function projectDetail(proj){
+  const live=CERTS.filter(c=>c.status!=="Cancelled"&&(c.project||"—")===proj);
+  const bySup={};
+  live.forEach(c=>{ const p=bySup[c.supplierId||c.supplier]||(bySup[c.supplierId||c.supplier]={name:c.supplier,supplierId:c.supplierId,certs:0,payable:0,paid:0,retention:0,advance:0});
+    p.certs++; p.payable+=c.payable||0; p.retention+=c.retention||0; p.advance+=c.advanceRecovery||0; if(c.status==="Paid")p.paid+=c.payable||0; });
+  const rows=Object.values(bySup).map(p=>{ const sup=supById(p.supplierId)||{};
+    const relTerms = (+sup.retentionPct||0)===0 ? "No retention" : (sup.retentionRelease||"On completion / after DLP");
+    return `<tr><td>${esc(p.name)}</td><td class="num">${p.certs}</td><td class="num">${fmt(p.payable)}</td><td class="num">${fmt(p.paid)}</td>
+      <td class="num" style="background:#fff2cc;font-weight:700;color:#7a5c00">${fmt(p.retention)}</td>
+      <td class="num">${fmt(p.advance)}${(+sup.advanceAmount)>0?` / ${fmt(sup.advanceAmount)}`:""}</td>
+      <td style="font-size:11px">${esc(relTerms)}${sup.dlpMonths?` · DLP ${sup.dlpMonths}m`:""}</td></tr>`; }).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(proj)}</h2><button class="btn ghost right" id="back">← All projects</button></div>
+   <div style="height:10px"></div>
+   <table><tr><th>Supplier / Subcontractor</th><th class="num">Certs</th><th class="num">Payable (incl VAT)</th><th class="num">Paid</th><th class="num" style="background:#7a5c00">Retention Held</th><th class="num">Advance Rec. / Total</th><th>Retention release</th></tr>
+   ${rows||`<tr><td colspan="7" class="muted">No data.</td></tr>`}</table>
+   <h3 style="margin-top:16px">Certificates</h3>
+   ${certTable(live)}</div>`;
+  $("#back").onclick=vProjects;
+  bindRows();
+}
+function printProjectReport(stats,T){
+  const rows=stats.map(p=>`<tr><td>${esc(p.project)}</td><td style="text-align:right">${fmt(p.certifiedNet)}</td><td style="text-align:right">${fmt(p.payable)}</td><td style="text-align:right">${fmt(p.paid)}</td><td style="text-align:right;background:#fff2cc">${fmt(p.retention)}</td><td style="text-align:right">${fmt(p.advance)}</td></tr>`).join("");
+  $("#printArea").innerHTML=`<div class="cert">
+    <div class="hd"><img src="logo.png"><div class="n1">MA GROUP</div><div class="n2">Project Payment Monitoring Report</div><div class="n2">Generated ${dmy(new Date())}</div></div>
+    <div class="title">PROJECT PAYMENT & RETENTION REPORT</div>
+    <table><tr><td class="sec" colspan="6">Summary by project (AED)</td></tr>
+    <tr class="tot"><td class="lab">Project</td><td style="text-align:right"><b>Certified excl VAT</b></td><td style="text-align:right"><b>Total Payable</b></td><td style="text-align:right"><b>Paid</b></td><td style="text-align:right"><b>Retention Held</b></td><td style="text-align:right"><b>Advance Rec.</b></td></tr>
+    ${rows}
+    <tr class="pay"><td>TOTAL</td><td style="text-align:right">${fmt(stats.reduce((a,p)=>a+p.certifiedNet,0))}</td><td style="text-align:right">${fmt(T.payable)}</td><td style="text-align:right">${fmt(T.paid)}</td><td style="text-align:right">${fmt(T.retention)}</td><td style="text-align:right">${fmt(T.advance)}</td></tr></table>
+    <div style="font-size:9.5px;font-style:italic;margin-top:6px">Retention held is withheld from suppliers and released after completion / taking-over or on expiry of the Defects Liability Period, per each supplier's contract terms. Suppliers marked "No retention" have none.</div>
+    <div class="foot">MA Group Payment Certificate System — project monitoring — printed ${dmy(new Date())}</div></div>`;
+  document.body.classList.add("printing-cert");
+  const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
+  window.addEventListener("afterprint",done); window.print();
+}
+
+/* ---------- cheques page (register + print) ---------- */
+function vCheques(){
+  const canPrint=["Accounts","CEO"].includes(ME.role);
+  const cheques=CERTS.filter(c=>c.mode==="Cheque").sort((a,b)=>(a.no<b.no?1:-1));
+  // pull payment ref/bank/date from REG for each cheque cert
+  const regByNo={}; REG.forEach(r=>{ if(r.mode==="Cheque") regByNo[r.no]=r; });
+  const rows=cheques.map(c=>{ const r=regByNo[c.no]||{};
+    return `<tr><td><b>${esc(c.no)}</b></td><td>${esc(r.ref||"—")}</td><td>${dmy(r.date)}</td><td>${esc(c.supplier)}</td>
+      <td>${esc(r.bank||"—")}</td><td class="num">${fmt(c.payable)}</td>
+      <td>${canPrint?`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Print</button>`:"—"}</td></tr>`; }).join("");
+  const approvedNoPay=CERTS.filter(c=>c.status==="Approved").length;
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Cheque Register</h2>
+     <span class="muted">All cheque payments. Print or reprint any cheque here.</span>
+     <button class="btn ghost right" id="chqCsv">Export CSV</button></div>
+   <div style="height:10px"></div>
+   <table><tr><th>Cert No.</th><th>Cheque No.</th><th>Date</th><th>Payee / Supplier</th><th>Bank</th><th class="num">Amount (AED)</th><th>Print</th></tr>
+   ${rows||`<tr><td colspan="7" class="muted">No cheques yet. Record a payment with mode = Cheque on an approved certificate.</td></tr>`}</table>
+   ${approvedNoPay?`<div class="note" style="margin-top:12px">${approvedNoPay} approved certificate(s) awaiting payment — record a cheque payment from the Certificates tab to add it here.</div>`:""}
+   <div class="note" style="margin-top:12px"><b>To print:</b> click Print — a cheque-sized PDF opens; print at <b>Actual size / 100%</b> on A4 and feed your ENBD cheque. Adjust alignment in Settings → Cheque Layout if ever needed.</div>
+   </div>`;
+  document.querySelectorAll("[data-chq]").forEach(b=>b.onclick=()=>reprintCheque(b.dataset.chq));
+  $("#chqCsv").onclick=()=>{ const rows2=[["CertNo","ChequeNo","Date","Supplier","Payee","Bank","Amount"]]
+    .concat(cheques.map(c=>{const r=regByNo[c.no]||{};return [c.no,r.ref||"",r.date||"",c.supplier,r.payee||c.supplier,r.bank||"",c.payable];}));
+    const csv=rows2.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cheque_Register.csv"; a.click(); };
+}
+async function reprintCheque(no){
+  let c; try{ c=await api("cert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
+  if(!c.payment){ toast("No payment recorded"); return; }
+  printCheque(c);
+  try{ await api("cert/"+encodeURIComponent(no)+"/printed",{method:"POST"}); }catch(e){}
+}
+
+/* ---------- payment register ---------- */
+function vReg(){
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Payment Register</h2>
+   <button class="btn ghost right" id="csvBtn">Export CSV</button></div><div style="height:10px"></div>
+   <table><tr><th>Sr</th><th>Cert No.</th><th>Invoice</th><th>Project</th><th>Supplier</th><th>Payee</th><th>Mode</th><th>Ref</th><th>Bank</th><th>Date</th><th class="num">Amount</th><th>Receipt</th><th>By</th></tr>
+   ${REG.slice().reverse().map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; const rcell=done?`<span style="color:#2E7D32">✓</span>`:`<span style="color:#C0392B">pending</span>`;
+     return `<tr><td>${r.sr}</td><td><b>${esc(r.no)}</b></td><td>${esc(r.invoiceNo||"—")}</td><td>${esc(r.project)}</td><td>${esc(r.supplier)}</td><td>${esc(r.payee)}</td><td>${esc(r.mode)}</td><td>${esc(r.ref||"—")}</td><td>${esc(r.bank||"—")}</td><td>${dmy(r.date)}</td><td class="num">${fmt(r.amount)}</td><td>${rcell}</td><td>${esc(r.by)}</td></tr>`;}).join("")||`<tr><td colspan="13" class="muted">No payments recorded yet.</td></tr>`}
+   </table></div>`;
+  $("#csvBtn").onclick=()=>{ const rows=[["Sr","CertNo","Invoice","Entity","Project","Supplier","Payee","Mode","Ref","Bank","Date","Amount","Receipt","By","At"]]
+      .concat(REG.map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; return [r.sr,r.no,r.invoiceNo,r.entity,r.project,r.supplier,r.payee,r.mode,r.ref,r.bank,r.date,r.amount,done?"Received":"Pending",r.by,r.at];}));
+    const csv=rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Payment_Register.csv"; a.click(); };
+}
+
+/* ---------- asset registry ---------- */
+let ASSET_STATE=null, ASSET_FILTERED=[];
+function loadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector(`script[src="${src}"]`)) return res(); const s=document.createElement("script"); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error("Could not load "+src)); document.head.appendChild(s); }); }
+async function vAssets(){
+  const canAsset=["CEO","PM","Secretary","QS"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Asset Registry</h2><span class="muted" id="asCount"></span>
+    <div class="right flex">
+      ${canAsset?`<button class="btn gold" id="asNew">+ Add asset</button>`:""}
+      ${canAsset?`<button class="btn ghost" id="asImport">Import Excel</button>`:""}
+      <button class="btn ghost" id="asCsv">Export CSV</button>
+      <select id="asLabelSize" title="Label size (match the roll in your printer)">
+        <option value="t3x2">3×2 in (76×51mm)</option>
+        <option value="t2x3">2×3 in (51×76mm) portrait</option>
+        <option value="t4x6">4×6 in (100×150mm)</option>
+        <option value="t100x50">100×50 mm</option>
+        <option value="t60x40">60×40 mm</option>
+      </select>
+      <button class="btn" id="asLabels">🖨 Print labels</button></div></div>
+    <div id="asSummary" class="muted">Loading…</div>
+    <div class="flex" style="margin:10px 0;flex-wrap:wrap"><input id="asQ" placeholder="Search code / item / serial / location / custodian…" style="max-width:300px">
+      <select id="asCat"><option value="">All categories</option></select>
+      <select id="asStatus"><option value="">All statuses</option></select></div>
+    <div id="asList" class="muted">Loading…</div></div>`;
+  // Bind the toolbar first so buttons always work, even if the data load hiccups
+  if(canAsset){ $("#asNew").onclick=()=>{ if(!ASSET_STATE){ toast("Still loading — one moment"); return; } assetForm(null); }; $("#asImport").onclick=importAssetsExcel; }
+  $("#asCsv").onclick=exportAssetsCsv;
+  const lsz=$("#asLabelSize"); if(lsz){ lsz.value=LABEL_SIZE; lsz.onchange=e=>{ LABEL_SIZE=e.target.value; }; }
+  $("#asLabels").onclick=()=>printAssetLabels(ASSET_FILTERED.length?ASSET_FILTERED:(ASSET_STATE?ASSET_STATE.assets:[]));
+  ["asQ","asCat","asStatus"].forEach(id=>$("#"+id).addEventListener("input",renderAssetList));
+  let d; try{ d=await api("assets"); }catch(e){ $("#asSummary").textContent=""; $("#asList").textContent="Could not load assets: "+e.message; return; }
+  ASSET_STATE=d;
+  $("#asCat").innerHTML=`<option value="">All categories</option>`+d.cats.map(c=>`<option value="${c.code}">${esc(c.code)} — ${esc(c.name)}</option>`).join("");
+  $("#asStatus").innerHTML=`<option value="">All statuses</option>`+d.statuses.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  renderAssetSummary(); renderAssetList();
+}
+function renderAssetSummary(){
+  const s=ASSET_STATE.summary, cats=ASSET_STATE.cats;
+  $("#asSummary").classList.remove("muted");
+  $("#asSummary").innerHTML=`<div class="kpis">
+    <div class="kpi"><div class="v">${s.count}</div><div class="l">Total assets</div></div>
+    <div class="kpi"><div class="v">${s.active}</div><div class="l">Active</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(s.totalValue)}</div><div class="l">Total cost / value</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(s.totalNbv)}</div><div class="l">Net book value</div></div></div>
+    <details style="margin-top:8px"><summary style="cursor:pointer;color:#2E75B6;font-size:13px">Value by category</summary>
+    <table style="margin-top:6px"><tr><th>Code</th><th>Category</th><th class="num">Count</th><th class="num">Value (AED)</th><th class="num">NBV (AED)</th></tr>
+    ${cats.map(c=>{ const b=s.byCat[c.code]; if(!b) return ""; return `<tr><td><b>${c.code}</b></td><td>${esc(c.name)}</td><td class="num">${b.count}</td><td class="num">${fmt(b.value)}</td><td class="num">${fmt(b.nbv)}</td></tr>`;}).join("")}</table></details>`;
+}
+function renderAssetList(){
+  const d=ASSET_STATE; if(!d) return;
+  const canAsset=["CEO","PM","Secretary","QS"].includes(ME.role);
+  const q=($("#asQ").value||"").toLowerCase(), cat=$("#asCat").value, st=$("#asStatus").value;
+  const list=d.assets.filter(a=> (!cat||a.cat===cat) && (!st||(a.status||"Active")===st) &&
+    (!q || (a.code+" "+a.description+" "+(a.model||"")+" "+(a.serial||"")+" "+(a.location||"")+" "+(a.custodian||"")).toLowerCase().includes(q)) );
+  ASSET_FILTERED=list;
+  $("#asCount").textContent=`${list.length} of ${d.assets.length} shown`;
+  if(!list.length){ $("#asList").innerHTML=`<div class="muted">${d.assets.length?"No assets match your filter.":"No assets yet. Click “Import Excel” to bring in your existing registry, or “Add asset”."}</div>`; return; }
+  $("#asList").classList.remove("muted");
+  $("#asList").innerHTML=`<table><tr><th>Code</th><th>Cat</th><th>Description</th><th>Serial / Plate</th><th>Location</th><th>Custodian</th><th class="num">Cost</th><th class="num">NBV</th><th>Status</th><th></th></tr>
+    ${list.map(a=>`<tr><td><b>${esc(a.code)}</b></td><td>${esc(a.cat)}</td><td>${esc(a.description)}${a.model?` <span class="muted">· ${esc(a.model)}</span>`:""}</td>
+      <td>${esc(a.serial||"—")}</td><td>${esc(a.location||"—")}</td><td>${esc(a.custodian||"—")}</td>
+      <td class="num">${fmt(a.cost)}</td><td class="num">${fmt(a.dep?a.dep.nbv:0)}</td>
+      <td>${a.status&&a.status!=="Active"?`<span class="muted">${esc(a.status)}</span>`:`<span style="color:#375623">Active</span>`}</td>
+      <td style="white-space:nowrap"><a href="#" data-lbl="${esc(a.code)}">label</a>${canAsset?` · <a href="#" data-edit="${esc(a.code)}">edit</a>`:""}</td></tr>`).join("")}</table>`;
+  $("#asList").querySelectorAll("[data-lbl]").forEach(x=>x.onclick=e=>{e.preventDefault(); const a=d.assets.find(y=>y.code===x.dataset.lbl); if(a) printAssetLabels([a]);});
+  $("#asList").querySelectorAll("[data-edit]").forEach(x=>x.onclick=e=>{e.preventDefault(); const a=d.assets.find(y=>y.code===x.dataset.edit); if(a) assetForm(a);});
+}
+function assetForm(a){
+  const isNew=!a;
+  a=a||{cat:"IT",condition:"Good",owner:"MA Group",status:"Active"};
+  const cats=ASSET_STATE.cats, conds=ASSET_STATE.conditions, stats=ASSET_STATE.statuses;
+  const opt=(arr,sel,val,lab)=>arr.map(x=>{const v=val?val(x):x,l=lab?lab(x):x;return `<option value="${esc(v)}" ${v===sel?"selected":""}>${esc(l)}</option>`;}).join("");
+  $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add asset":"Edit "+esc(a.code)}</h2>
+   ${isNew?`<div class="note">The asset code is generated automatically as <b>MAG-{category}-####</b> when you save — the next free number in the category.</div>`:`<div class="note">Code <b>${esc(a.code)}</b> — fixed for the life of the asset. To retire it, set Status to Disposed/Sold (don’t delete).</div>`}
+   <div class="grid" style="margin-top:10px">
+     <div><label>Category</label><select id="a_cat" ${isNew?"":"disabled"}>${opt(cats,a.cat,c=>c.code,c=>c.code+" — "+c.name)}</select></div>
+     <div><label>Description</label><input id="a_description" value="${esc(a.description||"")}" placeholder="e.g. Laptop, Office Chair"></div>
+     <div><label>Model</label><input id="a_model" value="${esc(a.model||"")}"></div>
+     <div><label>Serial / Plate no.</label><input id="a_serial" value="${esc(a.serial||"")}"></div>
+     <div><label>Year of manufacture</label><input id="a_year" value="${esc(a.year||"")}"></div>
+     <div><label>Location</label><input id="a_location" value="${esc(a.location||"")}" list="locList"></div>
+     <div><label>Custodian</label><input id="a_custodian" value="${esc(a.custodian||"")}"></div>
+     <div><label>Owner / company</label><input id="a_owner" value="${esc(a.owner||"MA Group")}"></div>
+     <div><label>Purchase date</label><input id="a_purchaseDate" type="date" value="${esc((a.purchaseDate||'').slice(0,10))}"></div>
+     <div><label>Condition</label><select id="a_condition">${opt(conds,a.condition||"Good")}</select></div>
+     <div><label>Cost / value (AED)</label><input id="a_cost" type="number" step="0.01" value="${a.cost??""}"></div>
+     <div><label>Life (years)</label><input id="a_life" type="number" step="1" value="${a.life??""}" placeholder="default per category"></div>
+     <div><label>Residual %</label><input id="a_residPct" type="number" step="1" value="${a.residPct?Math.round(a.residPct*100):0}"></div>
+     <div><label>Status</label><select id="a_status">${opt(stats,a.status||"Active")}</select></div>
+     <div style="grid-column:1/-1"><label>Remarks</label><input id="a_remarks" value="${esc(a.remarks||"")}"></div>
+   </div>
+   <datalist id="locList">${[...new Set(ASSET_STATE.assets.map(x=>x.location).filter(Boolean))].map(l=>`<option value="${esc(l)}">`).join("")}</datalist>
+   <div style="height:12px"></div><div class="flex">
+     <button class="btn green" id="a_save">${isNew?"Add asset":"Save changes"}</button>
+     <button class="btn ghost" id="a_back">Back</button>
+     ${!isNew?`<button class="btn ghost" id="a_label">🖨 Print label</button>`:""}
+     ${!isNew&&ME.role==="CEO"?`<button class="btn red right" id="a_del">Delete</button>`:""}
+   </div></div>`;
+  $("#a_back").onclick=()=>{VIEW="assets";render();};
+  if(!isNew) $("#a_label").onclick=()=>printAssetLabels([a]);
+  if(!isNew&&ME.role==="CEO") $("#a_del").onclick=async ()=>{ if(!confirm(`Permanently delete ${a.code}?\n\nThis cannot be undone. To retire an asset you still own, set Status = Disposed instead.`)) return;
+    try{ await api("assets/"+encodeURIComponent(a.code),{method:"DELETE"}); toast("Deleted"); VIEW="assets"; render(); }catch(e){toast(e.message);} };
+  $("#a_save").onclick=async ()=>{ const g=id=>{const el=$("#a_"+id);return el?el.value:"";};
+    const body={ cat:g("cat"), description:g("description").trim(), model:g("model"), serial:g("serial"), year:g("year"),
+      location:g("location"), custodian:g("custodian"), owner:g("owner"), purchaseDate:g("purchaseDate"),
+      condition:g("condition"), cost:+g("cost")||0, life:g("life")===""?"":+g("life"), residPct:(+g("residPct")||0)/100, status:g("status"), remarks:g("remarks") };
+    if(!isNew) body.code=a.code;
+    if(!body.description){ toast("Description is required"); return; }
+    try{ const saved=await api("assets",{method:"POST",body}); toast(isNew?("Added "+saved.code):"Saved"); VIEW="assets"; render(); }catch(e){ toast(e.message); }
+  };
+}
+function assetLabelHtml(a){
+  const catName=(ASSET_STATE?.cats||[]).find(c=>c.code===a.cat)?.name || a.cat || "Asset";
+  const isVeh=a.cat==="VEH";
+  const item=esc(a.description||"")+(a.model?" · "+esc(a.model):"");
+  const plate = (isVeh&&a.serial) ? `<div class="plate">PLATE NO. ${esc(a.serial)}</div>` : (a.serial?`<div class="plate">S/N: ${esc(a.serial)}</div>`:"");
+  return `<div class="lh"><div class="lg"><img src="logo.png" alt=""></div>
+    <div class="lt"><b>ASSET TAG</b><small>${esc(catName)}</small><small>Property of MA Group</small></div></div>
+    <div class="lb"><svg class="bc"></svg><div class="code">${esc(a.code)}</div>
+    <div class="item">${item}</div>${plate}
+    <div class="sub">If found, contact MA Group<br>maagroup.ae · scan to identify asset</div></div>`;
+}
+var LABEL_SIZE="t3x2";
+var LABEL_PAGES={ t3x2:"76.2mm 50.8mm", t2x3:"50.8mm 76.2mm", t4x6:"100mm 150mm", t100x50:"100mm 50mm", t60x40:"60mm 40mm" };
+var LABEL_BC={ t3x2:{height:50,width:2}, t2x3:{height:60,width:1.8}, t4x6:{height:120,width:3}, t100x50:{height:52,width:2.4}, t60x40:{height:42,width:1.8} };
+function printAssetLabels(list,size){
+  size=size||LABEL_SIZE||"t3x2";
+  list=(list||[]).filter(Boolean);
+  if(!list.length){ toast("No assets to print"); return; }
+  if(typeof JsBarcode==="undefined"){ toast("Barcode library not loaded — refresh and retry"); return; }
+  $("#labelPage").textContent="@page { size:"+(LABEL_PAGES[size]||LABEL_PAGES.t3x2)+"; margin:0; }";
+  const area=document.getElementById("labelArea");
+  area.innerHTML=list.map(a=>`<div class="lbl ${size}">${assetLabelHtml(a)}</div>`).join("");
+  const divs=area.querySelectorAll(".lbl"); const bc=LABEL_BC[size]||LABEL_BC.t3x2;
+  list.forEach((a,i)=>{ const svg=divs[i].querySelector("svg.bc"); try{ JsBarcode(svg,a.code,{format:"CODE128",displayValue:false,margin:0,...bc}); }catch(e){} });
+  const done=()=>{ document.body.classList.remove("printing-labels"); window.removeEventListener("afterprint",done); };
+  window.addEventListener("afterprint",done);
+  document.body.classList.add("printing-labels");
+  setTimeout(()=>window.print(),60);
+}
+function exportAssetsCsv(){
+  const d=ASSET_STATE; if(!d) return;
+  const rows=[["Code","Category","Description","Model","Year","Serial/Plate","Location","Custodian","Owner","Purchase Date","Condition","Cost (AED)","Life (yrs)","Dep/yr","Accum Dep","NBV (AED)","Status","Remarks"]]
+    .concat(d.assets.map(a=>[a.code,a.cat,a.description,a.model,a.year,a.serial,a.location,a.custodian,a.owner,a.purchaseDate,a.condition,a.cost,a.life,a.dep?.depPerYear,a.dep?.accumDep,a.dep?.nbv,a.status,a.remarks]));
+  const csv=rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const aa=document.createElement("a"); aa.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); aa.download="MA_Asset_Registry.csv"; aa.click();
+}
+async function importAssetsExcel(){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".xlsx,.xlsm,.xls";
+  inp.onchange=async ()=>{ const f=inp.files[0]; if(!f) return;
+    toast("Reading Excel…");
+    try{ await loadScript("xlsx.full.min.js"); }catch(e){ toast("Could not load the Excel reader"); return; }
+    let assets=[];
+    try{
+      const buf=await f.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      const name=wb.SheetNames.find(n=>n.toLowerCase().includes("register"))||wb.SheetNames[0];
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:""});
+      const toISO=v=>{ if(v instanceof Date) return v.toISOString().slice(0,10); const s=String(v||"").trim(); const m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if(m) return `${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`; const m2=s.match(/^\d{4}-\d{2}-\d{2}/); return m2?m2[0]:""; };
+      for(const r of rows){ const code=String(r[1]||"").trim();
+        if(!/^MAG-[A-Z]{2,3}-\d{3,5}$/.test(code)) continue;
+        assets.push({ code, cat:String(r[2]||"").trim(), description:String(r[3]||"").trim(), model:String(r[4]||"").trim(),
+          year:String(r[5]||"").trim(), serial:String(r[6]||"").trim(), location:String(r[7]||"").trim(),
+          custodian:String(r[8]||"").trim(), owner:String(r[9]||"").trim(), purchaseDate:toISO(r[10]),
+          condition:String(r[11]||"").trim(), cost:r[12], life:r[13] });
+      }
+    }catch(e){ toast("Could not read that file: "+e.message); return; }
+    if(!assets.length){ toast("No asset rows found. The sheet needs a column of MAG-XXX-#### codes."); return; }
+    if(!confirm(`Found ${assets.length} assets in the file.\n\nImport now? Codes already in the system are skipped (your edits are kept).`)) return;
+    try{ const res=await api("assets/import",{method:"POST",body:{assets}}); toast(`Imported ${res.created} new · ${res.updated} updated · ${res.skipped} skipped`); vAssets(); }catch(e){ toast(e.message); }
+  };
+  inp.click();
+}
+
+/* ---------- settings ---------- */
+function vSettings(){
+  const admin=ME.role==="CEO";
+  $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
+   <h3>Projects</h3><div id="projList"></div>
+   ${admin?`<div class="flex"><input id="npCode" placeholder="Code (3 letters)" style="max-width:130px"><input id="npName" placeholder="Project name" style="max-width:320px"><button class="btn" id="npAdd">Add project</button></div>`:""}
+   <h3>Banks / accounts</h3><div id="bankList"></div>
+   ${admin?`<div class="flex"><input id="nbName" placeholder="Bank — account" style="max-width:320px"><button class="btn" id="nbAdd">Add bank</button></div>`:""}
+   ${admin?`<h3>Users</h3><table><tr><th>User</th><th>Role</th><th></th></tr>
+     ${USERS.map(u=>`<tr><td>${esc(u.name)}</td><td>${u.role}</td><td><a href="#" data-reset="${u.id}">reset PIN</a></td></tr>`).join("")}</table>
+     <div class="muted" style="margin-top:6px">Default PINs — CEO 1234, QS 1111, PM 2222, Accounts 3333, Secretary 4444. Change after first login. The Secretary can register & manage suppliers only.</div>`:""}
+   </div>
+   ${admin?`<div class="card"><h2>Storage &amp; usage</h2><div id="usageBox" class="muted">Loading…</div></div>`:""}
+   ${admin?emailCard():""}
+   ${admin?signatureCard():""}
+   ${admin?chequeLayoutCard():""}`;
+  const renderLists=()=>{
+    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td>${admin?`<td><a href="#" data-dp="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
+    $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
+    if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
+      document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
+  };
+  const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; renderLists(); toast("Saved"); }catch(e){ toast(e.message); } };
+  renderLists();
+  if(admin){ api("usage").then(u=>{ const b=$("#usageBox"); if(!b) return;
+    b.innerHTML=`<div class="kpis"><div class="kpi"><div class="v">${u.certs}</div><div class="l">Certificates</div></div>
+      <div class="kpi"><div class="v">${u.suppliers}</div><div class="l">Suppliers</div></div>
+      <div class="kpi"><div class="v">${u.docs}</div><div class="l">Attachments &amp; documents</div></div>
+      <div class="kpi"><div class="v">~${u.estMB} MB</div><div class="l">Estimated storage used</div></div></div>
+      <div class="muted" style="margin-top:8px">Estimate only. Netlify allows up to 5 GB per file and no practical total limit — this is years of headroom. Uploaded photos are auto-compressed to keep files small.</div>`;
+    }).catch(()=>{ const b=$("#usageBox"); if(b) b.textContent="Usage unavailable."; }); }
+  if(admin) bindSignature();
+  if(admin) bindEmail();
+  if(admin){
+    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(); if(!code||!name) return toast("Code and name required"); S.projects.push({code,name}); await saveS(); };
+    $("#nbAdd").onclick=async ()=>{ const b=$("#nbName").value.trim(); if(!b) return; S.banks.push(b); await saveS(); };
+    document.querySelectorAll("[data-reset]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const pin=prompt("New PIN (4-8 digits):"); if(!pin) return; const u=USERS.find(x=>x.id===a.dataset.reset);
+      try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,pin}}); toast("PIN reset"); }catch(x){ toast(x.message); } });
+    bindChequeLayout(saveS);
+  }
+}
+function emailCard(){
+  return `<div class="card"><h2>Email Notifications</h2>
+   <div class="note">Automated emails to suppliers & subcontractors, sent from <b>info@maagroup.ae</b> so they can reply directly. Registration confirmation, certificate initiated / approved / paid, cheque ready, action-required (rejections, deductions, missing docs), plus scheduled trade-licence reminders and a monthly SOA request on the 25th. By default these go through your own <b>Zoho Mail</b> mailbox — enter your Zoho app-specific password below to switch sending on. Until then, emails are composed and logged but not transmitted.</div>
+   <div id="emailBox" class="muted" style="margin-top:10px">Loading…</div></div>`;
+}
+async function bindEmail(){
+  const box=$("#emailBox"); if(!box) return;
+  let cfg; try{ cfg=await api("emailcfg"); }catch(e){ box.textContent="Email settings unavailable."; return; }
+  const T=cfg.types||{}; const tr=cfg.triggers||{};
+  const prov=cfg.provider||"smtp";
+  const smtpReady = cfg.smtpPassSet || cfg.smtpPassFromEnv;
+  const zeptoReady = cfg.tokenSet || cfg.tokenFromEnv;
+  const ready = prov==="smtp" ? smtpReady : zeptoReady;
+  const status = ready
+    ? `<span style="color:#2e7d32">● Sending is ON via ${prov==="smtp"?"Zoho Mail":"ZeptoMail"}${(prov==="smtp"?cfg.smtpPassFromEnv:cfg.tokenFromEnv)?" (set via environment)":""}</span>`
+    : `<span style="color:#bf9000">● ${prov==="smtp"?"Zoho Mail app password not set":"ZeptoMail token not set"} — emails are logged only, not sent</span>`;
+  const togRows=Object.keys(T).map(k=>`<label style="display:block;margin:3px 0;font-weight:400"><input type="checkbox" data-tg="${k}" ${tr[k]===false?"":"checked"}> ${esc(T[k])}</label>`).join("");
+  box.classList.remove("muted");
+  box.innerHTML=`
+   <div style="margin-bottom:10px">${status}</div>
+   <div class="grid">
+     <div><label>Master switch</label><select id="em_enabled"><option value="1" ${cfg.enabled?"selected":""}>On</option><option value="0" ${!cfg.enabled?"selected":""}>Off</option></select></div>
+     <div><label>Send using</label><select id="em_provider"><option value="smtp" ${prov==="smtp"?"selected":""}>Zoho Mail (your mailbox)</option><option value="zeptomail" ${prov==="zeptomail"?"selected":""}>ZeptoMail (API)</option></select></div>
+     <div><label>From name</label><input id="em_fromName" value="${esc(cfg.fromName||"")}"></div>
+     <div><label>From address</label><input id="em_from" value="${esc(cfg.from||"")}"></div>
+     <div><label>Reply-to</label><input id="em_replyTo" value="${esc(cfg.replyTo||"")}"></div>
+     <div><label>Internal CC (optional)</label><input id="em_cc" value="${esc(cfg.cc||"")}" placeholder="accounts@maagroup.ae"></div>
+     <div><label>Internal BCC (optional)</label><input id="em_bcc" value="${esc(cfg.bcc||"")}"></div>
+   </div>
+   <div id="em_smtpBlock" style="margin-top:10px">
+     <div class="note" style="margin-bottom:8px">Sends through your Zoho mailbox over SMTP. Use the account <b>info@maagroup.ae</b> and a <b>Zoho app-specific password</b> (Zoho Mail → Settings → Security → App Passwords) — not your normal login password.</div>
+     <div class="grid">
+       <div><label>SMTP host</label><input id="em_smtpHost" value="${esc(cfg.smtpHost||"smtppro.zoho.com")}"></div>
+       <div><label>SMTP port</label><input id="em_smtpPort" type="number" value="${cfg.smtpPort||465}"></div>
+       <div><label>SMTP username (mailbox)</label><input id="em_smtpUser" value="${esc(cfg.smtpUser||"info@maagroup.ae")}"></div>
+       <div><label>App password ${cfg.smtpPassFromEnv?"(set via environment)":cfg.smtpPassSet?"(saved — leave blank to keep)":""}</label><input id="em_smtpPass" type="password" placeholder="${cfg.smtpPassSet?"•••••••• (unchanged)":"Zoho app-specific password"}"></div>
+     </div>
+   </div>
+   <div id="em_zeptoBlock" style="margin-top:10px">
+     <div style="grid-column:1/-1"><label>ZeptoMail send token ${cfg.tokenFromEnv?"(set via environment)":cfg.tokenSet?"(saved — leave blank to keep)":""}</label><input id="em_token" type="password" style="width:100%" placeholder="${cfg.tokenSet?"•••••••• (unchanged)":"Zoho-enczapikey token"}"></div>
+   </div>
+   <h3>Which notifications to send</h3>
+   <div style="columns:2;-webkit-columns:2;font-size:13px">${togRows}</div>
+   <div style="height:12px"></div>
+   <div class="flex"><button class="btn green" id="em_save">Save email settings</button></div>
+   <h3 style="margin-top:18px">Test & run</h3>
+   <div class="flex"><input id="em_test" placeholder="test@address.com" style="max-width:260px"><button class="btn" id="em_testBtn">Send test email</button>
+     <button class="btn ghost" id="em_runLic">Run licence check now</button><button class="btn ghost" id="em_runSoa">Send SOA requests now</button></div>
+   <div id="em_result" class="muted" style="margin-top:8px"></div>
+   <h3 style="margin-top:18px">Recent email log <a href="#" id="em_refresh" style="font-size:12px;font-weight:400">refresh</a></h3>
+   <div id="em_log" class="muted">Loading…</div>`;
+  const syncProv=()=>{ const p=$("#em_provider").value;
+    $("#em_smtpBlock").style.display = p==="smtp"?"block":"none";
+    $("#em_zeptoBlock").style.display = p==="zeptomail"?"block":"none"; };
+  $("#em_provider").onchange=syncProv; syncProv();
+  const collect=()=>{ const tg={}; document.querySelectorAll("[data-tg]").forEach(c=>{ if(!c.checked) tg[c.dataset.tg]=false; });
+    const body={ enabled:$("#em_enabled").value==="1", provider:$("#em_provider").value,
+      fromName:$("#em_fromName").value.trim(), from:$("#em_from").value.trim(),
+      replyTo:$("#em_replyTo").value.trim(), cc:$("#em_cc").value.trim(), bcc:$("#em_bcc").value.trim(),
+      smtpHost:$("#em_smtpHost").value.trim(), smtpPort:+$("#em_smtpPort").value||465, smtpUser:$("#em_smtpUser").value.trim(),
+      triggers:tg };
+    const sp=$("#em_smtpPass").value.trim(); if(sp) body.smtpPass=sp;
+    const tk=$("#em_token").value.trim(); if(tk) body.token=tk; return body; };
+  $("#em_save").onclick=async ()=>{ try{ await api("emailcfg",{method:"POST",body:collect()}); toast("Email settings saved"); bindEmail(); }catch(e){ toast(e.message); } };
+  $("#em_testBtn").onclick=async ()=>{ const to=$("#em_test").value.trim(); const r=$("#em_result");
+    r.textContent="Sending…"; try{ const rec=await api("emailtest",{method:"POST",body:{to}}); r.innerHTML=`Test → <b>${esc(rec.status)}</b>${rec.detail?" — "+esc(rec.detail):""}`; loadLog(); }catch(e){ r.textContent=e.message; } };
+  $("#em_runLic").onclick=async ()=>{ const r=$("#em_result"); r.textContent="Scanning licences…"; try{ const d=await api("emailrun",{method:"POST",body:{job:"licence"}}); r.innerHTML=`Licence check: scanned ${d.scanned}, notified <b>${d.notified}</b>.`; loadLog(); }catch(e){ r.textContent=e.message; } };
+  $("#em_runSoa").onclick=async ()=>{ if(!confirm("Send a Statement-of-Account request to all active suppliers now?")) return; const r=$("#em_result"); r.textContent="Sending SOA requests…"; try{ const d=await api("emailrun",{method:"POST",body:{job:"soa"}}); r.innerHTML=`SOA requests (${esc(d.period)}): notified <b>${d.notified}</b>.`; loadLog(); }catch(e){ r.textContent=e.message; } };
+  const badge=st=>({sent:"#2e7d32",logged:"#bf9000",disabled:"#7a8494",skipped:"#7a8494",error:"#c0392b"}[st]||"#7a8494");
+  async function loadLog(){ const el=$("#em_log"); if(!el) return; try{ const d=await api("emaillog");
+    if(!d.log.length){ el.textContent="No emails yet."; return; }
+    el.classList.remove("muted");
+    el.innerHTML=`<table><tr><th>When</th><th>To</th><th>Type</th><th>Subject</th><th>Status</th></tr>${d.log.slice(0,40).map(l=>`<tr><td style="white-space:nowrap">${esc((l.at||"").slice(0,16).replace("T"," "))}</td><td>${esc(l.to)}</td><td>${esc(T[l.type]||l.type||"—")}</td><td>${esc(l.subject)}</td><td><b style="color:${badge(l.status)}">${esc(l.status)}</b>${l.detail?`<div class="muted" style="font-size:10px">${esc(l.detail)}</div>`:""}</td></tr>`).join("")}</table><div class="muted" style="margin-top:4px">Showing latest ${Math.min(40,d.log.length)} of ${d.total}.</div>`;
+  }catch(e){ el.textContent="Log unavailable."; } }
+  const rf=$("#em_refresh"); if(rf) rf.onclick=e=>{e.preventDefault();loadLog();};
+  loadLog();
+}
+function signatureCard(){
+  const sig=ASSETS.sign?`<img src="${ASSETS.sign}" style="height:60px;max-width:200px;border:1px solid #ddd;padding:4px;background:#fff">`:`<span class="muted">none uploaded</span>`;
+  const stp=ASSETS.stamp?`<img src="${ASSETS.stamp}" style="height:80px;border:1px solid #ddd;padding:4px;background:#fff">`:`<span class="muted">none uploaded</span>`;
+  return `<div class="card"><h2>CEO Signature & Company Stamp</h2>
+   <div class="note">Upload the CEO signature and the company stamp once (PNG with transparent background is best). They are printed automatically on every certificate <b>after you approve it</b> — signature in the "Approved by (CEO)" box and the stamp over the approval area. Not shown on drafts or unapproved certificates.</div>
+   <div class="grid" style="margin-top:12px">
+     <div><label>CEO signature</label><div id="sigPrev" style="margin-bottom:6px">${sig}</div>
+       <input type="file" id="sigFile" accept="image/png,image/jpeg"><button class="btn" id="sigSave" style="margin-top:6px">Save signature</button></div>
+     <div><label>Company stamp</label><div id="stpPrev" style="margin-bottom:6px">${stp}</div>
+       <input type="file" id="stpFile" accept="image/png,image/jpeg"><button class="btn" id="stpSave" style="margin-top:6px">Save stamp</button></div>
+   </div></div>`;
+}
+function bindSignature(){
+  const readAs=(inp,cb)=>{ const f=inp.files&&inp.files[0]; if(!f){ toast("Choose an image first"); return; }
+    if(f.size>8000000){ toast("Image too big — under ~8 MB"); return; }
+    fileToDataUrl(f,cb,{png:true}); };  // keep transparency, auto-shrink
+  const s1=$("#sigSave"), s2=$("#stpSave");
+  if(s1) s1.onclick=()=>readAs($("#sigFile"),async d=>{ try{ await api("asset",{method:"POST",body:{kind:"sign",dataUrl:d}}); ASSETS.sign=d; $("#sigPrev").innerHTML=`<img src="${d}" style="height:60px;max-width:200px;border:1px solid #ddd;padding:4px;background:#fff">`; toast("Signature saved"); }catch(e){ toast(e.message); } });
+  if(s2) s2.onclick=()=>readAs($("#stpFile"),async d=>{ try{ await api("asset",{method:"POST",body:{kind:"stamp",dataUrl:d}}); ASSETS.stamp=d; $("#stpPrev").innerHTML=`<img src="${d}" style="height:80px;border:1px solid #ddd;padding:4px;background:#fff">`; toast("Stamp saved"); }catch(e){ toast(e.message); } });
+}
+function chequeLayoutCard(){
+  const ch=S.cheque, f=ch.fields;
+  const fr=(k)=>`<tr><td>${esc(f[k].label)}</td>
+    <td><input data-fx="${k}" type="number" step="0.5" value="${f[k].x}" style="width:90px"></td>
+    <td><input data-fy="${k}" type="number" step="0.5" value="${f[k].y}" style="width:90px"></td></tr>`;
+  return `<div class="card"><h2>Cheque Layout (calibration)</h2>
+   <div class="note"><b>Important:</b> the page is a <b>full A4 sheet</b> (like your Excel cheque), not a small page. Print the test choosing <b>Paper = A4</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>, and feed the cheque leaf into the tray exactly the way you do for your Excel cheque. The default field positions are copied from your calibrated Excel cheque, so it should already land right. If it's off, nudge Offset X (→ right) / Offset Y (↓ down) by the millimetres you measure. Use the presets below to switch A4 / Letter to match your printer.</div>
+   <div class="flex" style="margin:8px 0"><button class="btn ghost" id="ch_a4">A4 landscape (297×210)</button><button class="btn ghost" id="ch_letter">Letter landscape (279×216)</button></div>
+   <div class="grid" style="margin-top:10px">
+     <div><label>Page width (mm)</label><input id="ch_w" type="number" step="1" value="${ch.widthMm}"></div>
+     <div><label>Page height (mm)</label><input id="ch_h" type="number" step="1" value="${ch.heightMm}"></div>
+     <div><label>Font size (pt)</label><input id="ch_font" type="number" step="0.5" value="${ch.fontPt}"></div>
+     <div><label>Global offset X → right (mm)</label><input id="ch_ox" type="number" step="0.5" value="${ch.offsetXmm}"></div>
+     <div><label>Global offset Y → down (mm)</label><input id="ch_oy" type="number" step="0.5" value="${ch.offsetYmm}"></div>
+     <div><label>Words wrap width (mm)</label><input id="ch_wrap" type="number" step="1" value="${ch.wordsWrapMm||120}"></div>
+   </div>
+   <h3>Field positions (mm from top-left)</h3>
+   <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save layout</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
+}
+function bindChequeLayout(saveS){
+  const btn=$("#ch_save"); if(!btn) return;
+  const pull=()=>{ const ch=S.cheque;
+    ch.widthMm=+$("#ch_w").value||205; ch.heightMm=+$("#ch_h").value||95; ch.fontPt=+$("#ch_font").value||11;
+    ch.offsetXmm=+$("#ch_ox").value||0; ch.offsetYmm=+$("#ch_oy").value||0; ch.wordsWrapMm=+$("#ch_wrap").value||120;
+    document.querySelectorAll("[data-fx]").forEach(i=>ch.fields[i.dataset.fx].x=+i.value||0);
+    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0); };
+  btn.onclick=async ()=>{ pull(); await saveS(); };
+  const a4=$("#ch_a4"), lt=$("#ch_letter");
+  if(a4) a4.onclick=()=>{ $("#ch_w").value=297; $("#ch_h").value=210; };
+  if(lt) lt.onclick=()=>{ $("#ch_w").value=279; $("#ch_h").value=216; };
+  $("#ch_test").onclick=()=>{ pull();
+    printCheque({ no:"TEST", payment:{ payee:"TEST PAYEE — ALIGNMENT CHECK LINE", amount:3047.10, date:new Date().toISOString().slice(0,10) } }); };
+}
+
+(async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();
+</script>
+</body>
+</html>
