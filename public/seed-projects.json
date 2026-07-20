@@ -1,0 +1,59 @@
+{
+  "projects": [
+    {
+      "client": {
+        "name": "Shayea Landscape Agricultural",
+        "trn": "100426238000003",
+        "address": "Dubai, U.A.E",
+        "emirate": "Dubai",
+        "contactName": "Mr. Jack",
+        "email": "jack.d@shayealandscape.com"
+      },
+      "contract": {
+        "project": "The Square 2.0 - Nad Al Sheba",
+        "projShort": "TSQ",
+        "entity": "Marvellous Art",
+        "mainContractor": "Shayea Landscape Agricultural",
+        "subcontractRef": "QUT/MA/06-2026/0124",
+        "contractSum": 6860000,
+        "variations": 280179,
+        "advancePct": 0.20,
+        "retentionPct": 0.10,
+        "recoveryRate": 0.20,
+        "vatPct": 0.05,
+        "retentionRelease": "5% on handover + 5% after 12-month DLP",
+        "dlpMonths": 12,
+        "startDate": "2026-06-10"
+      },
+      "certs": []
+    },
+    {
+      "client": {
+        "name": "Afaq Engineering for Building Contracting LLC",
+        "trn": "100590059000003",
+        "address": "Office No 104, Mohamed Saed Hareb Building, Port Saed, Dubai",
+        "emirate": "Dubai",
+        "contactName": "Mr. Ameen Budair",
+        "contactDesignation": "General Manager",
+        "email": "Ameen@afaqengineering.com"
+      },
+      "contract": {
+        "project": "Aster Garden Hospital @ Jabal Ali",
+        "projShort": "AGH",
+        "entity": "Marvellous Art",
+        "mainContractor": "Afaq Engineering for Building Contracting LLC",
+        "subcontractRef": "QUT/MA/06-2026/0126",
+        "contractSum": 7700000,
+        "variations": 0,
+        "advancePct": 0.20,
+        "retentionPct": 0.10,
+        "recoveryRate": 0.20,
+        "vatPct": 0.05,
+        "retentionRelease": "5% on handover + 5% after 12-month DLP",
+        "dlpMonths": 12,
+        "startDate": "2026-06-09"
+      },
+      "certs": []
+    }
+  ]
+}

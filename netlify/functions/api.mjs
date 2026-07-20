@@ -13409,6 +13409,14 @@ async function computePnl(s, project) {
   };
 }
 function budgetSlug(p) { return String(p).replace(/[^A-Za-z0-9]+/g, "_"); }
+async function projectAreas(s, project) {
+  const set = /* @__PURE__ */ new Set();
+  const bud = await s.get("budget/" + budgetSlug(project), { type: "json" });
+  if (bud && bud.lines) for (const l of bud.lines) { if (l.area) set.add(String(l.area)); }
+  const { blobs } = await s.list({ prefix: "expense/" });
+  for (const b of blobs) { const e = await s.get(b.key, { type: "json" }); if (e && e.project === project && e.area) set.add(String(e.area)); }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
 async function computeBudget(s, project) {
   const bud = await s.get("budget/" + budgetSlug(project), { type: "json" }) || { project, lines: [] };
   const expenses = await listExpenses(project);
@@ -14476,6 +14484,10 @@ var api_default = async (req, context) => {
   }
   if (path === "expenses" && req.method === "GET") {
     return json(await listExpenses(url.searchParams.get("project") || ""));
+  }
+  if (path === "areas" && req.method === "GET") {
+    const project = url.searchParams.get("project") || "";
+    return json({ project, areas: project ? await projectAreas(s, project) : [] });
   }
   if (path === "expense" && req.method === "POST") {
     if (!can("expense")) return err("No rights to log expenses", 403);

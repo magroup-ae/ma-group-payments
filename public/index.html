@@ -1469,7 +1469,7 @@ async function vExpenses(){
      <span class="muted" id="xCount"></span></div>
    <div id="xKpis"></div>
    <div id="xList" class="muted">Loading…</div></div>`;
-  if(can) $("#xNew").onclick=()=>expenseForm(null);
+  if(can) $("#xNew").onclick=()=>expenseForm(null, $("#xProj")?.value||"");
   if(can) $("#xImport").onclick=importExpensesExcel;
   $("#xCsv").onclick=exportExpensesCsv;
   if($("#xClear")) $("#xClear").onclick=()=>{ const p=$("#xProj").value; if(!p){ toast("Pick a project in the filter first"); return; } adminDelete("expenses-project",p,"ALL expenses for project: "+p,()=>{ COSTMETA=null; reloadExp(); }); };
@@ -1498,19 +1498,22 @@ function renderExpList(){
   $("#xList").querySelectorAll("[data-x]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del) return; expenseForm(EXP.find(x=>x.id===r.dataset.x)); });
   $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const ex=EXP.find(x=>x.id===a.dataset.del); adminDelete("expense",a.dataset.del,(ex?ex.description||ex.supplier:"")+" — AED "+fmt(ex?ex.amount:0),reloadExp); });
 }
-function expenseForm(x){
+async function expenseForm(x, presetProject){
   const isNew=!x; x=x||{status:"Pending",date:new Date().toISOString().slice(0,10)};
+  if(isNew&&presetProject) x.project=presetProject;
   const linked=x.source==="supplier-ipc";
-  const projList=[...new Set([...(COSTMETA.projects||[]), x.project].filter(Boolean))];
+  const projList=[...new Set([...(COSTMETA.projects||[]), x.project].filter(Boolean))].sort();
   const opt=(arr,sel)=>arr.map(v=>`<option ${v===sel?"selected":""}>${esc(v)}</option>`).join("");
+  const projOpts=`<option value="">— select project —</option>`+projList.map(p=>`<option ${p===x.project?"selected":""}>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
-   ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its area / category / cost type here.</div>`:""}
+   ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its activity / category / cost type here.</div>`:""}
+   <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log).</div>
    <div class="grid" style="margin-top:10px">
-     <div><label>Project</label><input id="x_project" list="x_projs" value="${esc(x.project||"")}" placeholder="type or pick"><datalist id="x_projs">${projList.map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div>
-     <div><label>Date</label><input id="x_date" type="date" value="${esc((x.date||"").slice(0,10))}"></div>
-     <div><label>Area / Building</label><input id="x_area" value="${esc(x.area||"")}" placeholder="e.g. Operation Building"></div>
+     <div style="grid-column:1/-1"><label>1 · Project *</label><select id="x_project" ${linked?"disabled":""}>${projOpts}</select></div>
+     <div style="grid-column:1/-1"><label>2 · Activity / Area within project *</label><input id="x_area" list="x_areas" value="${esc(x.area||"")}" placeholder="select the project first…" ${linked?"":""}><datalist id="x_areas"></datalist><div class="muted" id="x_areaHint" style="font-size:11px;margin-top:3px"></div></div>
      <div><label>Category / Trade</label><select id="x_category">${opt(COSTMETA.categories,x.category||"General / Other")}</select></div>
-     <div><label>Cost Type</label><select id="x_costType"${linked?"":""}>${opt(COSTMETA.costTypes.map(t=>t.name),x.costType||"Material Supply")}</select></div>
+     <div><label>Cost Type</label><select id="x_costType">${opt(COSTMETA.costTypes.map(t=>t.name),x.costType||"Material Supply")}</select></div>
+     <div><label>Date</label><input id="x_date" type="date" value="${esc((x.date||"").slice(0,10))}"></div>
      <div><label>Supplier / Subcontractor</label><input id="x_supplier" value="${esc(x.supplier||"")}" ${linked?"readonly":""}></div>
      <div style="grid-column:1/-1"><label>Description</label><input id="x_description" value="${esc(x.description||"")}"></div>
      <div><label>PO / Ref</label><input id="x_poRef" value="${esc(x.poRef||"")}"></div>
@@ -1522,14 +1525,22 @@ function expenseForm(x){
      <div style="grid-column:1/-1"><label>Notes</label><input id="x_notes" value="${esc(x.notes||"")}"></div>
    </div>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="x_save">${isNew?"Add expense":"Save"}</button><button class="btn ghost" id="x_back">Back</button></div></div>`;
+  const loadAreas=async ()=>{ const p=$("#x_project").value; const dl=$("#x_areas"), hint=$("#x_areaHint");
+    if(!p){ dl.innerHTML=""; hint.textContent=""; return; }
+    let areas=[]; try{ const r=await api("areas?project="+encodeURIComponent(p)); areas=r.areas||[]; }catch(e){}
+    dl.innerHTML=areas.map(a=>`<option>${esc(a)}</option>`).join("");
+    hint.innerHTML=areas.length?`${areas.length} activit${areas.length===1?"y":"ies"} defined for this project — pick one, or type a new one.`:`No activities yet for this project. Type the activity/area name (define BOQ areas in the Budget tab to build the list).`; };
+  $("#x_project").onchange=()=>{ if(isNew){ $("#x_area").value=""; } loadAreas(); };
   $("#x_back").onclick=()=>{VIEW="expenses";render();};
   $("#x_save").onclick=async ()=>{ const g=id=>{const el=$("#x_"+id);return el?el.value:"";};
-    const body={ project:g("project").trim(), date:g("date"), area:g("area"), category:g("category"), costType:g("costType"),
+    const body={ project:g("project").trim(), date:g("date"), area:g("area").trim(), category:g("category"), costType:g("costType"),
       supplier:g("supplier"), description:g("description"), poRef:g("poRef"), boqRef:g("boqRef"),
       budgeted:+g("budgeted")||0, amount:+g("amount")||0, status:g("status"), paid:+g("paid")||0, notes:g("notes") };
     if(!isNew) body.id=x.id;
-    if(!body.project){ toast("Project is required"); return; }
+    if(!body.project){ toast("Choose the project first"); return; }
+    if(!body.area){ toast("Choose the activity / area inside the project"); return; }
     try{ await api("expense",{method:"POST",body}); COSTMETA=null; toast("Saved"); VIEW="expenses"; render(); }catch(e){ toast(e.message); } };
+  if(x.project) loadAreas();
 }
 async function importExpensesExcel(){
   const inp=document.createElement("input"); inp.type="file"; inp.accept=".xlsx,.xlsm,.xls,.csv";
