@@ -1394,7 +1394,7 @@ async function vExpenses(){
   const projOpts=`<option value="">All projects</option>`+COSTMETA.projects.map(p=>`<option>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Daily Cost Log</h2>
      <span class="muted">project expenses — the source of truth for the P&amp;L. Supplier IPCs auto-post here; add anything else manually.</span>
-     <div class="right flex">${can?`<button class="btn gold" id="xNew">+ Add expense</button>`:""}<button class="btn ghost" id="xCsv">Export CSV</button></div></div>
+     <div class="right flex">${can?`<button class="btn gold" id="xNew">+ Add expense</button>`:""}${can?`<button class="btn ghost" id="xImport">Import Excel</button>`:""}<button class="btn ghost" id="xCsv">Export CSV</button></div></div>
    <div class="flex" style="margin:10px 0;flex-wrap:wrap">
      <select id="xProj" style="max-width:280px">${projOpts}</select>
      <input id="xQ" placeholder="Search supplier / description / PO / area…" style="max-width:280px">
@@ -1403,6 +1403,7 @@ async function vExpenses(){
    <div id="xKpis"></div>
    <div id="xList" class="muted">Loading…</div></div>`;
   if(can) $("#xNew").onclick=()=>expenseForm(null);
+  if(can) $("#xImport").onclick=importExpensesExcel;
   $("#xCsv").onclick=exportExpensesCsv;
   ["xProj","xQ","xType"].forEach(id=>$("#"+id).addEventListener("input",renderExpList));
   await reloadExp();
@@ -1462,6 +1463,45 @@ function expenseForm(x){
     if(!isNew) body.id=x.id;
     if(!body.project){ toast("Project is required"); return; }
     try{ await api("expense",{method:"POST",body}); COSTMETA=null; toast("Saved"); VIEW="expenses"; render(); }catch(e){ toast(e.message); } };
+}
+async function importExpensesExcel(){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".xlsx,.xlsm,.xls,.csv";
+  inp.onchange=async ()=>{ const f=inp.files[0]; if(!f) return;
+    toast("Reading file…");
+    try{ await loadScript("xlsx.full.min.js"); }catch(e){ toast("Could not load the Excel reader"); return; }
+    let out=[];
+    try{
+      const buf=await f.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""});
+      if(!rows.length){ toast("Empty sheet"); return; }
+      const head=rows[0].map(h=>String(h||"").toLowerCase().trim());
+      const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+      const iType=head.findIndex(h=>h.includes("cost type")||h==="type");
+      const iAmt=head.findIndex(h=>h==="cost"||h.includes("invoice")||h.includes("amount")||h.includes("cost ("));
+      const ci={ project:find("project"), date:find("date"), area:find("area","building"), category:find("category","trade"),
+        costType:iType, supplier:find("supplier","subcont"), description:find("desc"), poRef:find("po/","po ","ref"),
+        boqRef:find("boq"), budgeted:find("budget"), amount:iAmt, status:find("status"), paid:find("paid") };
+      const toISO=v=>{ if(v instanceof Date){ let y=v.getFullYear(); if(y<2020) y+=20; return `${y}-${String(v.getMonth()+1).padStart(2,"0")}-${String(v.getDate()).padStart(2,"0")}`; } const s=String(v||"").trim(); let m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if(m) return `${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`; m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m?m[0]:""; };
+      const at=(r,i)=>i>=0?r[i]:"";
+      const defProj=(ci.project<0)?(prompt("Project name for all rows:","The Square 2.0 - Nad Al Sheba")||""):"";
+      for(let n=1;n<rows.length;n++){ const r=rows[n]; const date=toISO(at(r,ci.date));
+        const project=ci.project>=0?String(at(r,ci.project)||"").trim():defProj;
+        const amount=parseFloat(String(at(r,ci.amount)).replace(/[^\d.-]/g,""))||0;
+        if(!date||(!project)||(amount===0 && !String(at(r,ci.supplier)).trim())) continue;
+        out.push({ project, date, area:String(at(r,ci.area)||"").trim(), category:String(at(r,ci.category)||"").trim(),
+          costType:String(at(r,ci.costType)||"").trim(), supplier:String(at(r,ci.supplier)||"").trim(),
+          description:String(at(r,ci.description)||"").trim(), poRef:String(at(r,ci.poRef)||"").trim(), boqRef:String(at(r,ci.boqRef)||"").trim(),
+          budgeted:parseFloat(String(at(r,ci.budgeted)).replace(/[^\d.-]/g,""))||0, amount,
+          status:String(at(r,ci.status)||"").trim(), paid:parseFloat(String(at(r,ci.paid)).replace(/[^\d.-]/g,""))||0 }); }
+    }catch(e){ toast("Could not read that file: "+e.message); return; }
+    if(!out.length){ toast("No expense rows found. Need columns: Date, Project, Cost, Cost Type…"); return; }
+    if(!confirm(`Found ${out.length} expense rows.\n\nImport now into the cost log?`)) return;
+    toast("Importing…");
+    try{ const res=await api("expenses/import",{method:"POST",body:{rows:out}}); COSTMETA=null; toast(`Imported ${res.created} expenses`); reloadExp(); }catch(e){ toast(e.message); }
+  };
+  inp.click();
 }
 function exportExpensesCsv(){
   const list=expFiltered();

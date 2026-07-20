@@ -14322,6 +14322,41 @@ var api_default = async (req, context) => {
     await s.setJSON("expense/" + id, exp);
     return json(exp);
   }
+  if (path === "expenses/import" && req.method === "POST") {
+    if (!can("expense")) return err("No rights to import", 403);
+    const { rows } = await req.json();
+    if (!Array.isArray(rows)) return err("No rows to import");
+    const stg = await s.get("settings", { type: "json" });
+    let seq = stg.expenseSeq || 0;
+    const validStatus = new Set(EXPENSE_STATUS);
+    const validType = new Set(COST_TYPES.map((t) => t.name));
+    const statusMap = { accrual: "Pending", pending: "Pending", paid: "Paid", "on hold": "On Hold", disputed: "Disputed", "partially paid": "Partially Paid", "partly paid": "Partially Paid" };
+    const items = [];
+    for (const r of rows) {
+      if (!r || !r.project || !r.date) continue;
+      seq++;
+      let status = String(r.status || "Pending").trim();
+      if (!validStatus.has(status)) status = statusMap[status.toLowerCase()] || "Pending";
+      let costType = String(r.costType || "").trim();
+      if (!validType.has(costType)) costType = "Material Supply";
+      const id = "X" + String(seq).padStart(5, "0");
+      items.push({
+        id, seq, project: String(r.project).trim(), date: String(r.date).slice(0, 10),
+        area: String(r.area || ""), category: String(r.category || "General / Other"), costType,
+        supplier: String(r.supplier || ""), description: String(r.description || ""),
+        poRef: String(r.poRef || ""), boqRef: String(r.boqRef || ""),
+        budgeted: num(r.budgeted), amount: num(r.amount), status, paid: num(r.paid),
+        notes: String(r.notes || ""), supplierCertNo: null, source: "import",
+        createdBy: me.name, createdAt: now(), updatedAt: now()
+      });
+    }
+    for (let i = 0; i < items.length; i += 25) {
+      await Promise.all(items.slice(i, i + 25).map((e) => s.setJSON("expense/" + e.id, e)));
+    }
+    stg.expenseSeq = seq;
+    await s.setJSON("settings", stg);
+    return json({ created: items.length });
+  }
   const expGet = path.match(/^expense\/([^/]+)$/);
   if (expGet && req.method === "GET") {
     const v = await s.get("expense/" + decodeURIComponent(expGet[1]), { type: "json" });
