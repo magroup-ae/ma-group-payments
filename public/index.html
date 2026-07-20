@@ -52,6 +52,25 @@
   .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:10px 20px; border-radius:8px; font-size:13px; opacity:0; transition:.3s; z-index:99; }
   .toast.show { opacity:1; }
   .audit { font-size:12px; color:#555; } .audit li { margin-bottom:3px; }
+  /* ------- dashboard charts ------- */
+  .kpigrp { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:#8a94a6; margin:16px 2px 7px; }
+  .kpi.alert { border-top-color:var(--red); } .kpi.good { border-top-color:var(--green); }
+  .chartgrid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  @media(max-width:820px){ .chartgrid{ grid-template-columns:1fr; } }
+  .chartcard { background:#fff; border-radius:12px; padding:16px 18px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .dash-h { font-size:13px; font-weight:800; color:var(--navy); margin:0 0 12px; letter-spacing:.2px; }
+  .hbars { display:flex; flex-direction:column; gap:9px; }
+  .hbar-row { display:grid; grid-template-columns:135px 1fr auto; gap:10px; align-items:center; font-size:12px; }
+  .hbar-lab { color:#33415a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
+  .hbar-track { position:relative; background:#eef2f8; border-radius:6px; height:16px; }
+  .hbar-2 .hbar-track { height:22px; }
+  .hbar-fill { position:absolute; left:0; height:16px; border-radius:6px; min-width:2px; }
+  .hbar-fill.b1 { top:0; height:9px; border-radius:5px; }
+  .hbar-fill.b2 { top:11px; height:9px; border-radius:5px; }
+  .hbar-val { font-weight:700; color:#1f2733; white-space:nowrap; text-align:right; font-size:11px; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:12px; font-size:12px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; color:#33415a; }
+  .legend i { width:11px; height:11px; border-radius:3px; display:inline-block; flex:none; }
   /* ------- printable areas ------- */
   #printArea, #chequeArea, #labelArea { display:none; }
   @media print {
@@ -279,25 +298,106 @@ function delBtn(kind,id,name){ return ME.role==="CEO"?`<button class="btn red" d
 function wireDelBtns(after){ $("#main").querySelectorAll("[data-del-kind]").forEach(b=>b.onclick=()=>adminDelete(b.dataset.delKind,b.dataset.delId,b.dataset.delName,after)); }
 
 /* ---------- dashboard ---------- */
-function vDash(){
+const CPAL=["#1F3864","#2E75B6","#BF9000","#375623","#C0392B","#7A5C00","#5B6B85","#2E7D32","#9AB0D0","#b06a00"];
+function chartCard(title,inner,sub){ return `<div class="chartcard"><div class="dash-h">${esc(title)}${sub?` <span class="muted" style="font-weight:400;font-size:11px">${esc(sub)}</span>`:""}</div>${inner}</div>`; }
+function hbars(rows,fmtv){ fmtv=fmtv||(v=>fmt(v)); if(!rows.length) return `<div class="muted">No data yet.</div>`;
+  const max=Math.max(1,...rows.map(r=>r.value||0));
+  return `<div class="hbars">`+rows.map((r,i)=>`<div class="hbar-row"><div class="hbar-lab" title="${esc(r.label)}">${esc(r.label)}</div>
+    <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(1.5,(r.value||0)/max*100).toFixed(1)}%;background:${r.color||CPAL[i%CPAL.length]}"></div></div>
+    <div class="hbar-val">${fmtv(r.value||0)}</div></div>`).join("")+`</div>`; }
+function hbars2(rows){ if(!rows.length) return `<div class="muted">No project data yet.</div>`;
+  const max=Math.max(1,...rows.flatMap(r=>[r.a||0,r.b||0]));
+  return `<div class="hbars">`+rows.map(r=>`<div class="hbar-row hbar-2"><div class="hbar-lab" title="${esc(r.label)}">${esc(r.label)}</div>
+    <div class="hbar-track"><div class="hbar-fill b1" style="width:${Math.max(1.5,(r.a||0)/max*100).toFixed(1)}%;background:#2E75B6"></div><div class="hbar-fill b2" style="width:${Math.max(1.5,(r.b||0)/max*100).toFixed(1)}%;background:#BF9000"></div></div>
+    <div class="hbar-val">${fmt(r.a||0)}<br><span style="color:#BF9000">${fmt(r.b||0)}</span></div></div>`).join("")+`</div>
+    <div class="legend"><span><i style="background:#2E75B6"></i>Revenue certified</span><span><i style="background:#BF9000"></i>Cost incurred</span></div>`; }
+function donut(data,center){ const size=158,thick=28,r=(size-thick)/2,c=2*Math.PI*r,cx=size/2,cy=size/2;
+  const dd=data.filter(d=>d.value>0); const total=dd.reduce((a,d)=>a+d.value,0);
+  if(!total) return `<div class="muted">No data yet.</div>`;
+  let off=0,seg="";
+  dd.forEach((d,i)=>{ const len=d.value/total*c; const col=d.color||CPAL[i%CPAL.length];
+    seg+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="${thick}" stroke-dasharray="${len.toFixed(2)} ${(c-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`; off+=len; });
+  const leg=`<div class="legend">`+dd.map((d,i)=>`<span><i style="background:${d.color||CPAL[i%CPAL.length]}"></i>${esc(d.label)} · ${fmt(d.value)}</span>`).join("")+`</div>`;
+  return `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 ${size} ${size}" width="150" height="150"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#eef2f8" stroke-width="${thick}"/>${seg}<text x="${cx}" y="${cy-3}" text-anchor="middle" style="font-size:10px;fill:#8a94a6">Total</text><text x="${cx}" y="${cy+13}" text-anchor="middle" style="font-size:12px;font-weight:800;fill:#1F3864">${esc(center||fmt(total))}</text></svg><div style="flex:1;min-width:150px">${leg}</div></div>`; }
+function areaChart(points){ if(!points.length) return `<div class="muted">No payments recorded yet.</div>`;
+  const w=580,h=160,pad=28; const max=Math.max(1,...points.map(p=>p.value)); const n=points.length;
+  const xs=i=>pad+(n<=1?(w-2*pad)/2:i*(w-2*pad)/(n-1)); const ys=v=>h-pad-(v/max)*(h-2*pad-6);
+  const pts=points.map((p,i)=>`${xs(i).toFixed(0)},${ys(p.value).toFixed(0)}`).join(" ");
+  const area=`${xs(0).toFixed(0)},${(h-pad).toFixed(0)} ${pts} ${xs(n-1).toFixed(0)},${(h-pad).toFixed(0)}`;
+  const grid=[0,.5,1].map(f=>{ const y=(h-pad-f*(h-2*pad-6)).toFixed(0); return `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="#eef2f8"/><text x="${pad-4}" y="${+y+3}" text-anchor="end" style="font-size:8px;fill:#b7c0cd">${fmt(max*f)}</text>`; }).join("");
+  const labels=points.map((p,i)=>`<text x="${xs(i).toFixed(0)}" y="${h-9}" text-anchor="middle" style="font-size:9px;fill:#8a94a6">${esc(p.label)}</text>`).join("");
+  const dots=points.map((p,i)=>`<circle cx="${xs(i).toFixed(0)}" cy="${ys(p.value).toFixed(0)}" r="2.6" fill="#1F3864"/>`).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet">${grid}<polygon points="${area}" fill="rgba(46,117,182,.13)"/><polyline points="${pts}" fill="none" stroke="#2E75B6" stroke-width="2.2"/>${dots}${labels}</svg>`; }
+function monthlyCash(){ const m={}; (REG||[]).forEach(r=>{ const d=String(r.date||r.at||"").slice(0,7); if(!/^\d{4}-\d{2}$/.test(d)) return; m[d]=(m[d]||0)+(+r.amount||0); });
+  const keys=Object.keys(m).sort(); let cum=0; return keys.map(k=>{ cum+=m[k]; const[y,mo]=k.split("-"); return {label:mo+"/"+y.slice(2),value:cum}; }); }
+async function vDash(){
+  $("#main").innerHTML=`<div class="muted" style="padding:24px">Loading executive dashboard…</div>`;
   const live=CERTS.filter(c=>c.status!=="Cancelled");
   const sum=f=>live.reduce((a,c)=>a+(f(c)||0),0);
-  const due=live.filter(c=>c.status==="Approved");
-  const pend=live.filter(c=>["Certified","Checked"].includes(c.status));
+  let ccerts=[],contracts=[],pnl=null,assets=null;
+  try{ ccerts=await api("clientcerts"); }catch(e){}
+  try{ contracts=await api("contracts"); }catch(e){}
+  try{ pnl=await api("pnl"); }catch(e){}
+  try{ assets=await api("assets"); }catch(e){}
+  const paidSup=(REG||[]).reduce((a,r)=>a+(+r.amount||0),0);
+  const certifiedInclVat=sum(c=>c.payable);
+  const dueSup=live.filter(c=>c.status==="Approved").reduce((a,c)=>a+(c.payable||0),0);
+  const retentionHeld=sum(c=>c.retention);
   const rcPend=live.filter(c=>c.status==="Paid"&&!c.receiptDone);
-  $("#main").innerHTML = `
-  <div class="kpis">
-    <div class="kpi"><div class="v">${live.length}</div><div class="l">Certificates</div></div>
-    <div class="kpi"><div class="v">${SUPS.length}</div><div class="l">Suppliers</div></div>
-    <div class="kpi" id="kpiAssets" style="cursor:pointer"><div class="v">${ASSETC}</div><div class="l">Registered assets →</div></div>
-    <div class="kpi"><div class="v">AED ${fmt(sum(c=>c.payable))}</div><div class="l">Total certified (incl VAT)</div></div>
-    <div class="kpi"><div class="v">AED ${fmt(due.reduce((a,c)=>a+(c.payable||0),0))}</div><div class="l">Approved — awaiting payment</div></div>
-    <div class="kpi"><div class="v">${pend.length}</div><div class="l">Awaiting check/approval</div></div>
-    <div class="kpi"${rcPend.length?' style="border-color:#C0392B"':''}><div class="v"${rcPend.length?' style="color:#C0392B"':''}>${rcPend.length}</div><div class="l">Receipts pending</div></div>
-  </div>
-  ${rcPend.length?`<div class="card"><h2>Receipts pending <span class="muted" style="font-size:12px;font-weight:400">— signed receipt copy + collector Emirates ID required</span></h2>${certTable(rcPend)}</div>`:""}
-  <div class="card"><h2>Needs action</h2>${certTable(live.filter(c=>c.status!=="Paid"))}</div>
-  <div class="card"><h2>Advance recovery by supplier</h2>${advTable()}</div>`;
+  const pendCheck=live.filter(c=>["Certified","Checked"].includes(c.status)).length;
+  const revenue=pnl?num(pnl.revenue):0, netDue=pnl?num(pnl.netDue):0, cost=pnl?num(pnl.cost):0, gp=pnl?num(pnl.grossProfit):0, margin=pnl?num(pnl.margin):0;
+  const contractValue=contracts.reduce((a,c)=>a+(+c.contractSum||0)+(+c.variations||0),0);
+  const contractProj={}; contracts.forEach(c=>contractProj[c.id]=c.project);
+  const maxg={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const g=+c.gross||0; if(g>(maxg[c.contractId]||0)) maxg[c.contractId]=g; });
+  const projRev={}; Object.keys(maxg).forEach(cid=>{ const p=contractProj[cid]; if(p) projRev[p]=(projRev[p]||0)+maxg[cid]; });
+  const projCost=(pnl&&pnl.byProject)||{};
+  const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost)])];
+  const projRows=projNames.map(p=>({label:p,a:projRev[p]||0,b:projCost[p]||0})).sort((x,y)=>(y.a+y.b)-(x.a+x.b)).slice(0,8);
+  const typeRows=pnl?Object.entries(pnl.byType||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value):[];
+  const grpRows=pnl?[{label:"Direct",value:num(pnl.byGroup.Direct),color:"#2E75B6"},{label:"Indirect",value:num(pnl.byGroup.Indirect),color:"#BF9000"},{label:"Overhead",value:num(pnl.byGroup.Overhead),color:"#375623"}]:[];
+  const stColors={Draft:"#8a8a8a",Certified:"#2E75B6",Checked:"#BF9000",Approved:"#375623",Paid:"#1F3864",Cancelled:"#C00000"};
+  const stCount={}; live.forEach(c=>stCount[c.status]=(stCount[c.status]||0)+1);
+  const stRows=Object.entries(stCount).map(([k,v])=>({label:k,value:v,color:stColors[k]||"#5B6B85"})).sort((a,b)=>b.value-a.value);
+  const cash=monthlyCash();
+  const assetVal=assets&&assets.summary?num(assets.summary.totalValue):0, assetCnt=assets&&assets.summary?assets.summary.count:ASSETC;
+  const gpc=gp>=0?"var(--green)":"var(--red)";
+  const kpi=(v,l,cls="",id="")=>`<div class="kpi ${cls}" ${id?`id="${id}" style="cursor:pointer"`:""}><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  $("#main").innerHTML=`
+   <div class="kpigrp">Receivables · Clients</div>
+   <div class="kpis">
+     ${kpi("AED "+fmt(revenue),"Revenue certified (ex-VAT)")}
+     ${kpi("AED "+fmt(netDue),"Net due from clients")}
+     ${kpi("AED "+fmt(contractValue),"Contract value — all projects")}
+     ${kpi(ccerts.length,"Client IPCs")}
+   </div>
+   <div class="kpigrp">Payables · Suppliers</div>
+   <div class="kpis">
+     ${kpi("AED "+fmt(certifiedInclVat),"Certified (incl VAT)")}
+     ${kpi("AED "+fmt(paidSup),"Paid to suppliers")}
+     ${kpi("AED "+fmt(dueSup),"Approved — to pay")}
+     ${kpi("AED "+fmt(retentionHeld),"Retention held")}
+   </div>
+   <div class="kpigrp">Profitability · Assets</div>
+   <div class="kpis">
+     ${kpi("AED "+fmt(cost),"Total cost incurred")}
+     ${kpi(`<span style="color:${gpc}">AED ${fmt(gp)}</span>`,"Gross profit",gp>=0?"good":"alert")}
+     ${kpi(`<span style="color:${gpc}">${fmt(margin*100)}%</span>`,"Gross margin",gp>=0?"good":"alert")}
+     ${kpi("AED "+fmt(assetVal),assetCnt+" assets · net value","","kpiAssets")}
+   </div>
+   ${(rcPend.length||pendCheck)?`<div class="kpis" style="margin-top:12px">${rcPend.length?kpi(`<span style="color:var(--red)">${rcPend.length}</span>`,"Receipts pending","alert"):""}${pendCheck?kpi(pendCheck,"Awaiting check / approval"):""}</div>`:""}
+   <div style="height:6px"></div>
+   <div class="chartgrid">
+     ${chartCard("Revenue vs Cost by project", hbars2(projRows), "certified income vs cost incurred")}
+     ${chartCard("Cost by type", donut(typeRows,"AED "+fmt(cost)))}
+   </div>
+   <div class="chartgrid">
+     ${chartCard("Cost split — Direct / Indirect / Overhead", donut(grpRows))}
+     ${chartCard("Supplier IPC status", hbars(stRows,v=>v))}
+   </div>
+   <div class="chartcard" style="margin-bottom:16px"><div class="dash-h">Cumulative cash paid to suppliers</div>${areaChart(cash)}</div>
+   ${rcPend.length?`<div class="card"><h2>Receipts pending <span class="muted" style="font-size:12px;font-weight:400">— signed receipt + collector Emirates ID required</span></h2>${certTable(rcPend)}</div>`:""}
+   <div class="card"><h2>Needs action — supplier certificates</h2>${certTable(live.filter(c=>c.status!=="Paid"))}</div>
+   <div class="card"><h2>Advance recovery by supplier</h2>${advTable()}</div>`;
   bindRows();
   const ka=$("#kpiAssets"); if(ka) ka.onclick=()=>{VIEW="assets";render();};
 }
