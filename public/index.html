@@ -253,7 +253,7 @@ async function unlockSettings(){
   catch(e){ toast(e.message); return false; }
 }
 function render(){
-  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["assets","Assets"]];
+  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["assets","Assets"]];
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
   <header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Payment Certificates</div><div class="sp"></div>
@@ -266,7 +266,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, assets:vAssets, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, assets:vAssets, settings:vSettings})[VIEW]();
 }
 
 function supById(id){ return SUPS.find(s=>s.id===id); }
@@ -1383,6 +1383,144 @@ function printClientIPC(c){
    <div class="foot">MA Group Payment Certificate System &nbsp;•&nbsp; Interim Payment Certificate (Client) &nbsp;•&nbsp; ${esc(c.no)} &nbsp;•&nbsp; Status: ${esc(c.status)}${isApproved&&c.approvedBy?" (approved by "+esc(c.approvedBy)+" on "+dmy(c.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated certificate issued under the MA Group financial control system.</div>
   </div>`;
   doPrint();
+}
+
+/* ---------- expenses (daily cost log) & P&L ---------- */
+let COSTMETA=null, EXP=[];
+async function loadCostMeta(){ if(!COSTMETA){ try{ COSTMETA=await api("costmeta"); }catch(e){ COSTMETA={costTypes:[],categories:[],statuses:[],projects:[]}; } } return COSTMETA; }
+async function vExpenses(){
+  const can=["CEO","PM","QS","Accounts","Secretary"].includes(ME.role);
+  await loadCostMeta();
+  const projOpts=`<option value="">All projects</option>`+COSTMETA.projects.map(p=>`<option>${esc(p)}</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Daily Cost Log</h2>
+     <span class="muted">project expenses — the source of truth for the P&amp;L. Supplier IPCs auto-post here; add anything else manually.</span>
+     <div class="right flex">${can?`<button class="btn gold" id="xNew">+ Add expense</button>`:""}<button class="btn ghost" id="xCsv">Export CSV</button></div></div>
+   <div class="flex" style="margin:10px 0;flex-wrap:wrap">
+     <select id="xProj" style="max-width:280px">${projOpts}</select>
+     <input id="xQ" placeholder="Search supplier / description / PO / area…" style="max-width:280px">
+     <select id="xType"><option value="">All cost types</option>${COSTMETA.costTypes.map(t=>`<option>${esc(t.name)}</option>`).join("")}</select>
+     <span class="muted" id="xCount"></span></div>
+   <div id="xKpis"></div>
+   <div id="xList" class="muted">Loading…</div></div>`;
+  if(can) $("#xNew").onclick=()=>expenseForm(null);
+  $("#xCsv").onclick=exportExpensesCsv;
+  ["xProj","xQ","xType"].forEach(id=>$("#"+id).addEventListener("input",renderExpList));
+  await reloadExp();
+}
+async function reloadExp(){ try{ EXP=await api("expenses"); }catch(e){ $("#xList").textContent=e.message; return; } renderExpList(); }
+function expFiltered(){
+  const proj=$("#xProj")?.value||"", q=($("#xQ")?.value||"").toLowerCase(), ty=$("#xType")?.value||"";
+  return EXP.filter(e=> (!proj||e.project===proj) && (!ty||e.costType===ty) &&
+    (!q || (e.supplier+" "+e.description+" "+e.poRef+" "+e.area+" "+e.category+" "+e.boqRef).toLowerCase().includes(q)) );
+}
+function renderExpList(){
+  const list=expFiltered();
+  const totCost=list.reduce((a,e)=>a+num(e.amount),0), totPaid=list.reduce((a,e)=>a+num(e.paid),0), totBud=list.reduce((a,e)=>a+num(e.budgeted),0);
+  $("#xCount").textContent=`${list.length} of ${EXP.length} shown`;
+  $("#xKpis").innerHTML=`<div class="kpis"><div class="kpi"><div class="v">AED ${fmt(totCost)}</div><div class="l">Cost (invoiced)</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(totPaid)}</div><div class="l">Paid (cash out)</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(Math.max(0,totCost-totPaid))}</div><div class="l">Outstanding to pay</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(totBud)}</div><div class="l">Budgeted</div></div></div>`;
+  const can=["CEO","PM"].includes(ME.role);
+  if(!list.length){ $("#xList").innerHTML=`<div class="muted">No expenses yet. Click “Add expense” to log a cost, or approve a Supplier IPC and it will appear here automatically.</div>`; return; }
+  $("#xList").classList.remove("muted");
+  $("#xList").innerHTML=`<table><tr><th>Date</th><th>Project</th><th>Area</th><th>Category</th><th>Cost Type</th><th>Supplier</th><th>Description</th><th class="num">Cost</th><th>Status</th><th class="num">Paid</th><th>Src</th><th></th></tr>
+    ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td>${esc(e.category)}</td><td>${esc(e.costType)}</td><td>${esc(e.supplier||"—")}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
+  $("#xList").querySelectorAll("[data-x]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del) return; expenseForm(EXP.find(x=>x.id===r.dataset.x)); });
+  $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); e.stopPropagation(); if(!confirm("Delete this expense line?")) return;
+    try{ await api("expense/"+encodeURIComponent(a.dataset.del),{method:"DELETE"}); toast("Deleted"); reloadExp(); }catch(x){ toast(x.message); } });
+}
+function expenseForm(x){
+  const isNew=!x; x=x||{status:"Pending",date:new Date().toISOString().slice(0,10)};
+  const linked=x.source==="supplier-ipc";
+  const projList=[...new Set([...(COSTMETA.projects||[]), x.project].filter(Boolean))];
+  const opt=(arr,sel)=>arr.map(v=>`<option ${v===sel?"selected":""}>${esc(v)}</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
+   ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its area / category / cost type here.</div>`:""}
+   <div class="grid" style="margin-top:10px">
+     <div><label>Project</label><input id="x_project" list="x_projs" value="${esc(x.project||"")}" placeholder="type or pick"><datalist id="x_projs">${projList.map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div>
+     <div><label>Date</label><input id="x_date" type="date" value="${esc((x.date||"").slice(0,10))}"></div>
+     <div><label>Area / Building</label><input id="x_area" value="${esc(x.area||"")}" placeholder="e.g. Operation Building"></div>
+     <div><label>Category / Trade</label><select id="x_category">${opt(COSTMETA.categories,x.category||"General / Other")}</select></div>
+     <div><label>Cost Type</label><select id="x_costType"${linked?"":""}>${opt(COSTMETA.costTypes.map(t=>t.name),x.costType||"Material Supply")}</select></div>
+     <div><label>Supplier / Subcontractor</label><input id="x_supplier" value="${esc(x.supplier||"")}" ${linked?"readonly":""}></div>
+     <div style="grid-column:1/-1"><label>Description</label><input id="x_description" value="${esc(x.description||"")}"></div>
+     <div><label>PO / Ref</label><input id="x_poRef" value="${esc(x.poRef||"")}"></div>
+     <div><label>BOQ Ref</label><input id="x_boqRef" value="${esc(x.boqRef||"")}"></div>
+     <div><label>Budgeted (AED)</label><input id="x_budgeted" type="number" step="0.01" value="${x.budgeted??""}"></div>
+     <div><label>Cost / Invoice (AED, excl VAT)</label><input id="x_amount" type="number" step="0.01" value="${x.amount??""}" ${linked?"readonly":""}></div>
+     <div><label>Payment Status</label><select id="x_status">${opt(COSTMETA.statuses,x.status||"Pending")}</select></div>
+     <div><label>Paid (AED)</label><input id="x_paid" type="number" step="0.01" value="${x.paid??""}" ${linked?"readonly":""}></div>
+     <div style="grid-column:1/-1"><label>Notes</label><input id="x_notes" value="${esc(x.notes||"")}"></div>
+   </div>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="x_save">${isNew?"Add expense":"Save"}</button><button class="btn ghost" id="x_back">Back</button></div></div>`;
+  $("#x_back").onclick=()=>{VIEW="expenses";render();};
+  $("#x_save").onclick=async ()=>{ const g=id=>{const el=$("#x_"+id);return el?el.value:"";};
+    const body={ project:g("project").trim(), date:g("date"), area:g("area"), category:g("category"), costType:g("costType"),
+      supplier:g("supplier"), description:g("description"), poRef:g("poRef"), boqRef:g("boqRef"),
+      budgeted:+g("budgeted")||0, amount:+g("amount")||0, status:g("status"), paid:+g("paid")||0, notes:g("notes") };
+    if(!isNew) body.id=x.id;
+    if(!body.project){ toast("Project is required"); return; }
+    try{ await api("expense",{method:"POST",body}); COSTMETA=null; toast("Saved"); VIEW="expenses"; render(); }catch(e){ toast(e.message); } };
+}
+function exportExpensesCsv(){
+  const list=expFiltered();
+  const rows=[["Date","Project","Area","Category","CostType","Supplier","Description","PO/Ref","BOQ","Budgeted","Cost","Status","Paid","Source","CertNo"]]
+    .concat(list.map(e=>[e.date,e.project,e.area,e.category,e.costType,e.supplier,e.description,e.poRef,e.boqRef,e.budgeted,e.amount,e.status,e.paid,e.source,e.supplierCertNo||""]));
+  const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cost_Log.csv"; a.click();
+}
+async function vPnl(){
+  await loadCostMeta();
+  const projOpts=`<option value="">All projects (group)</option>`+COSTMETA.projects.map(p=>`<option>${esc(p)}</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Project P&amp;L</h2>
+     <span class="muted">revenue (client IPCs certified) vs cost (daily cost log)</span>
+     <div class="right flex"><select id="pProj" style="max-width:300px">${projOpts}</select><button class="btn ghost" id="pCsv">Export CSV</button></div></div>
+   <div id="pBody" class="muted" style="margin-top:10px">Loading…</div></div>`;
+  const load=async ()=>{ const proj=$("#pProj").value; $("#pBody").innerHTML=`<div class="muted">Loading…</div>`;
+    let d; try{ d=await api("pnl"+(proj?("?project="+encodeURIComponent(proj)):"")); }catch(e){ $("#pBody").textContent=e.message; return; } renderPnl(d); };
+  $("#pProj").onchange=load; await load();
+}
+let PNL=null;
+function renderPnl(d){
+  PNL=d;
+  const g=d.byGroup||{}, direct=num(g.Direct), indirect=num(g.Indirect), overhead=num(g.Overhead);
+  const marginPct=(d.margin*100);
+  const mColor=d.grossProfit>=0?"var(--green)":"var(--red)";
+  const typeRows=Object.entries(d.byType||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td><td class="num">${d.cost?fmt(v/d.cost*100)+"%":"—"}</td></tr>`).join("")||`<tr><td colspan="3" class="muted">No costs logged yet.</td></tr>`;
+  const catRows=Object.entries(d.byCat||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td></tr>`).join("");
+  const projRows=Object.entries(d.byProject||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td></tr>`).join("");
+  $("#pBody").classList.remove("muted");
+  $("#pBody").innerHTML=`
+   <div class="kpis">
+     <div class="kpi"><div class="v">AED ${fmt(d.revenue)}</div><div class="l">Revenue certified (ex-VAT)</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.cost)}</div><div class="l">Total cost incurred</div></div>
+     <div class="kpi" style="border-top-color:${mColor}"><div class="v" style="color:${mColor}">AED ${fmt(d.grossProfit)}</div><div class="l">Gross profit</div></div>
+     <div class="kpi" style="border-top-color:${mColor}"><div class="v" style="color:${mColor}">${fmt(marginPct)}%</div><div class="l">Gross margin</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.paidOut)}</div><div class="l">Cash paid out</div></div>
+   </div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
+     <div class="card" style="margin:0"><h3>P&amp;L summary</h3>
+       <table><tr><td class="lab">Revenue certified (ex-VAT)</td><td class="num"><b>${fmt(d.revenue)}</b></td></tr>
+        <tr><td class="lab">Less: Direct costs</td><td class="num">(${fmt(direct)})</td></tr>
+        <tr><td class="lab">Less: Indirect costs</td><td class="num">(${fmt(indirect)})</td></tr>
+        <tr><td class="lab">Less: Overheads</td><td class="num">(${fmt(overhead)})</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>Gross Profit</td><td class="num" style="color:${mColor}">${fmt(d.grossProfit)}</td></tr>
+        <tr><td class="lab">Gross Margin %</td><td class="num">${fmt(marginPct)}%</td></tr>
+        <tr><td class="lab">Net amount still due from client</td><td class="num">${fmt(d.netDue)}</td></tr>
+        <tr><td class="lab">Cash paid to suppliers</td><td class="num">${fmt(d.paidOut)}</td></tr></table></div>
+     <div class="card" style="margin:0"><h3>Cost by type</h3>
+       <table><tr><th>Cost Type</th><th class="num">AED</th><th class="num">%</th></tr>${typeRows}</table></div>
+   </div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
+     <div class="card" style="margin:0"><h3>Cost by category / trade</h3><table><tr><th>Category</th><th class="num">AED</th></tr>${catRows||`<tr><td class="muted">—</td><td></td></tr>`}</table></div>
+     <div class="card" style="margin:0"><h3>${d.project?"Daily cost trend":"Cost by project"}</h3>
+       <table><tr><th>${d.project?"Date":"Project"}</th><th class="num">${d.project?"Cost":"Cost"}</th>${d.project?'<th class="num">Paid</th>':""}</tr>
+       ${d.project?(d.byDate||[]).slice(-30).reverse().map(x=>`<tr><td>${dmy(x.date)}</td><td class="num">${fmt(x.cost)}</td><td class="num">${fmt(x.paid)}</td></tr>`).join(""):projRows}</table></div>
+   </div>`;
+  $("#pCsv").onclick=()=>{ const rows=[["Metric","AED"],["Project",d.scope],["Revenue certified",d.revenue],["Direct",direct],["Indirect",indirect],["Overhead",overhead],["Total cost",d.cost],["Gross profit",d.grossProfit],["Gross margin %",fmt(marginPct)],["Cash paid out",d.paidOut],["Net due from client",d.netDue],[],["Cost Type","AED"]].concat(Object.entries(d.byType||{}).map(([k,v])=>[k,v]));
+    const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_PnL_"+(d.project||"all")+".csv"; a.click(); };
 }
 
 /* ---------- asset registry ---------- */

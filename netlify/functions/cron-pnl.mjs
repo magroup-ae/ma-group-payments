@@ -1,4 +1,4 @@
-import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);
+import{createRequire as __cr}from "module";const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -728,14 +728,14 @@ var require_fetch = __commonJS({
         if (typeof options.body.pipe === "function") {
           headers["Transfer-Encoding"] = "chunked";
           body = options.body;
-          body.on("error", (err2) => {
+          body.on("error", (err) => {
             if (finished) {
               return;
             }
             finished = true;
-            err2.code = errors.EFETCH;
-            err2.sourceUrl = url;
-            fetchRes.emit("error", err2);
+            err.code = errors.EFETCH;
+            err.sourceUrl = url;
+            fetchRes.emit("error", err);
           });
         } else {
           if (options.body instanceof Buffer) {
@@ -803,20 +803,20 @@ var require_fetch = __commonJS({
           }
           finished = true;
           req.abort();
-          const err2 = new Error("Request Timeout");
-          err2.code = errors.EFETCH;
-          err2.sourceUrl = url;
-          fetchRes.emit("error", err2);
+          const err = new Error("Request Timeout");
+          err.code = errors.EFETCH;
+          err.sourceUrl = url;
+          fetchRes.emit("error", err);
         });
       }
-      req.on("error", (err2) => {
+      req.on("error", (err) => {
         if (finished) {
           return;
         }
         finished = true;
-        err2.code = errors.EFETCH;
-        err2.sourceUrl = url;
-        fetchRes.emit("error", err2);
+        err.code = errors.EFETCH;
+        err.sourceUrl = url;
+        fetchRes.emit("error", err);
       });
       req.on("response", (res) => {
         let inflate;
@@ -838,10 +838,10 @@ var require_fetch = __commonJS({
           options.redirects++;
           if (options.redirects > options.maxRedirects) {
             finished = true;
-            const err2 = new Error("Maximum redirect count exceeded");
-            err2.code = errors.EFETCH;
-            err2.sourceUrl = url;
-            fetchRes.emit("error", err2);
+            const err = new Error("Maximum redirect count exceeded");
+            err.code = errors.EFETCH;
+            err.sourceUrl = url;
+            fetchRes.emit("error", err);
             req.abort();
             return;
           }
@@ -865,33 +865,33 @@ var require_fetch = __commonJS({
         fetchRes.headers = res.headers;
         if (res.statusCode >= 300 && !options.allowErrorResponse) {
           finished = true;
-          const err2 = new Error("Invalid status code " + res.statusCode);
-          err2.code = errors.EFETCH;
-          err2.sourceUrl = url;
-          fetchRes.emit("error", err2);
+          const err = new Error("Invalid status code " + res.statusCode);
+          err.code = errors.EFETCH;
+          err.sourceUrl = url;
+          fetchRes.emit("error", err);
           req.abort();
           return;
         }
-        res.on("error", (err2) => {
+        res.on("error", (err) => {
           if (finished) {
             return;
           }
           finished = true;
-          err2.code = errors.EFETCH;
-          err2.sourceUrl = url;
-          fetchRes.emit("error", err2);
+          err.code = errors.EFETCH;
+          err.sourceUrl = url;
+          fetchRes.emit("error", err);
           req.abort();
         });
         if (inflate) {
           res.pipe(inflate).pipe(fetchRes);
-          inflate.on("error", (err2) => {
+          inflate.on("error", (err) => {
             if (finished) {
               return;
             }
             finished = true;
-            err2.code = errors.EFETCH;
-            err2.sourceUrl = url;
-            fetchRes.emit("error", err2);
+            err.code = errors.EFETCH;
+            err.sourceUrl = url;
+            fetchRes.emit("error", err);
             req.abort();
           });
         } else {
@@ -905,11 +905,11 @@ var require_fetch = __commonJS({
               return body.pipe(req);
             }
             req.write(body);
-          } catch (err2) {
+          } catch (err) {
             finished = true;
-            err2.code = errors.EFETCH;
-            err2.sourceUrl = url;
-            fetchRes.emit("error", err2);
+            err.code = errors.EFETCH;
+            err.sourceUrl = url;
+            fetchRes.emit("error", err);
             return;
           }
         }
@@ -959,9 +959,9 @@ var require_shared = __commonJS({
         return callback(null, []);
       }
       const dnsResolver = dns.Resolver ? new dns.Resolver(options) : dns;
-      dnsResolver["resolve" + family](hostname, (err2, addresses) => {
-        if (err2) {
-          switch (err2.code) {
+      dnsResolver["resolve" + family](hostname, (err, addresses) => {
+        if (err) {
+          switch (err.code) {
             case dns.NODATA:
             case dns.NOTFOUND:
             case dns.NOTIMP:
@@ -971,7 +971,7 @@ var require_shared = __commonJS({
             case "EAI_AGAIN":
               return callback(null, []);
           }
-          return callback(err2);
+          return callback(err);
         }
         return callback(null, Array.isArray(addresses) ? addresses : [].concat(addresses || []));
       });
@@ -1040,15 +1040,15 @@ var require_shared = __commonJS({
       let ipv6Addresses = [];
       let ipv4Error = null;
       let ipv6Error = null;
-      resolve(4, options.host, options, (err2, addresses) => {
-        if (err2) {
-          ipv4Error = err2;
+      resolve(4, options.host, options, (err, addresses) => {
+        if (err) {
+          ipv4Error = err;
         } else {
           ipv4Addresses = addresses || [];
         }
-        resolve(6, options.host, options, (err3, addresses2) => {
-          if (err3) {
-            ipv6Error = err3;
+        resolve(6, options.host, options, (err2, addresses2) => {
+          if (err2) {
+            ipv6Error = err2;
           } else {
             ipv6Addresses = addresses2 || [];
           }
@@ -1085,8 +1085,8 @@ var require_shared = __commonJS({
             }
           }
           try {
-            dns.lookup(options.host, { all: true }, (err4, addresses3) => {
-              if (err4) {
+            dns.lookup(options.host, { all: true }, (err3, addresses3) => {
+              if (err3) {
                 if (cached) {
                   dnsCache.set(options.host, {
                     value: cached.value,
@@ -1096,11 +1096,11 @@ var require_shared = __commonJS({
                     null,
                     formatDNSValue(cached.value, {
                       cached: true,
-                      error: err4
+                      error: err3
                     })
                   );
                 }
-                return callback(err4);
+                return callback(err3);
               }
               const supportedAddresses = addresses3 ? addresses3.filter((addr) => isFamilySupported(addr.family)).map((addr) => addr.address) : [];
               if (addresses3 && addresses3.length && !supportedAddresses.length) {
@@ -1237,9 +1237,9 @@ var require_shared = __commonJS({
     };
     module.exports.callbackPromise = (resolve2, reject) => function() {
       const args = Array.from(arguments);
-      const err2 = args.shift();
-      if (err2) {
-        reject(err2);
+      const err = args.shift();
+      if (err) {
+        reject(err);
       } else {
         resolve2(...args);
       }
@@ -1323,9 +1323,9 @@ var require_shared = __commonJS({
       }
       if (typeof content === "object") {
         if (typeof content.pipe === "function") {
-          return resolveStream(content, (err2, value) => {
-            if (err2) {
-              return callback(err2);
+          return resolveStream(content, (err, value) => {
+            if (err) {
+              return callback(err);
             }
             if (data[key].content) {
               data[key].content = value;
@@ -1337,9 +1337,9 @@ var require_shared = __commonJS({
         } else if (/^https?:\/\//i.test(content.path || content.href)) {
           if (options.disableUrlAccess) {
             return setImmediate(() => {
-              const err2 = new Error("Url access rejected for " + (content.path || content.href));
-              err2.code = errors.EURLACCESS;
-              callback(err2);
+              const err = new Error("Url access rejected for " + (content.path || content.href));
+              err.code = errors.EURLACCESS;
+              callback(err);
             });
           }
           return resolveStream(nmfetch(content.path || content.href, { headers: content.httpHeaders, tls: content.tls }), callback);
@@ -1349,9 +1349,9 @@ var require_shared = __commonJS({
         } else if (content.path) {
           if (options.disableFileAccess) {
             return setImmediate(() => {
-              const err2 = new Error("File access rejected for " + content.path);
-              err2.code = errors.EFILEACCESS;
-              callback(err2);
+              const err = new Error("File access rejected for " + content.path);
+              err.code = errors.EFILEACCESS;
+              callback(err);
             });
           }
           return resolveStream(fs.createReadStream(content.path), callback);
@@ -1396,12 +1396,12 @@ var require_shared = __commonJS({
       let responded = false;
       const chunks = [];
       let chunklen = 0;
-      stream.on("error", (err2) => {
+      stream.on("error", (err) => {
         if (responded) {
           return;
         }
         responded = true;
-        callback(err2);
+        callback(err);
       });
       stream.on("readable", () => {
         let chunk;
@@ -4958,9 +4958,9 @@ var require_mime_node = __commonJS({
       setContent(content) {
         this.content = content;
         if (typeof this.content.pipe === "function") {
-          this._contentErrorHandler = (err2) => {
+          this._contentErrorHandler = (err) => {
             this.content.removeListener("error", this._contentErrorHandler);
-            this.content = err2;
+            this.content = err;
           };
           this.content.once("error", this._contentErrorHandler);
         } else if (typeof this.content === "string") {
@@ -4989,12 +4989,12 @@ var require_mime_node = __commonJS({
             buflen += chunk.length;
           }
         });
-        stream.once("error", (err2) => {
+        stream.once("error", (err) => {
           if (returned) {
             return;
           }
           returned = true;
-          return callback(err2);
+          return callback(err);
         });
         stream.once("end", (chunk) => {
           if (returned) {
@@ -5140,23 +5140,23 @@ var require_mime_node = __commonJS({
         const stream = new PassThrough(options);
         let outputStream = stream;
         let transform;
-        this.stream(stream, options, (err2) => {
-          if (err2) {
-            outputStream.emit("error", err2);
+        this.stream(stream, options, (err) => {
+          if (err) {
+            outputStream.emit("error", err);
             return;
           }
           stream.end();
         });
         for (let i = 0, len = this._transforms.length; i < len; i++) {
           transform = typeof this._transforms[i] === "function" ? this._transforms[i]() : this._transforms[i];
-          outputStream.once("error", (err2) => {
-            transform.emit("error", err2);
+          outputStream.once("error", (err) => {
+            transform.emit("error", err);
           });
           outputStream = outputStream.pipe(transform);
         }
         transform = new LastNewline();
-        outputStream.once("error", (err2) => {
-          transform.emit("error", err2);
+        outputStream.once("error", (err) => {
+          transform.emit("error", err);
         });
         outputStream = outputStream.pipe(transform);
         for (let i = 0, len = this._processFuncs.length; i < len; i++) {
@@ -5167,7 +5167,7 @@ var require_mime_node = __commonJS({
           const winbreak = ["win", "windows", "dos", "\r\n"].includes(this.newline.toString().toLowerCase());
           const newlineTransform = winbreak ? new LeWindows() : new LeUnix();
           const stream2 = outputStream.pipe(newlineTransform);
-          outputStream.on("error", (err2) => stream2.emit("error", err2));
+          outputStream.on("error", (err) => stream2.emit("error", err));
           return stream2;
         }
         return outputStream;
@@ -5197,12 +5197,12 @@ var require_mime_node = __commonJS({
         let contentStream;
         let localStream;
         let returned = false;
-        const callback = (err2) => {
+        const callback = (err) => {
           if (returned) {
             return;
           }
           returned = true;
-          done(err2);
+          done(err);
         };
         const finalize = () => {
           let childId = 0;
@@ -5213,9 +5213,9 @@ var require_mime_node = __commonJS({
             }
             const child = this.childNodes[childId++];
             outputStream.write((childId > 1 ? "\r\n" : "") + "--" + this.boundary + "\r\n");
-            child.stream(outputStream, options, (err2) => {
-              if (err2) {
-                return callback(err2);
+            child.stream(outputStream, options, (err) => {
+              if (err) {
+                return callback(err);
               }
               setImmediate(processChildNode);
             });
@@ -5233,7 +5233,7 @@ var require_mime_node = __commonJS({
             }
             if (typeof this.content.pipe === "function") {
               this.content.removeListener("error", this._contentErrorHandler);
-              this._contentErrorHandler = (err2) => callback(err2);
+              this._contentErrorHandler = (err) => callback(err);
               this.content.once("error", this._contentErrorHandler);
             }
             const createStream = () => {
@@ -5243,7 +5243,7 @@ var require_mime_node = __commonJS({
                   end: false
                 });
                 contentStream.once("end", finalize);
-                contentStream.once("error", (err2) => callback(err2));
+                contentStream.once("error", (err) => callback(err));
                 localStream = this._getStream(this.content);
                 localStream.pipe(contentStream);
               } else {
@@ -5253,19 +5253,19 @@ var require_mime_node = __commonJS({
                 });
                 localStream.once("end", finalize);
               }
-              localStream.once("error", (err2) => callback(err2));
+              localStream.once("error", (err) => callback(err));
             };
             if (this.content._resolve) {
               const chunks = [];
               let chunklen = 0;
               let returned2 = false;
               const sourceStream = this._getStream(this.content);
-              sourceStream.on("error", (err2) => {
+              sourceStream.on("error", (err) => {
                 if (returned2) {
                   return;
                 }
                 returned2 = true;
-                callback(err2);
+                callback(err);
               });
               sourceStream.on("readable", () => {
                 let chunk;
@@ -5302,7 +5302,7 @@ var require_mime_node = __commonJS({
             raw.pipe(outputStream, {
               end: false
             });
-            raw.on("error", (err2) => outputStream.emit("error", err2));
+            raw.on("error", (err) => outputStream.emit("error", err));
             raw.on("end", finalize);
           });
         } else {
@@ -5409,9 +5409,9 @@ var require_mime_node = __commonJS({
       setRaw(raw) {
         this._raw = raw;
         if (this._raw && typeof this._raw.pipe === "function") {
-          this._contentErrorHandler = (err2) => {
+          this._contentErrorHandler = (err) => {
             this._raw.removeListener("error", this._contentErrorHandler);
-            this._raw = err2;
+            this._raw = err;
           };
           this._raw.once("error", this._contentErrorHandler);
         }
@@ -5444,9 +5444,9 @@ var require_mime_node = __commonJS({
           if (this.disableFileAccess) {
             contentStream = new PassThrough();
             setImmediate(() => {
-              const err2 = new Error("File access rejected for " + content.path);
-              err2.code = errors.EFILEACCESS;
-              contentStream.emit("error", err2);
+              const err = new Error("File access rejected for " + content.path);
+              err.code = errors.EFILEACCESS;
+              contentStream.emit("error", err);
             });
             return contentStream;
           }
@@ -5456,9 +5456,9 @@ var require_mime_node = __commonJS({
           if (this.disableUrlAccess) {
             contentStream = new PassThrough();
             setImmediate(() => {
-              const err2 = new Error("Url access rejected for " + content.href);
-              err2.code = errors.EURLACCESS;
-              contentStream.emit("error", err2);
+              const err = new Error("Url access rejected for " + content.href);
+              err.code = errors.EURLACCESS;
+              contentStream.emit("error", err);
             });
             return contentStream;
           }
@@ -6546,10 +6546,10 @@ var require_dkim = __commonJS({
         this.output = output;
         this.output.usingCache = false;
         this.hasErrored = false;
-        this.input.on("error", (err2) => {
+        this.input.on("error", (err) => {
           this.hasErrored = true;
           this.cleanup();
-          output.emit("error", err2);
+          output.emit("error", err);
         });
       }
       cleanup() {
@@ -6560,9 +6560,9 @@ var require_dkim = __commonJS({
       }
       createReadCache() {
         this.cache = fs.createReadStream(this.cachePath);
-        this.cache.once("error", (err2) => {
+        this.cache.once("error", (err) => {
           this.cleanup();
-          this.output.emit("error", err2);
+          this.output.emit("error", err);
         });
         this.cache.once("close", () => {
           this.cleanup();
@@ -6616,7 +6616,7 @@ var require_dkim = __commonJS({
       createWriteCache() {
         this.output.usingCache = true;
         this.cache = fs.createWriteStream(this.cachePath);
-        this.cache.once("error", (err2) => {
+        this.cache.once("error", (err) => {
           this.cleanup();
           this.relaxedBody.unpipe(this.cache);
           this.relaxedBody.on("readable", () => {
@@ -6624,7 +6624,7 @@ var require_dkim = __commonJS({
             }
           });
           this.hasErrored = true;
-          this.output.emit("error", err2);
+          this.output.emit("error", err);
         });
         this.cache.once("close", () => {
           this.sendSignedOutput();
@@ -6725,9 +6725,9 @@ var require_http_proxy_client = __commonJS({
       tlsOptions = tlsOptions || {};
       destinationPort = Number(destinationPort) || 0;
       if (!destinationPort || /[\r\n]/.test(destinationHost)) {
-        const err2 = new Error("Invalid proxy destination");
-        err2.code = errors.EPROXY;
-        return setImmediate(() => callback(err2));
+        const err = new Error("Invalid proxy destination");
+        err.code = errors.EPROXY;
+        return setImmediate(() => callback(err));
       }
       const proxy = urllib.parse(proxyUrl);
       const connectOptions = {
@@ -6743,7 +6743,7 @@ var require_http_proxy_client = __commonJS({
       }
       let socket;
       let finished = false;
-      const tempSocketErr = (err2) => {
+      const tempSocketErr = (err) => {
         if (finished) {
           return;
         }
@@ -6752,12 +6752,12 @@ var require_http_proxy_client = __commonJS({
           socket.destroy();
         } catch (_E) {
         }
-        callback(err2);
+        callback(err);
       };
       const timeoutErr = () => {
-        const err2 = new Error("Proxy socket timed out");
-        err2.code = "ETIMEDOUT";
-        tempSocketErr(err2);
+        const err = new Error("Proxy socket timed out");
+        err.code = "ETIMEDOUT";
+        tempSocketErr(err);
       };
       socket = connect(connectOptions, () => {
         if (finished) {
@@ -6798,9 +6798,9 @@ var require_http_proxy_client = __commonJS({
                 socket.destroy();
               } catch (_E) {
               }
-              const err2 = new Error("Invalid response from proxy" + (match && ": " + match[1] || ""));
-              err2.code = errors.EPROXY;
-              return callback(err2);
+              const err = new Error("Invalid response from proxy" + (match && ": " + match[1] || ""));
+              err.code = errors.EPROXY;
+              return callback(err);
             }
             socket.removeListener("error", tempSocketErr);
             socket.removeListener("timeout", timeoutErr);
@@ -6809,9 +6809,9 @@ var require_http_proxy_client = __commonJS({
           }
           if (headers.length > MAX_RESPONSE_HEADER_BYTES) {
             socket.removeListener("data", onSocketData);
-            const err2 = new Error("Proxy response headers too large");
-            err2.code = errors.EPROXY;
-            return tempSocketErr(err2);
+            const err = new Error("Proxy response headers too large");
+            err.code = errors.EPROXY;
+            return tempSocketErr(err);
           }
         };
         socket.on("data", onSocketData);
@@ -6921,9 +6921,9 @@ var require_mail_message = __commonJS({
           shared.resolveContent(
             ...args,
             { disableFileAccess: this.data.disableFileAccess, disableUrlAccess: this.data.disableUrlAccess },
-            (err2, value) => {
-              if (err2) {
-                return callback(err2);
+            (err, value) => {
+              if (err) {
+                return callback(err);
               }
               const node = {
                 content: value
@@ -6945,9 +6945,9 @@ var require_mail_message = __commonJS({
       normalize(callback) {
         const envelope = this.data.envelope || this.message.getEnvelope();
         const messageId = this.message.messageId();
-        this.resolveAll((err2, data) => {
-          if (err2) {
-            return callback(err2);
+        this.resolveAll((err, data) => {
+          if (err) {
+            return callback(err);
           }
           data.envelope = envelope;
           data.messageId = messageId;
@@ -7144,16 +7144,16 @@ var require_mailer = __commonJS({
               log.message
             );
           });
-          this.transporter.on("error", (err2) => {
+          this.transporter.on("error", (err) => {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "transport"
               },
               "Transport Error: %s",
-              err2.message
+              err.message
             );
-            this.emit("error", err2);
+            this.emit("error", err);
           });
           this.transporter.on("idle", (...args) => {
             this.emit("idle", ...args);
@@ -7224,35 +7224,35 @@ var require_mailer = __commonJS({
           this.transporter.name,
           this.transporter.version
         );
-        this._processPlugins("compile", mail, (err2) => {
-          if (err2) {
+        this._processPlugins("compile", mail, (err) => {
+          if (err) {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "plugin",
                 action: "compile"
               },
               "PluginCompile Error: %s",
-              err2.message
+              err.message
             );
-            return callback(err2);
+            return callback(err);
           }
           mail.message = new MailComposer(mail.data).compile();
           mail.setMailerHeader();
           mail.setPriorityHeaders();
           mail.setListHeaders();
-          this._processPlugins("stream", mail, (err3) => {
-            if (err3) {
+          this._processPlugins("stream", mail, (err2) => {
+            if (err2) {
               this.logger.error(
                 {
-                  err: err3,
+                  err: err2,
                   tnx: "plugin",
                   action: "stream"
                 },
                 "PluginStream Error: %s",
-                err3.message
+                err2.message
               );
-              return callback(err3);
+              return callback(err2);
             }
             if (mail.data.dkim || this.dkim) {
               mail.message.processFunc((input) => {
@@ -7333,9 +7333,9 @@ var require_mailer = __commonJS({
             }
           }
           const plugin = curplugins[pos++];
-          plugin(mail, (err2) => {
-            if (err2) {
-              return callback(err2);
+          plugin(mail, (err) => {
+            if (err) {
+              return callback(err);
             }
             processPlugins();
           });
@@ -7358,9 +7358,9 @@ var require_mailer = __commonJS({
             // Connect using a HTTP CONNECT method
             case "http":
             case "https":
-              httpProxyClient(proxy.href, options.port, options.host, this.options.tls || {}, (err3, socket) => {
-                if (err3) {
-                  return callback(err3);
+              httpProxyClient(proxy.href, options.port, options.host, this.options.tls || {}, (err2, socket) => {
+                if (err2) {
+                  return callback(err2);
                 }
                 return callback(null, {
                   connection: socket
@@ -7372,9 +7372,9 @@ var require_mailer = __commonJS({
             case "socks4":
             case "socks4a": {
               if (!this.meta.has("proxy_socks_module")) {
-                let err3 = new Error("Socks module not loaded");
-                err3.code = errors.EPROXY;
-                return callback(err3);
+                let err2 = new Error("Socks module not loaded");
+                err2.code = errors.EPROXY;
+                return callback(err2);
               }
               const connect = (ipaddress) => {
                 const proxyV2 = !!this.meta.get("proxy_socks_module").SocksClient;
@@ -7407,9 +7407,9 @@ var require_mailer = __commonJS({
                     };
                   }
                 }
-                socksClient.createConnection(connectionOpts, (err3, info) => {
-                  if (err3) {
-                    return callback(err3);
+                socksClient.createConnection(connectionOpts, (err2, info) => {
+                  if (err2) {
+                    return callback(err2);
                   }
                   return callback(null, {
                     connection: info.socket || info
@@ -7419,17 +7419,17 @@ var require_mailer = __commonJS({
               if (net.isIP(proxy.hostname)) {
                 return connect(proxy.hostname);
               }
-              return dns.resolve(proxy.hostname, (err3, address) => {
-                if (err3) {
-                  return callback(err3);
+              return dns.resolve(proxy.hostname, (err2, address) => {
+                if (err2) {
+                  return callback(err2);
                 }
                 connect(Array.isArray(address) ? address[0] : address);
               });
             }
           }
-          let err2 = new Error("Unknown proxy configuration");
-          err2.code = errors.EPROXY;
-          callback(err2);
+          let err = new Error("Unknown proxy configuration");
+          err.code = errors.EPROXY;
+          callback(err);
         };
       }
       _convertDataImages(mail, callback) {
@@ -7440,9 +7440,9 @@ var require_mailer = __commonJS({
           mail.data,
           "html",
           { disableFileAccess: mail.data.disableFileAccess, disableUrlAccess: mail.data.disableUrlAccess },
-          (err2, html) => {
-            if (err2) {
-              return callback(err2);
+          (err, html) => {
+            if (err) {
+              return callback(err);
             }
             let cidCounter = 0;
             html = (html || "").toString().replace(
@@ -7644,7 +7644,7 @@ var require_smtp_connection = __commonJS({
         this._onSocketClose = () => this._onClose();
         this._onSocketEnd = () => this._onEnd();
         this._onSocketTimeout = () => this._onTimeout();
-        this._onConnectionSocketError = (err2) => this._onConnectionError(err2, "ESOCKET");
+        this._onConnectionSocketError = (err) => this._onConnectionError(err, "ESOCKET");
         this._connectionAttemptId = 0;
       }
       /**
@@ -7681,9 +7681,9 @@ var require_smtp_connection = __commonJS({
           this._setupConnectionHandlers();
           if (this.secureConnection && !this.alreadySecured) {
             setImmediate(
-              () => this._upgradeConnection((err2) => {
-                if (err2) {
-                  this._onError(new Error("Error initiating TLS - " + (err2.message || err2)), "ETLS", false, "CONN");
+              () => this._upgradeConnection((err) => {
+                if (err) {
+                  this._onError(new Error("Error initiating TLS - " + (err.message || err)), "ETLS", false, "CONN");
                   return;
                 }
                 this._onConnect();
@@ -7700,9 +7700,9 @@ var require_smtp_connection = __commonJS({
               this._socket.connect(this.port, this.host, () => {
                 this._socket.setKeepAlive(true);
                 if (this.secureConnection && !this.alreadySecured) {
-                  return this._upgradeConnection((err2) => {
-                    if (err2) {
-                      this._onError(new Error("Error initiating TLS - " + (err2.message || err2)), "ETLS", false, "CONN");
+                  return this._upgradeConnection((err) => {
+                    if (err) {
+                      this._onError(new Error("Error initiating TLS - " + (err.message || err)), "ETLS", false, "CONN");
                       return;
                     }
                     this._onConnect();
@@ -7737,9 +7737,9 @@ var require_smtp_connection = __commonJS({
        * @param {Function} callback Called with resolved data on success
        */
       _resolveAndConnect(opts, callback) {
-        return shared.resolveHostname(opts, (err2, resolved) => {
-          if (err2) {
-            return setImmediate(() => this._onError(err2, "EDNS", false, "CONN"));
+        return shared.resolveHostname(opts, (err, resolved) => {
+          if (err) {
+            return setImmediate(() => this._onError(err, "EDNS", false, "CONN"));
           }
           this.logger.debug(
             {
@@ -7802,11 +7802,11 @@ var require_smtp_connection = __commonJS({
        * @param {Error|String} err Error object or message
        * @param {String} code Error code
        */
-      _onConnectionError(err2, code) {
+      _onConnectionError(err, code) {
         clearTimeout(this._connectionTimeout);
         const canFallback = this._fallbackAddresses && this._fallbackAddresses.length && this.stage === "init" && !this._destroyed;
         if (!canFallback) {
-          this._onError(err2, code, false, "CONN");
+          this._onError(err, code, false, "CONN");
           return;
         }
         const nextHost = this._fallbackAddresses.shift();
@@ -7815,7 +7815,7 @@ var require_smtp_connection = __commonJS({
             tnx: "network",
             failedHost: this._connectOpts.host,
             nextHost,
-            error: err2.message || err2
+            error: err.message || err
           },
           "Connection to %s failed, trying %s",
           this._connectOpts.host,
@@ -7931,12 +7931,12 @@ var require_smtp_connection = __commonJS({
             this.authenticated = true;
             callback(null, true);
           };
-          const reject = (err2) => {
+          const reject = (err) => {
             if (returned) {
               return;
             }
             returned = true;
-            callback(this._formatError(err2, "EAUTH", lastResponse, "AUTH " + this._authMethod));
+            callback(this._formatError(err, "EAUTH", lastResponse, "AUTH " + this._authMethod));
           };
           const handlerResponse = handler({
             auth: this._auth,
@@ -8049,11 +8049,11 @@ var require_smtp_connection = __commonJS({
           done(...arguments);
         };
         if (typeof message.on === "function") {
-          message.on("error", (err2) => callback(this._formatError(err2, "ESTREAM", false, "API")));
+          message.on("error", (err) => callback(this._formatError(err, "ESTREAM", false, "API")));
         }
         const startTime = Date.now();
-        this._setEnvelope(envelope, (err2, info) => {
-          if (err2) {
+        this._setEnvelope(envelope, (err, info) => {
+          if (err) {
             const stream2 = new PassThrough();
             if (typeof message.pipe === "function") {
               message.pipe(stream2);
@@ -8061,12 +8061,12 @@ var require_smtp_connection = __commonJS({
               stream2.write(message);
               stream2.end();
             }
-            return callback(err2);
+            return callback(err);
           }
           const envelopeTime = Date.now();
-          const stream = this._createSendStream((err3, str) => {
-            if (err3) {
-              return callback(err3);
+          const stream = this._createSendStream((err2, str) => {
+            if (err2) {
+              return callback(err2);
             }
             info.envelopeTime = envelopeTime - startTime;
             info.messageTime = Date.now() - envelopeTime;
@@ -8186,44 +8186,44 @@ var require_smtp_connection = __commonJS({
        * @param {Error} err Error object
        * @param {String} type Error name
        */
-      _onError(err2, type, data, command) {
+      _onError(err, type, data, command) {
         clearTimeout(this._connectionTimeout);
         clearTimeout(this._greetingTimeout);
         if (this._destroyed) {
           return;
         }
-        err2 = this._formatError(err2, type, data, command);
+        err = this._formatError(err, type, data, command);
         const transientCodes = ["ETIMEDOUT", "ESOCKET", "ECONNECTION"];
-        if (transientCodes.includes(err2.code)) {
-          this.logger.warn(data, err2.message);
+        if (transientCodes.includes(err.code)) {
+          this.logger.warn(data, err.message);
         } else {
-          this.logger.error(data, err2.message);
+          this.logger.error(data, err.message);
         }
-        this.emit("error", err2);
+        this.emit("error", err);
         this.close();
       }
       _formatError(message, type, response, command) {
-        let err2;
+        let err;
         if (/Error\]$/i.test(Object.prototype.toString.call(message))) {
-          err2 = message;
+          err = message;
         } else {
-          err2 = new Error(message);
+          err = new Error(message);
         }
         if (type && type !== "Error") {
-          err2.code = type;
+          err.code = type;
         }
         if (response) {
-          err2.response = response;
-          err2.message += ": " + response;
+          err.response = response;
+          err.message += ": " + response;
         }
         const responseCode = typeof response === "string" && Number((response.match(/^\d+/) || [])[0]) || false;
         if (responseCode) {
-          err2.responseCode = responseCode;
+          err.responseCode = responseCode;
         }
         if (command) {
-          err2.command = command;
+          err.command = command;
         }
-        return err2;
+        return err;
       }
       /**
        * 'close' listener for the socket
@@ -8324,9 +8324,9 @@ var require_smtp_connection = __commonJS({
             removePlainSocketListeners();
             return callback(null, true);
           });
-        } catch (err2) {
+        } catch (err) {
           removePlainSocketListeners();
-          return callback(err2);
+          return callback(err);
         }
         this._socket.on("error", this._onSocketError);
         this._socket.once("close", this._onSocketClose);
@@ -8430,8 +8430,8 @@ var require_smtp_connection = __commonJS({
         if (this._envelope.dsn) {
           try {
             this._envelope.dsn = this._setDsnEnvelope(this._envelope.dsn);
-          } catch (err2) {
-            return callback(this._formatError("Invalid DSN " + err2.message, "EENVELOPE", false, "API"));
+          } catch (err) {
+            return callback(this._formatError("Invalid DSN " + err.message, "EENVELOPE", false, "API"));
           }
         }
         if (this._envelope.requireTLSExtensionEnabled) {
@@ -8494,18 +8494,18 @@ var require_smtp_connection = __commonJS({
           throw new Error("ret: " + JSON.stringify(ret));
         }
         const envid = (params.envid || params.id || "").toString() || null;
-        let notify2 = params.notify || null;
-        if (notify2) {
-          if (typeof notify2 === "string") {
-            notify2 = notify2.split(",");
+        let notify = params.notify || null;
+        if (notify) {
+          if (typeof notify === "string") {
+            notify = notify.split(",");
           }
-          notify2 = notify2.map((n) => n.trim().toUpperCase());
+          notify = notify.map((n) => n.trim().toUpperCase());
           const validNotify = ["NEVER", "SUCCESS", "FAILURE", "DELAY"];
-          const invalidNotify = notify2.filter((n) => !validNotify.includes(n));
-          if (invalidNotify.length || notify2.length > 1 && notify2.includes("NEVER")) {
-            throw new Error("notify: " + JSON.stringify(notify2.join(",")));
+          const invalidNotify = notify.filter((n) => !validNotify.includes(n));
+          if (invalidNotify.length || notify.length > 1 && notify.includes("NEVER")) {
+            throw new Error("notify: " + JSON.stringify(notify.join(",")));
           }
-          notify2 = notify2.join(",");
+          notify = notify.join(",");
         }
         let orcpt = (params.recipient || params.orcpt || "").toString() || null;
         if (orcpt && orcpt.indexOf(";") < 0) {
@@ -8514,7 +8514,7 @@ var require_smtp_connection = __commonJS({
         return {
           ret,
           envid,
-          notify: notify2,
+          notify,
           orcpt
         };
       }
@@ -8720,9 +8720,9 @@ var require_smtp_connection = __commonJS({
           this._onError(new Error("Error upgrading connection with STARTTLS"), "ETLS", str, "STARTTLS");
           return;
         }
-        this._upgradeConnection((err2, secured) => {
-          if (err2) {
-            this._onError(new Error("Error initiating TLS - " + (err2.message || err2)), "ETLS", false, "STARTTLS");
+        this._upgradeConnection((err, secured) => {
+          if (err) {
+            this._onError(new Error("Error initiating TLS - " + (err.message || err)), "ETLS", false, "STARTTLS");
             return;
           }
           this.logger.info(
@@ -8913,14 +8913,14 @@ var require_smtp_connection = __commonJS({
        * @param {String} str Message from the server
        */
       _actionRCPT(str, callback) {
-        let err2;
+        let err;
         const curRecipient = this._recipientQueue.shift();
         if (Number(str.charAt(0)) !== 2) {
           const message = this._usingSmtpUtf8 && /^553 /.test(str) && /[\x80-\uFFFF]/.test(curRecipient) ? "Internationalized mailbox name not allowed" : "Recipient command failed";
           this._envelope.rejected.push(curRecipient);
-          err2 = this._formatError(message, "EENVELOPE", str, "RCPT TO");
-          err2.recipient = curRecipient;
-          this._envelope.rejectedErrors.push(err2);
+          err = this._formatError(message, "EENVELOPE", str, "RCPT TO");
+          err.recipient = curRecipient;
+          this._envelope.rejectedErrors.push(err);
         } else {
           this._envelope.accepted.push(curRecipient);
         }
@@ -8931,10 +8931,10 @@ var require_smtp_connection = __commonJS({
             });
             this._sendCommand("DATA");
           } else {
-            err2 = this._formatError("Can't send mail - all recipients were rejected", "EENVELOPE", str, "RCPT TO");
-            err2.rejected = this._envelope.rejected;
-            err2.rejectedErrors = this._envelope.rejectedErrors;
-            return callback(err2);
+            err = this._formatError("Can't send mail - all recipients were rejected", "EENVELOPE", str, "RCPT TO");
+            err.rejected = this._envelope.rejected;
+            err.rejectedErrors = this._envelope.rejectedErrors;
+            return callback(err);
           }
         } else if (this._envelope.rcptQueue.length) {
           const nextRecipient = this._envelope.rcptQueue.shift();
@@ -8988,12 +8988,12 @@ var require_smtp_connection = __commonJS({
        * @param {String} str Message from the server
        */
       _actionLMTPStream(recipient, final, str, callback) {
-        let err2;
+        let err;
         if (Number(str.charAt(0)) !== 2) {
-          err2 = this._formatError("Message failed for recipient " + recipient, "EMESSAGE", str, "DATA");
-          err2.recipient = recipient;
+          err = this._formatError("Message failed for recipient " + recipient, "EMESSAGE", str, "DATA");
+          err.recipient = recipient;
           this._envelope.rejected.push(recipient);
-          this._envelope.rejectedErrors.push(err2);
+          this._envelope.rejectedErrors.push(err);
           for (let i = 0, len = this._envelope.accepted.length; i < len; i++) {
             if (this._envelope.accepted[i] === recipient) {
               this._envelope.accepted.splice(i, 1);
@@ -9005,8 +9005,8 @@ var require_smtp_connection = __commonJS({
         }
       }
       _handleXOauth2Token(isRetry, callback) {
-        this._auth.oauth2.getToken(isRetry, (err2, accessToken) => {
-          if (err2) {
+        this._auth.oauth2.getToken(isRetry, (err, accessToken) => {
+          if (err) {
             this.logger.info(
               {
                 tnx: "smtp",
@@ -9017,7 +9017,7 @@ var require_smtp_connection = __commonJS({
               "User %s failed to authenticate",
               JSON.stringify(this._auth.user)
             );
-            return callback(this._formatError(err2, "EAUTH", false, "AUTH XOAUTH2"));
+            return callback(this._formatError(err, "EAUTH", false, "AUTH XOAUTH2"));
           }
           this._responseActions.push((str) => {
             this._actionAUTHComplete(str, isRetry, callback);
@@ -9082,9 +9082,9 @@ var require_xoauth2 = __commonJS({
         this.options = options || {};
         if (options && options.serviceClient) {
           if (!options.privateKey || !options.user) {
-            const err2 = new Error('Options "privateKey" and "user" are required for service account!');
-            err2.code = errors.EOAUTH2;
-            setImmediate(() => this.emit("error", err2));
+            const err = new Error('Options "privateKey" and "user" are required for service account!');
+            err.code = errors.EOAUTH2;
+            setImmediate(() => this.emit("error", err));
             return;
           }
           const serviceRequestTimeout = Math.min(Math.max(Number(this.options.serviceRequestTimeout) || 0, 0), 3600);
@@ -9153,22 +9153,22 @@ var require_xoauth2 = __commonJS({
             "Cannot renew access token for %s: No refresh mechanism available",
             this.options.user
           );
-          const err2 = new Error("Can't create new access token for user");
-          err2.code = errors.EOAUTH2;
-          return callback(err2);
+          const err = new Error("Can't create new access token for user");
+          err.code = errors.EOAUTH2;
+          return callback(err);
         }
         if (this.renewing) {
           return this.renewalQueue.push({ renew, callback });
         }
         this.renewing = true;
-        const generateCallback = (err2, accessToken) => {
-          this.renewalQueue.forEach((item) => item.callback(err2, accessToken));
+        const generateCallback = (err, accessToken) => {
+          this.renewalQueue.forEach((item) => item.callback(err, accessToken));
           this.renewalQueue = [];
           this.renewing = false;
-          if (err2) {
+          if (err) {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "OAUTH2",
                 user: this.options.user,
                 action: "renew"
@@ -9187,15 +9187,15 @@ var require_xoauth2 = __commonJS({
               this.options.user
             );
           }
-          callback(err2, accessToken);
+          callback(err, accessToken);
         };
         if (this.provisionCallback) {
-          this.provisionCallback(this.options.user, !!renew, (err2, accessToken, expires) => {
-            if (!err2 && accessToken) {
+          this.provisionCallback(this.options.user, !!renew, (err, accessToken, expires) => {
+            if (!err && accessToken) {
               this.accessToken = accessToken;
               this.expires = expires || 0;
             }
-            generateCallback(err2, accessToken);
+            generateCallback(err, accessToken);
           });
         } else {
           this.generateToken(generateCallback);
@@ -9241,9 +9241,9 @@ var require_xoauth2 = __commonJS({
           try {
             token = this.jwtSignRS256(tokenData);
           } catch (_err) {
-            const err2 = new Error("Can't generate token. Check your auth options");
-            err2.code = errors.EOAUTH2;
-            return callback(err2);
+            const err = new Error("Can't generate token. Check your auth options");
+            err.code = errors.EOAUTH2;
+            return callback(err);
           }
           urlOptions = {
             grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -9255,9 +9255,9 @@ var require_xoauth2 = __commonJS({
           };
         } else {
           if (!this.options.refreshToken) {
-            const err2 = new Error("Can't create new access token for user");
-            err2.code = errors.EOAUTH2;
-            return callback(err2);
+            const err = new Error("Can't create new access token for user");
+            err.code = errors.EOAUTH2;
+            return callback(err);
           }
           urlOptions = {
             client_id: this.options.clientId || "",
@@ -9303,9 +9303,9 @@ var require_xoauth2 = __commonJS({
               "Response: %s",
               (body || "").toString()
             );
-            const err3 = new Error("Invalid authentication response");
-            err3.code = errors.EOAUTH2;
-            return callback(err3);
+            const err2 = new Error("Invalid authentication response");
+            err2.code = errors.EOAUTH2;
+            return callback(err2);
           }
           const logData = Object.assign({}, data);
           if (logData.access_token) {
@@ -9328,17 +9328,17 @@ var require_xoauth2 = __commonJS({
             if (data.error_uri) {
               errorMessage += " (" + data.error_uri + ")";
             }
-            const err3 = new Error(errorMessage);
-            err3.code = errors.EOAUTH2;
-            return callback(err3);
+            const err2 = new Error(errorMessage);
+            err2.code = errors.EOAUTH2;
+            return callback(err2);
           }
           if (data.access_token) {
             this.updateToken(data.access_token, data.expires_in);
             return callback(null, this.accessToken);
           }
-          const err2 = new Error("No access token");
-          err2.code = errors.EOAUTH2;
-          return callback(err2);
+          const err = new Error("No access token");
+          err.code = errors.EOAUTH2;
+          return callback(err);
         });
       }
       /**
@@ -9384,12 +9384,12 @@ var require_xoauth2 = __commonJS({
             chunklen += chunk.length;
           }
         });
-        req.once("error", (err2) => {
+        req.once("error", (err) => {
           if (returned) {
             return;
           }
           returned = true;
-          return callback(err2);
+          return callback(err);
         });
         req.once("end", () => {
           if (returned) {
@@ -9454,7 +9454,7 @@ var require_pool_resource = __commonJS({
                 method: "XOAUTH2"
               };
               oauth2.on("token", (token) => this.pool.mailer.emit("token", token));
-              oauth2.on("error", (err2) => this.emit("error", err2));
+              oauth2.on("error", (err) => this.emit("error", err));
               break;
             }
             default:
@@ -9484,9 +9484,9 @@ var require_pool_resource = __commonJS({
        * @param {Function} callback Callback function to run once the connection is established or failed
        */
       connect(callback) {
-        this.pool.getSocket(this.options, (err2, socketOptions) => {
-          if (err2) {
-            return callback(err2);
+        this.pool.getSocket(this.options, (err, socketOptions) => {
+          if (err) {
+            return callback(err);
           }
           let returned = false;
           let options = this.options;
@@ -9509,13 +9509,13 @@ var require_pool_resource = __commonJS({
             options = Object.assign(assign(false, options), socketOptions);
           }
           this.connection = new SMTPConnection(options);
-          this.connection.once("error", (err3) => {
-            this.emit("error", err3);
+          this.connection.once("error", (err2) => {
+            this.emit("error", err2);
             if (returned) {
               return;
             }
             returned = true;
-            return callback(err3);
+            return callback(err2);
           });
           this.connection.once("end", () => {
             this.close();
@@ -9527,11 +9527,11 @@ var require_pool_resource = __commonJS({
               if (returned) {
                 return;
               }
-              const err3 = new Error("Unexpected socket close");
+              const err2 = new Error("Unexpected socket close");
               if (this.connection && this.connection._socket && this.connection._socket.upgrading) {
-                err3.code = errors.ETLS;
+                err2.code = errors.ETLS;
               }
-              callback(err3);
+              callback(err2);
             }, 1e3);
             try {
               timer.unref();
@@ -9543,15 +9543,15 @@ var require_pool_resource = __commonJS({
               return;
             }
             if (this.auth && (this.connection.allowsAuth || options.forceAuth)) {
-              this.connection.login(this.auth, (err3) => {
+              this.connection.login(this.auth, (err2) => {
                 if (returned) {
                   return;
                 }
                 returned = true;
-                if (err3) {
+                if (err2) {
                   this.connection.close();
-                  this.emit("error", err3);
-                  return callback(err3);
+                  this.emit("error", err2);
+                  return callback(err2);
                 }
                 this._connected = true;
                 callback(null, true);
@@ -9572,9 +9572,9 @@ var require_pool_resource = __commonJS({
        */
       send(mail, callback) {
         if (!this._connected) {
-          return this.connect((err2) => {
-            if (err2) {
-              return callback(err2);
+          return this.connect((err) => {
+            if (err) {
+              return callback(err);
             }
             return this.send(mail, callback);
           });
@@ -9602,12 +9602,12 @@ var require_pool_resource = __commonJS({
         if (mail.data.requireTLSExtensionEnabled) {
           envelope.requireTLSExtensionEnabled = mail.data.requireTLSExtensionEnabled;
         }
-        this.connection.send(envelope, mail.message.createReadStream(), (err2, info) => {
+        this.connection.send(envelope, mail.message.createReadStream(), (err, info) => {
           this.messages++;
-          if (err2) {
+          if (err) {
             this.connection.close();
-            this.emit("error", err2);
-            return callback(err2);
+            this.emit("error", err);
+            return callback(err);
           }
           info.envelope = {
             from: envelope.from,
@@ -9616,10 +9616,10 @@ var require_pool_resource = __commonJS({
           info.messageId = messageId;
           setImmediate(() => {
             if (this.messages >= this.options.maxMessages) {
-              const err3 = new Error("Resource exhausted");
-              err3.code = errors.EMAXLIMIT;
+              const err2 = new Error("Resource exhausted");
+              err2.code = errors.EMAXLIMIT;
               this.connection.close();
-              this.emit("error", err3);
+              this.emit("error", err2);
             } else {
               this.pool._checkRateLimit(() => {
                 this.available = true;
@@ -10437,10 +10437,10 @@ var require_smtp_pool = __commonJS({
             this._rateLimit.checkpoint = Date.now();
           }
         }
-        connection.send(entry.mail, (err2, info) => {
+        connection.send(entry.mail, (err, info) => {
           if (entry === connection.queueEntry) {
             try {
-              entry.callback(err2, info);
+              entry.callback(err, info);
             } catch (E) {
               this.logger.error(
                 {
@@ -10488,17 +10488,17 @@ var require_smtp_pool = __commonJS({
             this._processMessages();
           }
         });
-        connection.once("error", (err2) => {
-          if (err2.code !== errors.EMAXLIMIT) {
+        connection.once("error", (err) => {
+          if (err.code !== errors.EMAXLIMIT) {
             this.logger.warn(
               {
-                err: err2,
+                err,
                 tnx: "pool",
                 cid: connection.id
               },
               "Pool Error for #%s: %s",
               connection.id,
-              err2.message
+              err.message
             );
           } else {
             this.logger.debug(
@@ -10513,7 +10513,7 @@ var require_smtp_pool = __commonJS({
           }
           if (connection.queueEntry) {
             try {
-              connection.queueEntry.callback(err2);
+              connection.queueEntry.callback(err);
             } catch (E) {
               this.logger.error(
                 {
@@ -10681,9 +10681,9 @@ var require_smtp_pool = __commonJS({
           });
         }
         const auth = new PoolResource(this).auth;
-        this.getSocket(this.options, (err2, socketOptions) => {
-          if (err2) {
-            return callback(err2);
+        this.getSocket(this.options, (err, socketOptions) => {
+          if (err) {
+            return callback(err);
           }
           let options = this.options;
           if (socketOptions && socketOptions.connection) {
@@ -10706,13 +10706,13 @@ var require_smtp_pool = __commonJS({
           }
           const connection = new SMTPConnection(options);
           let returned = false;
-          connection.once("error", (err3) => {
+          connection.once("error", (err2) => {
             if (returned) {
               return;
             }
             returned = true;
             connection.close();
-            return callback(err3);
+            return callback(err2);
           });
           connection.once("end", () => {
             if (returned) {
@@ -10734,23 +10734,23 @@ var require_smtp_pool = __commonJS({
               return;
             }
             if (auth && (connection.allowsAuth || options.forceAuth)) {
-              connection.login(auth, (err3) => {
+              connection.login(auth, (err2) => {
                 if (returned) {
                   return;
                 }
-                if (err3) {
+                if (err2) {
                   returned = true;
                   connection.close();
-                  return callback(err3);
+                  return callback(err2);
                 }
                 finalize();
               });
             } else if (!auth && connection.allowsAuth && options.forceAuth) {
-              const err3 = new Error("Authentication info was not provided");
-              err3.code = errors.ENOAUTH;
+              const err2 = new Error("Authentication info was not provided");
+              err2.code = errors.ENOAUTH;
               returned = true;
               connection.close();
-              return callback(err3);
+              return callback(err2);
             } else {
               finalize();
             }
@@ -10844,7 +10844,7 @@ var require_smtp_transport = __commonJS({
             const oauth2 = new XOAuth2(authData, this.logger);
             oauth2.provisionCallback = this.mailer && this.mailer.get("oauth2_provision_cb") || oauth2.provisionCallback;
             oauth2.on("token", (token) => this.mailer.emit("token", token));
-            oauth2.on("error", (err2) => this.emit("error", err2));
+            oauth2.on("error", (err) => this.emit("error", err));
             return {
               type: "OAUTH2",
               user: authData.user,
@@ -10872,9 +10872,9 @@ var require_smtp_transport = __commonJS({
        * @param {Function} callback Callback function
        */
       send(mail, callback) {
-        this.getSocket(this.options, (err2, socketOptions) => {
-          if (err2) {
-            return callback(err2);
+        this.getSocket(this.options, (err, socketOptions) => {
+          if (err) {
+            return callback(err);
           }
           let returned = false;
           let options = this.options;
@@ -10904,14 +10904,14 @@ var require_smtp_transport = __commonJS({
             }
             perCallAuth = null;
           };
-          connection.once("error", (err3) => {
+          connection.once("error", (err2) => {
             if (returned) {
               return;
             }
             returned = true;
             cleanupPerCallAuth();
             connection.close();
-            return callback(err3);
+            return callback(err2);
           });
           connection.once("end", () => {
             if (returned) {
@@ -10923,11 +10923,11 @@ var require_smtp_transport = __commonJS({
               }
               returned = true;
               cleanupPerCallAuth();
-              const err3 = new Error("Unexpected socket close");
+              const err2 = new Error("Unexpected socket close");
               if (connection && connection._socket && connection._socket.upgrading) {
-                err3.code = errors.ETLS;
+                err2.code = errors.ETLS;
               }
-              callback(err3);
+              callback(err2);
             }, 1e3);
             try {
               timer.unref();
@@ -10956,21 +10956,21 @@ var require_smtp_transport = __commonJS({
               messageId,
               recipients.join(", ")
             );
-            connection.send(envelope, mail.message.createReadStream(), (err3, info) => {
+            connection.send(envelope, mail.message.createReadStream(), (err2, info) => {
               returned = true;
               cleanupPerCallAuth();
               connection.close();
-              if (err3) {
+              if (err2) {
                 this.logger.error(
                   {
-                    err: err3,
+                    err: err2,
                     tnx: "send"
                   },
                   "Send error for %s: %s",
                   messageId,
-                  err3.message
+                  err2.message
                 );
-                return callback(err3);
+                return callback(err2);
               }
               info.envelope = {
                 from: envelope.from,
@@ -10998,15 +10998,15 @@ var require_smtp_transport = __commonJS({
             }
             perCallAuth = this.getAuth(mail.data.auth);
             if (perCallAuth && (connection.allowsAuth || options.forceAuth)) {
-              connection.login(perCallAuth, (err3) => {
+              connection.login(perCallAuth, (err2) => {
                 cleanupPerCallAuth();
                 if (returned) {
                   return;
                 }
-                if (err3) {
+                if (err2) {
                   returned = true;
                   connection.close();
-                  return callback(err3);
+                  return callback(err2);
                 }
                 sendMessage();
               });
@@ -11028,9 +11028,9 @@ var require_smtp_transport = __commonJS({
             callback = shared.callbackPromise(resolve, reject);
           });
         }
-        this.getSocket(this.options, (err2, socketOptions) => {
-          if (err2) {
-            return callback(err2);
+        this.getSocket(this.options, (err, socketOptions) => {
+          if (err) {
+            return callback(err);
           }
           let options = this.options;
           if (socketOptions && socketOptions.connection) {
@@ -11060,14 +11060,14 @@ var require_smtp_transport = __commonJS({
             }
             perCallAuth = null;
           };
-          connection.once("error", (err3) => {
+          connection.once("error", (err2) => {
             if (returned) {
               return;
             }
             returned = true;
             cleanupPerCallAuth();
             connection.close();
-            return callback(err3);
+            return callback(err2);
           });
           connection.once("end", () => {
             if (returned) {
@@ -11092,25 +11092,25 @@ var require_smtp_transport = __commonJS({
             }
             perCallAuth = this.getAuth({});
             if (perCallAuth && (connection.allowsAuth || options.forceAuth)) {
-              connection.login(perCallAuth, (err3) => {
+              connection.login(perCallAuth, (err2) => {
                 cleanupPerCallAuth();
                 if (returned) {
                   return;
                 }
-                if (err3) {
+                if (err2) {
                   returned = true;
                   connection.close();
-                  return callback(err3);
+                  return callback(err2);
                 }
                 finalize();
               });
             } else if (!perCallAuth && connection.allowsAuth && options.forceAuth) {
-              const err3 = new Error("Authentication info was not provided");
-              err3.code = errors.ENOAUTH;
+              const err2 = new Error("Authentication info was not provided");
+              err2.code = errors.ENOAUTH;
               returned = true;
               cleanupPerCallAuth();
               connection.close();
-              return callback(err3);
+              return callback(err2);
             } else {
               finalize();
             }
@@ -11179,19 +11179,19 @@ var require_sendmail_transport = __commonJS({
         let returned;
         const hasInvalidAddresses = [].concat(envelope.from || []).concat(envelope.to || []).some((addr) => /^-/.test(addr));
         if (hasInvalidAddresses) {
-          const err2 = new Error("Can not send mail. Invalid envelope addresses.");
-          err2.code = errors.ESENDMAIL;
-          return done(err2);
+          const err = new Error("Can not send mail. Invalid envelope addresses.");
+          err.code = errors.ESENDMAIL;
+          return done(err);
         }
         const args = this.args ? ["-i"].concat(this.args).concat(envelope.to) : ["-i"].concat(envelope.from ? ["-f", envelope.from] : []).concat(envelope.to);
-        const callback = (err2) => {
+        const callback = (err) => {
           if (returned) {
             return;
           }
           returned = true;
           if (typeof done === "function") {
-            if (err2) {
-              return done(err2);
+            if (err) {
+              return done(err);
             }
             return done(null, {
               envelope,
@@ -11216,52 +11216,52 @@ var require_sendmail_transport = __commonJS({
           return callback(E);
         }
         if (sendmail) {
-          sendmail.on("error", (err2) => {
+          sendmail.on("error", (err) => {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "spawn",
                 messageId
               },
               "Error occurred when sending message %s. %s",
               messageId,
-              err2.message
+              err.message
             );
-            callback(err2);
+            callback(err);
           });
           sendmail.once("exit", (code) => {
             if (!code) {
               return callback();
             }
-            const err2 = new Error(
+            const err = new Error(
               code === 127 ? "Sendmail command not found, process exited with code " + code : "Sendmail exited with code " + code
             );
-            err2.code = errors.ESENDMAIL;
+            err.code = errors.ESENDMAIL;
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "stdin",
                 messageId
               },
               "Error sending message %s to sendmail. %s",
               messageId,
-              err2.message
+              err.message
             );
-            callback(err2);
+            callback(err);
           });
           sendmail.once("close", callback);
-          sendmail.stdin.on("error", (err2) => {
+          sendmail.stdin.on("error", (err) => {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "stdin",
                 messageId
               },
               "Error occurred when piping message %s to sendmail. %s",
               messageId,
-              err2.message
+              err.message
             );
-            callback(err2);
+            callback(err);
           });
           const recipients = [].concat(envelope.to || []);
           if (recipients.length > 3) {
@@ -11280,27 +11280,27 @@ var require_sendmail_transport = __commonJS({
           let stream = sourceStream;
           if (this.options.newline) {
             stream = sourceStream.pipe(this.winbreak ? new LeWindows() : new LeUnix());
-            sourceStream.once("error", (err2) => stream.emit("error", err2));
+            sourceStream.once("error", (err) => stream.emit("error", err));
           }
-          stream.once("error", (err2) => {
+          stream.once("error", (err) => {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "stdin",
                 messageId
               },
               "Error occurred when generating message %s. %s",
               messageId,
-              err2.message
+              err.message
             );
             sendmail.kill("SIGINT");
-            callback(err2);
+            callback(err);
           });
           stream.pipe(sendmail.stdin);
         } else {
-          const err2 = new Error("sendmail was not found");
-          err2.code = errors.ESENDMAIL;
-          return callback(err2);
+          const err = new Error("sendmail was not found");
+          err.code = errors.ESENDMAIL;
+          return callback(err);
         }
       }
     };
@@ -11358,7 +11358,7 @@ var require_stream_transport = __commonJS({
             if (this.options.newline) {
               const sourceStream = stream;
               stream = sourceStream.pipe(this.winbreak ? new LeWindows() : new LeUnix());
-              sourceStream.once("error", (err2) => stream.emit("error", err2));
+              sourceStream.once("error", (err) => stream.emit("error", err));
             }
           } catch (E) {
             this.logger.error(
@@ -11374,16 +11374,16 @@ var require_stream_transport = __commonJS({
             return done(E);
           }
           if (!this.options.buffer) {
-            stream.once("error", (err2) => {
+            stream.once("error", (err) => {
               this.logger.error(
                 {
-                  err: err2,
+                  err,
                   tnx: "send",
                   messageId
                 },
                 "Failed creating message for %s. %s",
                 messageId,
-                err2.message
+                err.message
               );
             });
             return done(null, {
@@ -11401,18 +11401,18 @@ var require_stream_transport = __commonJS({
               chunklen += chunk.length;
             }
           });
-          stream.once("error", (err2) => {
+          stream.once("error", (err) => {
             this.logger.error(
               {
-                err: err2,
+                err,
                 tnx: "send",
                 messageId
               },
               "Failed creating message for %s. %s",
               messageId,
-              err2.message
+              err.message
             );
-            return done(err2);
+            return done(err);
           });
           stream.on(
             "end",
@@ -11469,19 +11469,19 @@ var require_json_transport = __commonJS({
           recipients.join(", ")
         );
         setImmediate(() => {
-          mail.normalize((err2, data) => {
-            if (err2) {
+          mail.normalize((err, data) => {
+            if (err) {
               this.logger.error(
                 {
-                  err: err2,
+                  err,
                   tnx: "send",
                   messageId
                 },
                 "Failed building JSON structure for %s. %s",
                 messageId,
-                err2.message
+                err.message
               );
-              return done(err2);
+              return done(err);
             }
             delete data.envelope;
             delete data.normalizedHeaders;
@@ -11508,11 +11508,11 @@ var require_ses_transport = __commonJS({
     var errors = require_errors();
     var LeWindows = require_le_windows();
     var MimeNode = require_mime_node();
-    function tagSesError(err2) {
-      if (err2 && typeof err2 === "object" && !err2.code) {
-        err2.code = errors.ESES;
+    function tagSesError(err) {
+      if (err && typeof err === "object" && !err.code) {
+        err.code = errors.ESES;
       }
-      return err2;
+      return err;
     }
     var SESTransport = class extends EventEmitter {
       constructor(options) {
@@ -11530,7 +11530,7 @@ var require_ses_transport = __commonJS({
         if (this.ses.sesClient.config && typeof this.ses.sesClient.config.region === "function") {
           return this.ses.sesClient.config.region().then(
             (region) => cb(null, region),
-            (err2) => cb(err2)
+            (err) => cb(err)
           );
         }
         return cb(null, false);
@@ -11582,24 +11582,24 @@ var require_ses_transport = __commonJS({
               chunklen += chunk.length;
             }
           });
-          sourceStream.once("error", (err2) => stream.emit("error", err2));
-          stream.once("error", (err2) => next(err2));
+          sourceStream.once("error", (err) => stream.emit("error", err));
+          stream.once("error", (err) => next(err));
           stream.once("end", () => next(null, Buffer.concat(chunks, chunklen)));
         };
         setImmediate(
-          () => getRawMessage((err2, raw) => {
-            if (err2) {
+          () => getRawMessage((err, raw) => {
+            if (err) {
               this.logger.error(
                 {
-                  err: err2,
+                  err,
                   tnx: "send",
                   messageId
                 },
                 "Failed creating message for %s. %s",
                 messageId,
-                err2.message
+                err.message
               );
-              return callback(err2);
+              return callback(err);
             }
             const sesMessage = Object.assign(
               {
@@ -11617,26 +11617,26 @@ var require_ses_transport = __commonJS({
               },
               mail.data.ses || {}
             );
-            this.getRegion((err3, region) => {
-              if (err3 || !region) {
+            this.getRegion((err2, region) => {
+              if (err2 || !region) {
                 region = "us-east-1";
               }
               let sendPromise;
               try {
                 const command = new this.ses.SendEmailCommand(sesMessage);
                 sendPromise = this.ses.sesClient.send(command);
-              } catch (err4) {
-                tagSesError(err4);
+              } catch (err3) {
+                tagSesError(err3);
                 this.logger.error(
                   {
-                    err: err4,
+                    err: err3,
                     tnx: "send"
                   },
                   "Send error for %s: %s",
                   messageId,
-                  err4.message
+                  err3.message
                 );
-                setImmediate(() => callback(err4));
+                setImmediate(() => callback(err3));
                 return;
               }
               sendPromise.then((data) => {
@@ -11653,18 +11653,18 @@ var require_ses_transport = __commonJS({
                   raw
                 };
                 setImmediate(() => callback(null, info));
-              }).catch((err4) => {
-                tagSesError(err4);
+              }).catch((err3) => {
+                tagSesError(err3);
                 this.logger.error(
                   {
-                    err: err4,
+                    err: err3,
                     tnx: "send"
                   },
                   "Send error for %s: %s",
                   messageId,
-                  err4.message
+                  err3.message
                 );
-                setImmediate(() => callback(err4));
+                setImmediate(() => callback(err3));
               });
             });
           })
@@ -11682,9 +11682,9 @@ var require_ses_transport = __commonJS({
             callback = shared.callbackPromise(resolve, reject);
           });
         }
-        const cb = (err2) => {
-          if (err2 && !["InvalidParameterValue", "MessageRejected"].includes(err2.code || err2.Code || err2.name)) {
-            return callback(tagSesError(err2));
+        const cb = (err) => {
+          if (err && !["InvalidParameterValue", "MessageRejected"].includes(err.code || err.Code || err.name)) {
+            return callback(tagSesError(err));
           }
           return callback(null, true);
         };
@@ -11704,11 +11704,11 @@ var require_ses_transport = __commonJS({
           try {
             const command = new this.ses.SendEmailCommand(sesMessage);
             sendPromise = this.ses.sesClient.send(command);
-          } catch (err2) {
-            setImmediate(() => cb(err2));
+          } catch (err) {
+            setImmediate(() => cb(err));
             return;
           }
-          sendPromise.then(() => setImmediate(() => cb(null))).catch((err2) => setImmediate(() => cb(err2)));
+          sendPromise.then(() => setImmediate(() => cb(null))).catch((err) => setImmediate(() => cb(err)));
         });
         return promise;
       }
@@ -11816,7 +11816,7 @@ var require_nodemailer = __commonJS({
           chunklen += chunk.length;
         }
       });
-      req.once("error", (err2) => callback(err2));
+      req.once("error", (err) => callback(err));
       req.once("end", () => {
         const res = Buffer.concat(chunks, chunklen);
         let data;
@@ -11857,9 +11857,7 @@ var require_nodemailer = __commonJS({
   }
 });
 
-// netlify/functions/api.mjs
-var import_nodemailer = __toESM(require_nodemailer(), 1);
-import { createHmac, createHash, randomBytes } from "node:crypto";
+// node_modules/@netlify/blobs/dist/chunk-XR3MUBBK.js
 var NF_ERROR = "x-nf-error";
 var NF_REQUEST_ID = "x-nf-request-id";
 var BlobsInternalError = class extends Error {
@@ -12172,6 +12170,8 @@ var getClientOptions = (options, contextOverride) => {
   };
   return clientOptions;
 };
+
+// node_modules/@netlify/blobs/dist/main.js
 var DEPLOY_STORE_PREFIX = "deploy:";
 var LEGACY_STORE_INTERNAL_PREFIX = "netlify-internal/legacy-namespace/";
 var SITE_STORE_PREFIX = "site:";
@@ -12461,13 +12461,14 @@ var getStore = (input) => {
     "The `getStore` method requires the name of the store as a string or as the `name` property of an options object"
   );
 };
+
+// _src/emaillib.mjs
+var import_nodemailer = __toESM(require_nodemailer(), 1);
+import { randomBytes } from "node:crypto";
 var store = () => getStore({ name: "ma-payments", consistency: "strong" });
-var json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
-var err = (message, status = 400) => json({ error: message }, status);
-var r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
-var num = (x) => typeof x === "number" && isFinite(x) ? x : parseFloat(x) || 0;
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
-var hashPin = (pin, salt) => createHash("sha256").update(salt + ":" + pin).digest("hex");
+var num = (x) => typeof x === "number" && isFinite(x) ? x : parseFloat(x) || 0;
+var r2 = (n) => Math.round((num(n) + Number.EPSILON) * 100) / 100;
 var emEsc = (x) => String(x == null ? "" : x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 var emMoney = (n) => {
   const p = r2(num(n)).toFixed(2).split(".");
@@ -12480,58 +12481,22 @@ var emDate = (d) => {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 };
-function amountWords(amount) {
-  amount = num(amount);
-  if (!amount) return "UAE Dirhams Zero Only";
-  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const grp = (n) => {
-    let w = "";
-    if (n >= 100) { w += ones[Math.floor(n / 100)] + " Hundred"; n %= 100; if (n) w += " "; }
-    if (n >= 20) { w += tens[Math.floor(n / 10)]; n %= 10; if (n) w += " " + ones[n]; }
-    else if (n) w += ones[n];
-    return w;
-  };
-  const d = Math.floor(amount), f = Math.round((amount - d) * 100);
-  const m = Math.floor(d / 1e6), t = Math.floor(d % 1e6 / 1e3), u = d % 1e3;
-  const w = [m ? grp(m) + " Million" : "", t ? grp(t) + " Thousand" : "", u ? grp(u) : ""].filter(Boolean).join(" ") || "Zero";
-  return "UAE Dirhams " + w + (f ? " and " + grp(f) + " Fils" : "") + " Only";
-}
-var EMAIL_TYPES = {
-  welcome: "Registration confirmation",
-  initiated: "Payment certificate initiated",
-  approved: "Payment certificate approved",
-  paid: "Payment executed",
-  cheque: "Cheque ready for collection",
-  action: "Action required (rejection / deduction / missing docs)",
-  licence: "Trade licence expiry reminder",
-  soa: "Monthly statement of account request",
-  client_issued: "Client payment certificate issued",
-  client_approved: "Client payment certificate approved"
-};
-var COLLECT_WINDOW = "Tuesdays only, between 2:00 PM and 5:00 PM";
-var collectNoteHtml = `<strong>Collection policy:</strong> Cash and cheques are handed over <strong>on ${COLLECT_WINDOW}</strong> at our office. Collection must be made by an <strong>authorised representative</strong> presenting their <strong>original Emirates ID</strong> (the EID number is recorded at handover). A <strong>signed &amp; stamped receipt copy is mandatory</strong> and must be provided at the time of collection.`;
-var receiptNoteHtml = `<strong>Receipt required:</strong> a signed &amp; stamped receipt copy is <strong>mandatory for every payment</strong>. Kindly return your acknowledgement so we can close our records.`;
-function getEnv(k) {
+var getEnv = (k) => {
   try {
     return typeof process !== "undefined" && process.env ? process.env[k] : void 0;
   } catch {
     return void 0;
   }
-}
+};
 async function getEmailCfg(s) {
   const saved = await s.get("emailcfg", { type: "json" }) || {};
-  const smtpUser = getEnv("SMTP_USER") || saved.smtpUser || "info@maagroup.ae";
-  const smtpPass = getEnv("SMTP_PASS") || saved.smtpPass || "";
   return {
     enabled: saved.enabled !== false,
     provider: saved.provider || "smtp",
-    // Zoho Mail SMTP (default) — send through your own mailbox
     smtpHost: getEnv("SMTP_HOST") || saved.smtpHost || "smtppro.zoho.com",
     smtpPort: Number(getEnv("SMTP_PORT") || saved.smtpPort || 465),
-    smtpUser,
-    smtpPass,
-    // ZeptoMail API (alternative)
+    smtpUser: getEnv("SMTP_USER") || saved.smtpUser || "info@maagroup.ae",
+    smtpPass: getEnv("SMTP_PASS") || saved.smtpPass || "",
     token: getEnv("ZEPTOMAIL_TOKEN") || saved.token || "",
     host: getEnv("ZEPTOMAIL_HOST") || saved.host || "api.zeptomail.com",
     from: getEnv("MAIL_FROM") || saved.from || "info@maagroup.ae",
@@ -12543,278 +12508,21 @@ async function getEmailCfg(s) {
   };
 }
 function emailShell(cfg, o) {
-  const rows = (o.table || []).map(
-    (r) => `<tr><td style="padding:7px 14px;border-bottom:1px solid #eceff3;color:#5b6472;font-size:13px;width:44%">${emEsc(r[0])}</td><td style="padding:7px 14px;border-bottom:1px solid #eceff3;color:#1f2733;font-size:13px;font-weight:600">${r[2] ? r[1] : emEsc(r[1])}</td></tr>`
-  ).join("");
+  const rows = (o.table || []).map((r) => `<tr><td style="padding:7px 14px;border-bottom:1px solid #eceff3;color:#5b6472;font-size:13px;width:44%">${emEsc(r[0])}</td><td style="padding:7px 14px;border-bottom:1px solid #eceff3;color:#1f2733;font-size:13px;font-weight:600">${emEsc(r[1])}</td></tr>`).join("");
   const tableHtml = o.table && o.table.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e7ee;border-radius:8px;border-collapse:separate;margin:6px 0 18px">${rows}</table>` : "";
   const callout = o.note ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="background:${o.noteColor || "#fff8e6"};border-left:4px solid ${o.noteBar || "#bf9000"};border-radius:4px;padding:12px 16px;color:#4a4028;font-size:13px;line-height:1.55">${o.note}</td></tr></table>` : "";
   const lead = (o.lead || []).map((p) => `<p style="margin:0 0 13px;color:#333c48;font-size:14px;line-height:1.65">${p}</p>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;background:#eef1f5;font-family:Segoe UI,Arial,Helvetica,sans-serif">
 <span style="display:none;max-height:0;overflow:hidden;opacity:0">${emEsc(o.preheader || o.title)}</span>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:24px 12px">
-<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(20,30,50,.08)">
-<tr><td style="background:#1f3864;padding:22px 30px">
-<div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:.3px">MA GROUP</div>
-<div style="color:#c7d2e6;font-size:11px;margin-top:2px">Marvellous Art \u2022 MA Building Contracting \u2022 MA Building Maintenance</div>
-</td></tr>
+<tr><td style="background:#1f3864;padding:22px 30px"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:.3px">MA GROUP</div><div style="color:#c7d2e6;font-size:11px;margin-top:2px">Marvellous Art \u2022 MA Building Contracting \u2022 MA Building Maintenance</div></td></tr>
 <tr><td style="background:${o.band || "#bf9000"};padding:11px 30px;color:#ffffff;font-size:15px;font-weight:600">${emEsc(o.title)}</td></tr>
-<tr><td style="padding:26px 30px 8px">
-<p style="margin:0 0 15px;color:#1f2733;font-size:14px">Dear ${emEsc(o.greeting || "Partner")},</p>
-${lead}
-${tableHtml}
-${callout}
-${o.closing ? `<p style="margin:0 0 6px;color:#333c48;font-size:14px;line-height:1.65">${o.closing}</p>` : ""}
-</td></tr>
-<tr><td style="padding:14px 30px 26px">
-<p style="margin:0;color:#1f2733;font-size:14px;line-height:1.5">Best regards,<br><strong>MA Group \u2014 Accounts &amp; Administration</strong></p>
-</td></tr>
-<tr><td style="background:#f4f6f9;border-top:1px solid #e3e7ee;padding:16px 30px;color:#7a8494;font-size:11px;line-height:1.6">
-<a href="mailto:${emEsc(cfg.replyTo)}" style="color:#2e75b6;text-decoration:none">${emEsc(cfg.replyTo)}</a> &nbsp;|&nbsp; www.maagroup.ae &nbsp;|&nbsp; +971 80062244<br>
-This is an automated notification from the MA Group Payment System. You may reply directly to this email to reach our team.
-</td></tr>
-</table>
-</td></tr></table></body></html>`;
-}
-function partyWord(sup) {
-  return sup && sup.type === "Supplier" ? "supplier" : "subcontractor";
-}
-function buildEmail(type, ctx, cfg) {
-  const sup = ctx.sup || {};
-  const c = ctx.cert || {};
-  const to = sup.email || "";
-  const greeting = sup.contactName || sup.name || "Partner";
-  const proj = c.project || sup.project || "\u2014";
-  if (type === "welcome") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Registration Confirmed \u2014 ${sup.name || ""} | MA Group`,
-      html: emailShell(cfg, {
-        title: "Vendor Registration Confirmed",
-        band: "#2e7d32",
-        preheader: `Your registration as an approved ${partyWord(sup)} is confirmed.`,
-        lead: [
-          `We are pleased to confirm that <strong>${emEsc(sup.name)}</strong> has been successfully registered as an approved ${partyWord(sup)} with MA Group.`,
-          `Please retain the reference below for all future correspondence, invoices and statements.`
-        ],
-        table: [
-          ["Registration No.", sup.regNo || "\u2014"],
-          ["Party type", sup.type || "Subcontractor"],
-          ["TRN", sup.trn || "\u2014"],
-          ["Registered on", emDate(sup.createdAt)]
-        ],
-        note: `Kindly note our standing requirements: (1) submit your <strong>Statement of Account (SOA)</strong> by the <strong>25th of every month</strong> for reconciliation; (2) keep a <strong>valid trade licence</strong> on file at all times to avoid any hold on payments.`,
-        closing: `We look forward to a successful working relationship.`
-      })
-    };
-  }
-  if (type === "initiated") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Payment Certificate ${c.no} Initiated \u2014 ${proj}`,
-      html: emailShell(cfg, {
-        title: "Payment Certificate Initiated",
-        band: "#2e75b6",
-        preheader: `Certificate ${c.no} has been raised and is under internal review.`,
-        lead: [
-          `This is to notify you that a payment certificate has been <strong>initiated in your favour</strong> and is currently under internal review and approval.`,
-          `The provisional assessment is summarised below. Figures are subject to certification and may change upon final approval.`
-        ],
-        table: [
-          ["Certificate No.", c.no],
-          ["Project", proj],
-          ["Your invoice ref.", c.invoiceNo || "\u2014"],
-          ["Gross this certificate", emMoney(c.calc?.gross)],
-          ["Net payable (provisional)", emMoney(c.calc?.payable)]
-        ],
-        closing: `You will receive a further notification once the certificate is approved.`
-      })
-    };
-  }
-  if (type === "approved") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Payment Certificate ${c.no} Approved \u2014 ${emMoney(c.calc?.payable)}`,
-      html: emailShell(cfg, {
-        title: "Payment Certificate Approved",
-        band: "#2e7d32",
-        preheader: `Certificate ${c.no} approved for ${emMoney(c.calc?.payable)}.`,
-        lead: [
-          `We are pleased to inform you that payment certificate <strong>${emEsc(c.no)}</strong> has been <strong>approved</strong> and will be processed in accordance with the agreed payment terms.`
-        ],
-        table: [
-          ["Certificate No.", c.no],
-          ["Project", proj],
-          ["Your invoice ref.", c.invoiceNo || "\u2014"],
-          ["Gross", emMoney(c.calc?.gross)],
-          ["Retention", emMoney(c.calc?.retention)],
-          ["Advance recovery", emMoney(c.calc?.advanceRecovery)],
-          ["Net", emMoney(c.calc?.net)],
-          ["VAT", emMoney(c.calc?.vat)],
-          ["Amount payable", emMoney(c.calc?.payable)]
-        ],
-        closing: `A further notification will follow once payment is executed.`
-      })
-    };
-  }
-  if (type === "paid") {
-    const mode = c.payment?.mode || "";
-    const amt = emMoney(c.payment?.amount);
-    let title = "Payment Executed", band = "#2e7d32", lead0, tbl;
-    if (mode === "Bank Transfer") {
-      title = "Payment Transferred";
-      lead0 = `We confirm that a bank transfer of <strong>${amt}</strong> has been executed against certificate <strong>${emEsc(c.no)}</strong>.`;
-      tbl = [["Certificate No.", c.no], ["Project", proj], ["Transfer ref.", c.payment?.ref || "\u2014"], ["Bank", c.payment?.bank || "\u2014"], ["Value date", emDate(c.payment?.date)], ["Amount", amt]];
-    } else if (mode === "Cash") {
-      title = "Payment Processed (Cash)";
-      lead0 = `We confirm that a cash payment of <strong>${amt}</strong> has been processed against certificate <strong>${emEsc(c.no)}</strong> via petty cash voucher.`;
-      tbl = [["Certificate No.", c.no], ["Project", proj], ["Voucher ref.", c.payment?.ref || "\u2014"], ["Date", emDate(c.payment?.date)], ["Amount", amt]];
-    } else {
-      title = "Cheque Issued";
-      lead0 = `We confirm that a cheque of <strong>${amt}</strong> has been issued against certificate <strong>${emEsc(c.no)}</strong>. You will be notified once it is ready for collection.`;
-      tbl = [["Certificate No.", c.no], ["Project", proj], ["Cheque no.", c.payment?.ref || "\u2014"], ["Bank", c.payment?.bank || "\u2014"], ["Date", emDate(c.payment?.date)], ["Amount", amt]];
-    }
-    const noteHtml = mode === "Bank Transfer" ? receiptNoteHtml : collectNoteHtml;
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `${title} \u2014 ${c.no} | ${amt}`,
-      html: emailShell(cfg, { title, band, preheader: `${title} for certificate ${c.no}.`, lead: [lead0], table: tbl, note: noteHtml, closing: `Kindly acknowledge receipt by return email.` })
-    };
-  }
-  if (type === "cheque") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Cheque Ready for Collection \u2014 ${c.no}`,
-      html: emailShell(cfg, {
-        title: "Cheque Ready for Collection",
-        band: "#2e75b6",
-        preheader: `Cheque ${c.payment?.ref || ""} is ready for collection.`,
-        lead: [`We are pleased to inform you that your cheque against certificate <strong>${emEsc(c.no)}</strong> has been prepared and is <strong>ready for collection</strong> from our office.`],
-        table: [["Certificate No.", c.no], ["Project", proj], ["Cheque no.", c.payment?.ref || "\u2014"], ["Bank", c.payment?.bank || "\u2014"], ["Amount", emMoney(c.payment?.amount)]],
-        note: collectNoteHtml
-      })
-    };
-  }
-  if (type === "action") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Action Required \u2014 Payment Certificate ${c.no}`,
-      html: emailShell(cfg, {
-        title: "Action Required",
-        band: "#c0392b",
-        preheader: `Certificate ${c.no} requires your attention.`,
-        lead: [
-          `One or more items relating to payment certificate <strong>${emEsc(c.no)}</strong> require your attention before processing can continue.`,
-          `This may relate to a rejected item, a deduction, or a missing document.`
-        ],
-        table: [["Certificate No.", c.no], ["Project", proj], ["Your invoice ref.", c.invoiceNo || "\u2014"]],
-        note: `<strong>Details / remarks:</strong><br>${emEsc(ctx.comment || "Please contact our accounts team for clarification.")}`,
-        noteColor: "#fdecea",
-        noteBar: "#c0392b",
-        closing: `Kindly review and respond at your earliest convenience so we can proceed.`
-      })
-    };
-  }
-  if (type === "licence") {
-    const days = ctx.daysLeft;
-    const expired = days < 0;
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: expired ? `Trade Licence Expired \u2014 ${sup.name || ""}` : `Reminder: Trade Licence Expiring in ${days} day${days === 1 ? "" : "s"} \u2014 ${sup.name || ""}`,
-      html: emailShell(cfg, {
-        title: expired ? "Trade Licence Expired" : "Trade Licence Expiry Reminder",
-        band: expired ? "#c0392b" : "#bf9000",
-        preheader: expired ? `Your trade licence on our records has expired.` : `Your trade licence expires on ${emDate(sup.licenseExpiry)}.`,
-        lead: [
-          expired ? `Our records indicate that your trade licence <strong>expired on ${emDate(sup.licenseExpiry)}</strong>.` : `This is a courtesy reminder that your trade licence is due to <strong>expire on ${emDate(sup.licenseExpiry)}</strong> (${days} day${days === 1 ? "" : "s"} remaining).`,
-          `To maintain active vendor status and avoid any hold on pending or future payments, kindly submit your renewed trade licence copy.`
-        ],
-        table: [["Company", sup.name || "\u2014"], ["Licence no.", sup.licenseNo || "\u2014"], ["Expiry date", emDate(sup.licenseExpiry)]],
-        note: `Please reply to this email attaching the renewed licence. If already renewed, kindly share the updated copy so we can update our records.`,
-        noteColor: expired ? "#fdecea" : "#fff8e6",
-        noteBar: expired ? "#c0392b" : "#bf9000"
-      })
-    };
-  }
-  if (type === "client_issued" || type === "client_approved") {
-    const cl = ctx.client || {};
-    const ct = ctx.contract || {};
-    const K = c.calc || {};
-    const cto = cl.email || "";
-    const cgreet = cl.contactName || cl.name || "Sir/Madam";
-    const cproj = ct.project || "\u2014";
-    const period = (c.periodFrom ? emEsc(c.periodFrom) : "") + (c.periodTo ? " \u2013 " + emEsc(c.periodTo) : "");
-    const approved = type === "client_approved";
-    return {
-      to: cto,
-      toName: cgreet,
-      greeting: cgreet,
-      subject: `${approved ? "Approved " : ""}Interim Payment Certificate ${c.no} \u2014 ${cproj} | ${emMoney(K.payable)}`,
-      html: emailShell(cfg, {
-        title: approved ? "Interim Payment Certificate \u2014 Approved" : "Interim Payment Certificate \u2014 Issued",
-        band: approved ? "#2e7d32" : "#1f3864",
-        preheader: `IPC ${c.no} for ${cproj}: amount due ${emMoney(K.payable)} (incl. VAT).`,
-        lead: [
-          `Please find below our <strong>Interim Payment Certificate ${emEsc(c.no)}</strong> in respect of works executed on <strong>${emEsc(cproj)}</strong>${period ? ` for the period ${period}` : ""}.`,
-          approved
-            ? `The certificate has been reviewed and <strong>approved</strong>. We kindly request settlement of the certified amount in accordance with the agreed payment terms. Our proforma / tax invoice will follow.`
-            : `The certificate is submitted for your <strong>review and certification</strong>. Kindly confirm so we may proceed with our proforma / tax invoice.`
-        ],
-        table: [
-          ["Certificate No.", c.no],
-          ["Project", cproj],
-          ["Contract Ref.", ct.subcontractRef || "\u2014"],
-          ["Period", period || "\u2014"],
-          ["Gross value certified", emMoney(K.gross)],
-          ["Less retention", emMoney(K.retention)],
-          ["Less advance recovery", emMoney(K.advanceRecovery)],
-          ["Less previously certified", emMoney(K.prevCertified)],
-          ["Net amount due (excl. VAT)", emMoney(K.net)],
-          ["VAT", emMoney(K.vat)],
-          ["Total payable (incl. VAT)", emMoney(K.payable)]
-        ],
-        note: `<strong>Amount payable in words:</strong> ${emEsc(amountWords(K.payable))}. Kindly quote certificate reference <strong>${emEsc(c.no)}</strong> on your remittance.`,
-        noteColor: "#eef4ff",
-        noteBar: "#1f3864",
-        closing: `The signed certificate is attached / available on request. Thank you for your continued cooperation.`
-      })
-    };
-  }
-  if (type === "soa") {
-    return {
-      to,
-      toName: greeting,
-      greeting,
-      subject: `Statement of Account Request \u2014 ${ctx.period || ""}`,
-      html: emailShell(cfg, {
-        title: "Monthly Statement of Account Request",
-        band: "#2e75b6",
-        preheader: `Please submit your SOA for ${ctx.period || "this period"}.`,
-        lead: [
-          `As part of our monthly reconciliation, we kindly request your latest <strong>Statement of Account (SOA)</strong> for the period up to <strong>${emDate(ctx.asOf)}</strong>.`,
-          `Timely submission ensures your outstanding balances are reconciled and any due payments are processed without delay.`
-        ],
-        note: `Please reply to this email attaching your SOA in PDF or Excel format. Kindly ensure it reflects all invoices, payments received and current outstanding balance.`,
-        closing: `Thank you for your continued cooperation.`
-      })
-    };
-  }
-  return null;
+<tr><td style="padding:26px 30px 8px"><p style="margin:0 0 15px;color:#1f2733;font-size:14px">Dear ${emEsc(o.greeting || "Partner")},</p>${lead}${tableHtml}${callout}${o.closing ? `<p style="margin:0 0 6px;color:#333c48;font-size:14px;line-height:1.65">${o.closing}</p>` : ""}</td></tr>
+<tr><td style="padding:14px 30px 26px"><p style="margin:0;color:#1f2733;font-size:14px;line-height:1.5">Best regards,<br><strong>MA Group \u2014 Accounts &amp; Administration</strong></p></td></tr>
+<tr><td style="background:#f4f6f9;border-top:1px solid #e3e7ee;padding:16px 30px;color:#7a8494;font-size:11px;line-height:1.6"><a href="mailto:${emEsc(cfg.replyTo)}" style="color:#2e75b6;text-decoration:none">${emEsc(cfg.replyTo)}</a> &nbsp;|&nbsp; www.maagroup.ae &nbsp;|&nbsp; +971 80062244<br>This is an automated notification from the MA Group Payment System. You may reply directly to this email to reach our team.</td></tr>
+</table></td></tr></table></body></html>`;
 }
 async function sendMail(s, cfg, msg) {
   const id = "E" + Date.now().toString(36) + "-" + randomBytes(3).toString("hex");
@@ -12836,40 +12544,16 @@ async function sendMail(s, cfg, msg) {
       rec.status = "logged";
       rec.detail = cfg.provider === "smtp" ? "Zoho Mail app password not set \u2014 composed but not sent" : "no provider token configured \u2014 composed but not sent";
     } else if (useSmtp) {
-      const transport = import_nodemailer.default.createTransport({
-        host: cfg.smtpHost,
-        port: cfg.smtpPort,
-        secure: cfg.smtpPort === 465,
-        auth: { user: cfg.smtpUser, pass: cfg.smtpPass }
-      });
-      const info = await transport.sendMail({
-        from: `"${cfg.fromName}" <${cfg.from}>`,
-        to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to,
-        replyTo: cfg.replyTo,
-        cc: split(cfg.cc).join(", ") || void 0,
-        bcc: split(cfg.bcc).join(", ") || void 0,
-        subject: msg.subject,
-        html: msg.html
-      });
+      const transport = import_nodemailer.default.createTransport({ host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpPort === 465, auth: { user: cfg.smtpUser, pass: cfg.smtpPass } });
+      await transport.sendMail({ from: `"${cfg.fromName}" <${cfg.from}>`, to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to, replyTo: cfg.replyTo, cc: split(cfg.cc).join(", ") || void 0, bcc: split(cfg.bcc).join(", ") || void 0, subject: msg.subject, html: msg.html });
       rec.status = "sent";
-      rec.detail = info && info.messageId ? "" : "";
     } else {
-      const body = {
-        from: { address: cfg.from, name: cfg.fromName },
-        to: [{ email_address: { address: msg.to, name: msg.toName || msg.to } }],
-        reply_to: [{ address: cfg.replyTo, name: cfg.fromName }],
-        subject: msg.subject,
-        htmlbody: msg.html
-      };
+      const body = { from: { address: cfg.from, name: cfg.fromName }, to: [{ email_address: { address: msg.to, name: msg.toName || msg.to } }], reply_to: [{ address: cfg.replyTo, name: cfg.fromName }], subject: msg.subject, htmlbody: msg.html };
       const cc = split(cfg.cc);
       if (cc.length) body.cc = cc.map((a) => ({ email_address: { address: a } }));
       const bcc = split(cfg.bcc);
       if (bcc.length) body.bcc = bcc.map((a) => ({ email_address: { address: a } }));
-      const resp = await fetch(`https://${cfg.host}/v1.1/email`, {
-        method: "POST",
-        headers: { "Authorization": `Zoho-enczapikey ${cfg.token}`, "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(body)
-      });
+      const resp = await fetch(`https://${cfg.host}/v1.1/email`, { method: "POST", headers: { "Authorization": `Zoho-enczapikey ${cfg.token}`, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) });
       const txt = await resp.text();
       rec.status = resp.ok ? "sent" : "error";
       rec.detail = resp.ok ? "" : `HTTP ${resp.status}: ${txt.slice(0, 400)}`;
@@ -12884,1463 +12568,77 @@ async function sendMail(s, cfg, msg) {
   }
   return rec;
 }
-async function notify(s, type, ctx) {
-  try {
-    const cfg = await getEmailCfg(s);
-    const t = buildEmail(type, ctx, cfg);
-    if (!t) return null;
-    return await sendMail(s, cfg, { type, to: t.to, toName: t.toName, subject: t.subject, html: t.html, certNo: ctx.cert?.no, supplierId: ctx.sup?.id });
-  } catch (e) {
-    return null;
+async function runPnlJob(s) {
+  const cfg = await getEmailCfg(s);
+  const CG = { "Material Supply": "Direct", "Labour (Direct)": "Direct", "Subcontractor": "Direct", "Equipment / Plant": "Direct", "Labour (Indirect)": "Indirect", "Professional Fees": "Indirect", "Overhead / Admin": "Overhead", "Financing / Bank Charges": "Overhead", "Insurance & Bonds": "Overhead" };
+  let cost = 0, paid = 0;
+  const byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byProject = {};
+  const { blobs: eb } = await s.list({ prefix: "expense/" });
+  for (const b of eb) {
+    const e = await s.get(b.key, { type: "json" });
+    if (!e) continue;
+    const a = num(e.amount);
+    cost += a;
+    paid += num(e.paid);
+    byGroup[CG[e.costType] || "Direct"] += a;
+    byProject[e.project] = byProject[e.project] || { cost: 0, rev: 0 };
+    byProject[e.project].cost += a;
   }
-}
-function daysUntil(dateStr) {
-  const m = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  const exp = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  const t = /* @__PURE__ */ new Date();
-  const today = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
-  return Math.round((exp - today) / 864e5);
-}
-async function runLicenceJob(s) {
-  const suppliers = await listSuppliers();
-  const sent = [];
-  let scanned = 0;
-  for (const sup of suppliers) {
-    if (sup.status && sup.status !== "Active" || !sup.email || !sup.licenseExpiry) continue;
-    scanned++;
-    const d = daysUntil(sup.licenseExpiry);
-    if (d === null) continue;
-    const due = [30, 14, 7, 3, 1, 0].includes(d) || d < 0 && d % 7 === 0;
-    if (!due) continue;
-    const rec = await notify(s, "licence", { sup, daysLeft: d });
-    sent.push({ supplier: sup.name, daysLeft: d, status: rec?.status });
-  }
-  return { job: "licence", scanned, notified: sent.length, sent };
-}
-async function runSoaJob(s) {
-  const suppliers = await listSuppliers();
-  const t = /* @__PURE__ */ new Date();
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  const period = `${months[t.getUTCMonth()]} ${t.getUTCFullYear()}`;
-  const asOf = t.toISOString().slice(0, 10);
-  const sent = [];
-  for (const sup of suppliers) {
-    if (sup.status && sup.status !== "Active" || !sup.email) continue;
-    const rec = await notify(s, "soa", { sup, period, asOf });
-    sent.push({ supplier: sup.name, status: rec?.status });
-  }
-  return { job: "soa", period, notified: sent.length, sent };
-}
-async function getSecret() {
-  const s = store();
-  let sec = await s.get("secret");
-  if (!sec) {
-    sec = randomBytes(32).toString("hex");
-    await s.set("secret", sec);
-  }
-  return sec;
-}
-async function makeToken(userId) {
-  const exp = Date.now() + 12 * 3600 * 1e3;
-  const payload = `${userId}.${exp}`;
-  const sig = createHmac("sha256", await getSecret()).update(payload).digest("hex");
-  return Buffer.from(`${payload}.${sig}`).toString("base64url");
-}
-async function verifyToken(tok) {
-  if (!tok) return null;
-  try {
-    const raw = Buffer.from(tok, "base64url").toString();
-    const [userId, exp, sig] = raw.split(".");
-    if (Number(exp) < Date.now()) return null;
-    const good = createHmac("sha256", await getSecret()).update(`${userId}.${exp}`).digest("hex");
-    return sig === good ? userId : null;
-  } catch {
-    return null;
-  }
-}
-var CHEQUE_LAYOUT = {
-  layoutVersion: 5,
-  widthMm: 297,
-  heightMm: 210,
-  fontPt: 11,
-  offsetXmm: 0,
-  offsetYmm: 0,
-  wordsWrapMm: 112,
-  paper: "A4",
-  fields: {
-    date: { x: 227, y: 87, label: "Date" },
-    payee: { x: 132, y: 94, label: "Payee" },
-    words1: { x: 132, y: 107, label: "Amount in words (line 1)" },
-    words2: { x: 132, y: 114, label: "Amount in words (line 2)" },
-    figures: { x: 240, y: 115, label: "Amount in figures" }
-  }
-};
-var DEFAULT_SETTINGS = {
-  entities: [
-    {
-      short: "Marvellous Art",
-      name: "MARVELLOUS ART DECORATION DESIGN & FIT OUT CO. L.L.C",
-      line2: "Company ID 1175355 \u2022 Nad Al Hamar, Dubai, U.A.E \u2022 P.O. Box DXB 455277",
-      line3: "TRN: 104117106500003 | Tel: +971 80062244 | Info@maagroup.ae | www.maagroup.ae"
-    },
-    { short: "MA Building Contracting", name: "M A FOR BUILDING CONTRACTING CO. L.L.C", line2: "Dubai, U.A.E", line3: "" },
-    { short: "MA Building Maintenance", name: "MA BUILDING MAINTENANCE L.L.C", line2: "Dubai, U.A.E", line3: "" }
-  ],
-  projects: [
-    { code: "AST", name: "Aster Garden Jabal Ali" },
-    { code: "JVC", name: "JVC Office" },
-    { code: "MAH", name: "MA Head Office" },
-    { code: "SQU", name: "The Square 2.0 Infrastructure" }
-  ],
-  banks: ["Emirates NBD \u2014 M 3303"],
-  modes: ["Cheque", "Cash", "Bank Transfer"],
-  trades: [
-    "Civil / Substructure Works",
-    "Blockwork & Masonry",
-    "Roofing & Waterproofing",
-    "Finishes (Tiles, Plaster, Paint)",
-    "Carpentry & Joinery",
-    "Metal Work & Glazing",
-    "MEP - Plumbing & Drainage",
-    "MEP - Electrical",
-    "MEP - Air Conditioning",
-    "MEP - Firefighting",
-    "Gypsum & Partitions",
-    "External Works",
-    "Material Supply",
-    "Skilled & Unskilled Labour",
-    "Plant & Equipment",
-    "Transport & Logistics",
-    "Professional Fees",
-    "Other / General"
-  ],
-  cheque: CHEQUE_LAYOUT,
-  seq: 0,
-  supplierSeq: 0
-};
-var ROLES = ["CEO", "QS", "PM", "Accounts", "Secretary"];
-var DEFAULT_USERS = [
-  { id: "ceo", name: "Mohammed Abuassba", role: "CEO", salt: "", pinHash: "" },
-  { id: "qs", name: "QS / Site Engineer", role: "QS", salt: "", pinHash: "" },
-  { id: "pm", name: "PM / Commercial", role: "PM", salt: "", pinHash: "" },
-  { id: "accounts", name: "Accounts", role: "Accounts", salt: "", pinHash: "" },
-  { id: "secretary", name: "Secretary / Reception", role: "Secretary", salt: "", pinHash: "" }
-];
-var DEFAULT_PINS = { ceo: "1234", qs: "1111", pm: "2222", accounts: "3333", secretary: "4444" };
-async function ensureInit() {
-  const s = store();
-  let settings = await s.get("settings", { type: "json" });
-  if (!settings) {
-    settings = DEFAULT_SETTINGS;
-    await s.setJSON("settings", settings);
-  }
-  let patched = false;
-  for (const k of Object.keys(DEFAULT_SETTINGS)) {
-    if (settings[k] === void 0) {
-      settings[k] = DEFAULT_SETTINGS[k];
-      patched = true;
-    }
-  }
-  if (!settings.cheque || settings.cheque.layoutVersion !== CHEQUE_LAYOUT.layoutVersion) {
-    settings.cheque = CHEQUE_LAYOUT;
-    patched = true;
-  }
-  if (patched) await s.setJSON("settings", settings);
-  let users = await s.get("users", { type: "json" });
-  if (!users) {
-    users = DEFAULT_USERS.map((u) => ({ ...u, salt: randomBytes(8).toString("hex") }));
-    users.forEach((u) => {
-      u.pinHash = hashPin(DEFAULT_PINS[u.id], u.salt);
-      u.mustChangePin = true;
-    });
-    await s.setJSON("users", users);
-  } else if (!users.find((u) => u.id === "secretary")) {
-    const sec = { id: "secretary", name: "Secretary / Reception", role: "Secretary", salt: randomBytes(8).toString("hex"), pinHash: "" };
-    sec.pinHash = hashPin("4444", sec.salt);
-    sec.mustChangePin = true;
-    users.push(sec);
-    await s.setJSON("users", users);
-  }
-  return { settings, users };
-}
-async function listSuppliers() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "supplier/" });
-  const out = [];
-  for (const b of blobs) {
-    const v = await s.get(b.key, { type: "json" });
-    if (v) out.push(v);
-  }
-  out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return out;
-}
-async function certsBySupplier(supplierId, excludeNo) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "cert/" });
-  const out = [];
-  for (const b of blobs) {
+  const contractProject = {};
+  const { blobs: cb } = await s.list({ prefix: "contract/" });
+  for (const b of cb) {
     const c = await s.get(b.key, { type: "json" });
-    if (!c || c.no === excludeNo || c.status === "Cancelled") continue;
-    if (c.supplierId === supplierId) out.push(c);
+    if (c) contractProject[c.id] = c.project;
   }
-  return out;
-}
-function computeCert(c, supplier, prevNet, recoveredSoFar) {
-  const adjusted = num(c.originalValue) + num(c.variations);
-  const cumValue = r2(adjusted * num(c.workPct));
-  const gross = r2(cumValue + num(c.materialsOnSite));
-  const retention = r2(gross * num(c.retentionPct));
-  const afterRet = r2(gross - retention);
-  let advanceRecovery = 0, advanceAmount = 0, advanceRate = 0;
-  if (supplier) {
-    advanceAmount = num(supplier.advanceAmount);
-    advanceRate = num(supplier.advanceRecoveryRate);
-    if (advanceAmount > 0 && advanceRate > 0) {
-      const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
-      advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
-    }
-  } else advanceRecovery = num(c.advanceRecovery);
-  const net = r2(afterRet - advanceRecovery - prevNet - num(c.contra));
-  const vat = r2(net * num(c.vatPct));
-  return {
-    adjusted,
-    cumValue,
-    gross,
-    retention,
-    afterRet,
-    advanceRecovery,
-    advanceAmount,
-    advanceRate,
-    advanceRecoveredToDate: r2(recoveredSoFar + advanceRecovery),
-    advanceOutstanding: Math.max(0, r2(advanceAmount - recoveredSoFar - advanceRecovery)),
-    prevCertified: prevNet,
-    net,
-    vat,
-    payable: r2(net + vat)
-  };
-}
-async function recompute(c, supplier) {
-  const priors = await certsBySupplier(c.supplierId, c.no);
-  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
-  const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
-  const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
-  c.calc = computeCert(c, supplier, prevNet, recoveredSoFar);
-  return c;
-}
-function certNo(projectName, supplierName, seq, projects) {
-  const proj = projects.find((p) => p.name === projectName);
-  let pro = proj?.code;
-  if (!pro) {
-    let base = (projectName || "GEN").trim();
-    if (base.toLowerCase().startsWith("the ")) base = base.slice(4);
-    pro = base.replace(/\s+/g, "").slice(0, 3).toUpperCase() || "GEN";
-  }
-  const sup = (supplierName || "").replace(/\s+/g, "").slice(0, 3).toUpperCase() || "SUP";
-  return `${pro}-${sup}-MA${String(seq).padStart(3, "0")}`;
-}
-var CAN = {
-  create: ["QS", "CEO"],
-  editDraft: ["QS", "PM", "CEO"],
-  submit: ["QS", "CEO"],
-  check: ["PM", "CEO"],
-  approve: ["CEO"],
-  reject: ["PM", "CEO"],
-  pay: ["Accounts", "CEO"],
-  cancel: ["CEO"],
-  admin: ["CEO"],
-  suppliers: ["QS", "PM", "CEO", "Secretary"],
-  assets: ["CEO", "PM", "Secretary", "QS"],
-  assetsDelete: ["CEO"],
-  clients: ["CEO", "PM", "QS", "Secretary"],
-  contracts: ["CEO", "PM", "QS"],
-  clientcert: ["CEO", "PM", "QS"],
-  clientcertIssue: ["CEO", "PM"],
-  expense: ["CEO", "PM", "QS", "Accounts", "Secretary"],
-  expenseDelete: ["CEO", "PM"],
-  pnl: ["CEO", "PM", "QS", "Accounts"]
-};
-var DOC_KINDS = ["license", "trn", "bank", "establishment", "other"];
-var ASSET_CATS = [
-  { code: "IT", name: "IT & Electronics", life: 3 },
-  { code: "OE", name: "Office Equipment", life: 5 },
-  { code: "FUR", name: "Furniture", life: 5 },
-  { code: "APP", name: "Appliances", life: 5 },
-  { code: "DEC", name: "Décor & Lighting", life: 5 },
-  { code: "TLS", name: "Tools", life: 3 },
-  { code: "VEH", name: "Vehicles", life: 5 },
-  { code: "MCH", name: "Machinery & Site Equipment", life: 7 }
-];
-var ASSET_CONDITIONS = ["Good", "Fair", "Needs repair", "New"];
-var ASSET_STATUS = ["Active", "Disposed", "Sold", "Written off"];
-function assetCode(cat, seq) { return `MAG-${cat}-${String(seq).padStart(4, "0")}`; }
-async function listAssets() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "asset/MAG-" });
-  const out = [];
-  for (const b of blobs) { try { const v = await s.get(b.key, { type: "json" }); if (v && v.code) out.push(v); } catch { } }
-  out.sort((a, b) => (a.code || "").localeCompare(b.code || "", void 0, { numeric: true }));
-  return out;
-}
-function assetDepreciation(a) {
-  const cost = num(a.cost), life = num(a.life) || 0, resid = num(a.residPct) || 0;
-  const depreciable = r2(cost * (1 - resid));
-  const depPerYear = life > 0 ? r2(depreciable / life) : 0;
-  let age = 0;
-  if (a.purchaseDate) {
-    const m = String(a.purchaseDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) { const pd = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); age = Math.max(0, (Date.now() - pd) / (365.25 * 864e5)); }
-  }
-  let accum = (a.status && a.status !== "Active") ? depreciable : r2(Math.min(depreciable, depPerYear * age));
-  const nbv = r2(cost - accum);
-  return { depPerYear, age: r2(age), accumDep: r2(accum), nbv: Math.max(0, nbv) };
-}
-// ===================== CLIENT (RECEIVABLES) MODULE =====================
-async function listClients() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "client/" });
-  const out = [];
-  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
-  out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return out;
-}
-async function listContracts() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "contract/" });
-  const out = [];
-  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
-  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  return out;
-}
-async function clientCertsByContract(contractId, excludeNo) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "clientcert/" });
-  const out = [];
-  for (const b of blobs) {
+  const { blobs: ccb } = await s.list({ prefix: "clientcert/" });
+  let revenue = 0;
+  const maxGross = {};
+  for (const b of ccb) {
     const c = await s.get(b.key, { type: "json" });
-    if (!c || c.no === excludeNo || c.status === "Cancelled") continue;
-    if (c.contractId === contractId) out.push(c);
-  }
-  return out;
-}
-function computeClientCert(c, contract, prevNet, recoveredSoFar) {
-  const cumValue = num(c.grossCum);
-  const mos = num(c.mos);
-  const gross = r2(cumValue + mos);
-  const retentionPct = num(contract?.retentionPct);
-  const retention = r2(gross * retentionPct);
-  const afterRet = r2(gross - retention);
-  let advanceRecovery = 0;
-  const advanceAmount = num(contract?.advanceAmount), advanceRate = num(contract?.recoveryRate);
-  if (advanceAmount > 0 && advanceRate > 0) {
-    const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
-    advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
-  }
-  const contra = num(c.contra);
-  const net = r2(afterRet - advanceRecovery - prevNet - contra);
-  const vatPct = num(contract?.vatPct);
-  const vat = r2(net * vatPct);
-  return {
-    cumValue, mos, gross, retentionPct, retention, afterRet,
-    advanceAmount, advanceRate, advanceRecovery,
-    advanceRecoveredToDate: r2(recoveredSoFar + advanceRecovery),
-    advanceOutstanding: Math.max(0, r2(advanceAmount - recoveredSoFar - advanceRecovery)),
-    retentionHeld: retention,
-    prevCertified: prevNet, contra, net, vatPct, vat, payable: r2(net + vat)
-  };
-}
-async function recomputeClientCert(c, contract) {
-  const priors = await clientCertsByContract(c.contractId, c.no);
-  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
-  const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
-  const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
-  c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar);
-  return c;
-}
-function clientCertNo(contract, client, seq, dateStr) {
-  let yr = "";
-  const m = String(dateStr || now()).match(/^(\d{4})/);
-  yr = m ? m[1].slice(-2) : String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
-  const first = String(client?.name || contract?.mainContractor || "CLIENT").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "CLIENT";
-  const proj = (String(contract?.projShort || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || String(contract?.project || "PRJ").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3)).slice(0, 3).padEnd(3, "X");
-  return `PC/MA${yr}/${first}/${proj}/${String(seq).padStart(3, "0")}`;
-}
-function clientCertKey(contractId, seq) {
-  return `${contractId}-${String(seq).padStart(3, "0")}`;
-}
-async function resolveClientCert(s, param) {
-  const p = decodeURIComponent(param);
-  // Fast path: certs stored under their slash-free key
-  let c = await s.get("clientcert/" + p, { type: "json" });
-  if (c) return { c, storeKey: "clientcert/" + p, derivedKey: c.key || clientCertKey(c.contractId, c.seq) };
-  // Fallback: scan (handles legacy certs stored under a slash-containing "no",
-  // and lookups by cert number). Self-heals by migrating to the clean key path.
-  const { blobs } = await s.list({ prefix: "clientcert/" });
-  for (const bl of blobs) {
-    const cc = await s.get(bl.key, { type: "json" });
-    if (!cc) continue;
-    const k = cc.key || clientCertKey(cc.contractId, cc.seq);
-    if (k === p || cc.no === p || bl.key === "clientcert/" + p) {
-      const cleanKey = "clientcert/" + k;
-      if (bl.key !== cleanKey) {
-        cc.key = k;
-        try { await s.setJSON(cleanKey, cc); await s.delete(bl.key); } catch {}
-        return { c: cc, storeKey: cleanKey, derivedKey: k };
-      }
-      return { c: cc, storeKey: bl.key, derivedKey: k };
-    }
-  }
-  return null;
-}
-// ---------- Project cost log (expenses) & P&L ----------
-var COST_TYPES = [
-  { name: "Material Supply", group: "Direct" },
-  { name: "Labour (Direct)", group: "Direct" },
-  { name: "Subcontractor", group: "Direct" },
-  { name: "Equipment / Plant", group: "Direct" },
-  { name: "Labour (Indirect)", group: "Indirect" },
-  { name: "Professional Fees", group: "Indirect" },
-  { name: "Overhead / Admin", group: "Overhead" },
-  { name: "Financing / Bank Charges", group: "Overhead" },
-  { name: "Insurance & Bonds", group: "Overhead" }
-];
-var EXPENSE_CATEGORIES = [
-  "Civil / Substructure Works", "Blockwork & Masonry", "Roofing & Waterproofing", "Finishes (Tiles, Plaster, Paint)",
-  "Carpentry & Joinery", "Metal Work & Glazing", "MEP – Plumbing & Drainage", "MEP – Electrical",
-  "MEP – Air Conditioning", "MEP – Firefighting", "Foundations (Types A/B/C)", "Substation Works", "External Works",
-  "Site Management & Engineers", "Skilled & Unskilled Labour", "Plant & Equipment", "Temporary Facilities",
-  "Testing & Commissioning", "Shop Drawings & Submittals", "HSE & Safety Compliance", "Transport & Logistics",
-  "Head Office Overhead", "Financing / Bank Charges", "Insurance & Bonds", "General / Other"
-];
-var EXPENSE_STATUS = ["Pending", "Partially Paid", "Paid", "On Hold", "Disputed"];
-function costGroup(type) { const t = COST_TYPES.find((x) => x.name === type); return t ? t.group : "Direct"; }
-async function listExpenses(project) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "expense/" });
-  const out = [];
-  for (const b of blobs) {
-    const v = await s.get(b.key, { type: "json" });
-    if (!v) continue;
-    if (project && v.project !== project) continue;
-    out.push(v);
-  }
-  out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : (b.seq || 0) - (a.seq || 0));
-  return out;
-}
-async function projectNames(s) {
-  const set = /* @__PURE__ */ new Set();
-  for (const pfx of ["contract/", "cert/", "expense/"]) {
-    const { blobs } = await s.list({ prefix: pfx });
-    for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v && v.project) set.add(String(v.project)); }
-  }
-  return [...set].sort((a, b) => a.localeCompare(b));
-}
-async function upsertCertExpense(s, c) {
-  // Auto-post an approved/paid supplier IPC as a cost line (idempotent by cert no).
-  if (!c || !c.project) return;
-  const id = "XPC-" + c.no.replace(/[^A-Za-z0-9]+/g, "_");
-  const existing = await s.get("expense/" + id, { type: "json" });
-  const amount = num(c.calc?.net);
-  const paid = c.status === "Paid" ? num(c.payment?.amount || c.calc?.payable) : num(existing?.paid);
-  const exp = {
-    id, seq: existing?.seq || 0, project: c.project,
-    date: (c.payment?.date || c.date || now().slice(0, 10)).slice(0, 10),
-    area: existing?.area || "General / All", category: existing?.category || (c.trade || "Subcontractor"),
-    costType: existing?.costType || "Subcontractor",
-    supplier: c.supplier || "", description: `Supplier IPC ${c.no}${c.invoiceNo ? " — inv " + c.invoiceNo : ""}`,
-    poRef: c.lpoRef || "", boqRef: existing?.boqRef || "",
-    budgeted: num(existing?.budgeted), amount, status: c.status === "Paid" ? "Paid" : "Pending", paid,
-    notes: existing?.notes || "", supplierCertNo: c.no, source: "supplier-ipc",
-    createdBy: existing?.createdBy || "system", createdAt: existing?.createdAt || now(), updatedAt: now()
-  };
-  await s.setJSON("expense/" + id, exp);
-}
-async function computePnl(s, project) {
-  const expenses = await listExpenses(project);
-  let cost = 0, paidOut = 0;
-  const byType = {}, byCat = {}, byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byDate = {}, byProject = {};
-  for (const e of expenses) {
-    const a = num(e.amount), p = num(e.paid);
-    cost += a; paidOut += p;
-    byType[e.costType] = (byType[e.costType] || 0) + a;
-    byCat[e.category] = (byCat[e.category] || 0) + a;
-    byGroup[costGroup(e.costType)] = (byGroup[costGroup(e.costType)] || 0) + a;
-    byProject[e.project] = (byProject[e.project] || 0) + a;
-    const d = String(e.date || "").slice(0, 10);
-    if (d) { byDate[d] = byDate[d] || { cost: 0, paid: 0 }; byDate[d].cost += a; byDate[d].paid += p; }
-  }
-  const contracts = await listContracts();
-  const projContracts = contracts.filter((c) => !project || c.project === project);
-  const cids = new Set(projContracts.map((c) => c.id));
-  const { blobs } = await s.list({ prefix: "clientcert/" });
-  const maxGross = {}, netCertified = {}; let cashIn = 0;
-  for (const b of blobs) {
-    const c = await s.get(b.key, { type: "json" });
-    if (!c || !cids.has(c.contractId)) continue;
-    if (!["Issued", "Approved"].includes(c.status)) continue;
+    if (!c || !["Issued", "Approved"].includes(c.status)) continue;
     const g = num(c.calc?.gross);
     if (g > (maxGross[c.contractId] || 0)) maxGross[c.contractId] = g;
-    netCertified[c.contractId] = (netCertified[c.contractId] || 0) + num(c.calc?.net);
   }
-  let revenue = 0, netDue = 0;
-  for (const cid in maxGross) revenue += maxGross[cid];
-  for (const cid in netCertified) netDue += netCertified[cid];
-  revenue = r2(revenue);
-  const grossProfit = r2(revenue - cost);
-  const margin = revenue ? grossProfit / revenue : 0;
-  return {
-    project: project || "", scope: project || "All projects",
-    revenue, netDue: r2(netDue), cost: r2(cost), paidOut: r2(paidOut),
-    grossProfit, margin, byType, byCat, byGroup, byProject,
-    count: expenses.length,
-    byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
-    expenses: expenses.slice(0, 800)
-  };
+  for (const cid in maxGross) {
+    revenue += maxGross[cid];
+    const p = contractProject[cid];
+    if (p) {
+      byProject[p] = byProject[p] || { cost: 0, rev: 0 };
+      byProject[p].rev += maxGross[cid];
+    }
+  }
+  const gp = r2(revenue - cost), margin = revenue ? gp / revenue : 0;
+  const rows = [["Revenue certified (ex-VAT)", emMoney(revenue)], ["Direct costs", emMoney(byGroup.Direct)], ["Indirect costs", emMoney(byGroup.Indirect)], ["Overheads", emMoney(byGroup.Overhead)], ["Total cost incurred", emMoney(cost)], ["Gross profit", emMoney(gp)], ["Gross margin", (margin * 100).toFixed(1) + "%"], ["Cash paid to suppliers", emMoney(paid)]];
+  const projRows = Object.entries(byProject).sort((a, b) => b[1].cost - a[1].cost);
+  const projTable = projRows.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:4px;font-size:12px"><tr style="background:#1f3864;color:#fff"><td style="padding:5px 8px">Project</td><td style="padding:5px 8px;text-align:right">Revenue</td><td style="padding:5px 8px;text-align:right">Cost</td><td style="padding:5px 8px;text-align:right">Gross Profit</td></tr>${projRows.map(([k, v]) => `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">${emEsc(k)}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">${emMoney(v.rev)}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">${emMoney(v.cost)}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">${emMoney(r2(v.rev - v.cost))}</td></tr>`).join("")}</table>` : "No project costs logged this period.";
+  const to = getEnv("PNL_TO") || "ceo@maagroup.ae";
+  const html = emailShell(cfg, {
+    title: "Weekly Project P&L Summary",
+    band: "#1f3864",
+    greeting: "Mohammed",
+    preheader: `Group gross profit ${emMoney(gp)} at ${(margin * 100).toFixed(1)}% margin.`,
+    lead: [`Here is the weekly project P&L summary as of <strong>${emDate(now())}</strong>, generated automatically from the daily cost log and certified client IPCs.`],
+    table: rows,
+    note: `<strong>By project:</strong><br>${projTable}`,
+    noteColor: "#eef4ff",
+    noteBar: "#1f3864",
+    closing: `Figures are ex-VAT. Revenue = cumulative work certified to clients; cost = invoices logged in the daily cost log (including auto-posted supplier IPCs).`
+  });
+  const rec = await sendMail(s, cfg, { type: "pnl_weekly", to, toName: "Mohammed Abuassba", subject: `Weekly P&L \u2014 Gross Profit ${emMoney(gp)} (${(margin * 100).toFixed(1)}%)`, html });
+  return { job: "pnl", revenue, cost, grossProfit: gp, margin, status: rec?.status };
 }
-var api_default = async (req, context) => {
-  const url = new URL(req.url);
-  const path = url.pathname.replace(/^\/(?:api|\.netlify\/functions\/api)\/?/, "");
-  const s = store();
-  const { settings, users } = await ensureInit();
-  if (path === "login" && req.method === "POST") {
-    const { userId: userId2, pin } = await req.json();
-    const u = users.find((x) => x.id === userId2);
-    if (!u || hashPin(String(pin || ""), u.salt) !== u.pinHash) return err("Wrong PIN", 401);
-    return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, mustChangePin: !!u.mustChangePin } });
+
+// _src/cron-pnl.mjs
+var config = { schedule: "0 6 * * 1" };
+var cron_pnl_default = async () => {
+  try {
+    const res = await runPnlJob(store());
+    return new Response(JSON.stringify(res), { headers: { "content-type": "application/json" } });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String(e && e.message || e) }), { status: 500 });
   }
-  if (path === "userlist") return json(users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
-  const auth = req.headers.get("authorization") || "";
-  const userId = await verifyToken(auth.startsWith("Bearer ") ? auth.slice(7) : null);
-  const me = users.find((x) => x.id === userId);
-  if (!me) return err("Not logged in", 401);
-  const can = (a) => CAN[a].includes(me.role);
-  if (path === "pin" && req.method === "POST") {
-    const { pin } = await req.json();
-    if (!/^\d{4,8}$/.test(String(pin))) return err("PIN must be 4-8 digits");
-    const all = await s.get("users", { type: "json" });
-    const u = all.find((x) => x.id === me.id);
-    u.salt = randomBytes(8).toString("hex");
-    u.pinHash = hashPin(String(pin), u.salt);
-    u.mustChangePin = false;
-    await s.setJSON("users", all);
-    return json({ ok: true });
-  }
-  if (path === "verifypin" && req.method === "POST") {
-    const { pin } = await req.json();
-    return json({ ok: hashPin(String(pin || ""), me.salt) === me.pinHash });
-  }
-  if (path === "usage") {
-    if (!can("admin")) return err("CEO only", 403);
-    const count = async (prefix) => (await s.list({ prefix })).blobs.length;
-    const certs = await count("cert/");
-    const suppliers = await count("supplier/");
-    const attachments = await count("certdoc/");
-    const proofs = await count("proof/");
-    const supplierDocs = await count("supplierdoc/");
-    const docs = attachments + proofs + supplierDocs;
-    const estMB = Math.round((certs * 0.01 + suppliers * 0.01 + docs * 0.8) * 10) / 10;
-    return json({ certs, suppliers, attachments, proofs, supplierDocs, docs, estMB });
-  }
-  if (path === "emailcfg") {
-    if (!can("admin")) return err("CEO only", 403);
-    if (req.method === "GET") {
-      const cfg = await getEmailCfg(s);
-      return json({
-        enabled: cfg.enabled,
-        provider: cfg.provider,
-        from: cfg.from,
-        fromName: cfg.fromName,
-        replyTo: cfg.replyTo,
-        cc: cfg.cc,
-        bcc: cfg.bcc,
-        host: cfg.host,
-        smtpHost: cfg.smtpHost,
-        smtpPort: cfg.smtpPort,
-        smtpUser: cfg.smtpUser,
-        smtpPassSet: !!cfg.smtpPass,
-        smtpPassFromEnv: !!getEnv("SMTP_PASS"),
-        tokenSet: !!cfg.token,
-        tokenFromEnv: !!getEnv("ZEPTOMAIL_TOKEN"),
-        triggers: cfg.triggers,
-        types: EMAIL_TYPES
-      });
-    }
-    if (req.method === "POST") {
-      const b = await req.json();
-      const saved = await s.get("emailcfg", { type: "json" }) || {};
-      for (const k of ["enabled", "provider", "from", "fromName", "replyTo", "cc", "bcc", "host", "smtpHost", "smtpUser"]) if (b[k] !== void 0) saved[k] = b[k];
-      if (b.smtpPort !== void 0) saved.smtpPort = Number(b.smtpPort) || 465;
-      if (b.triggers !== void 0) saved.triggers = b.triggers;
-      if (typeof b.token === "string" && b.token.trim()) saved.token = b.token.trim();
-      if (typeof b.smtpPass === "string" && b.smtpPass.trim()) saved.smtpPass = b.smtpPass.trim();
-      if (b.clearToken) saved.token = "";
-      if (b.clearSmtpPass) saved.smtpPass = "";
-      await s.setJSON("emailcfg", saved);
-      return json({ ok: true });
-    }
-  }
-  if (path === "emaillog") {
-    if (!can("admin")) return err("CEO only", 403);
-    const { blobs } = await s.list({ prefix: "emaillog/" });
-    const out = [];
-    for (const b of blobs) {
-      const v = await s.get(b.key, { type: "json" });
-      if (v) out.push(v);
-    }
-    out.sort((a, b) => a.at < b.at ? 1 : -1);
-    return json({ log: out.slice(0, 200), total: out.length });
-  }
-  if (path === "emailtest" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
-    const { to } = await req.json();
-    const cfg = await getEmailCfg(s);
-    const html = emailShell(cfg, {
-      title: "Test Notification",
-      band: "#2e75b6",
-      lead: [`This is a test email from the MA Group Payment System, confirming that outbound notifications are configured correctly.`, `Sent at ${emDate(now())}.`],
-      note: `If you received this, replies to <strong>${emEsc(cfg.replyTo)}</strong> will reach your team.`
-    });
-    const rec = await sendMail(s, cfg, { type: "", to: to || cfg.replyTo, toName: "Test", subject: "MA Group \u2014 Email Test", html });
-    return json(rec);
-  }
-  if (path === "emailrun" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
-    const { job } = await req.json();
-    if (job === "licence") return json(await runLicenceJob(s));
-    if (job === "soa") return json(await runSoaJob(s));
-    return err("Unknown job");
-  }
-  if (path === "bootstrap") {
-    const { blobs } = await s.list({ prefix: "cert/" });
-    const certs = [];
-    for (const b of blobs) {
-      const c = await s.get(b.key, { type: "json" });
-      if (c) certs.push({
-        no: c.no,
-        date: c.date,
-        entity: c.entity,
-        project: c.project,
-        supplier: c.supplier,
-        supplierId: c.supplierId,
-        invoiceNo: c.invoiceNo,
-        lpoRef: c.lpoRef,
-        status: c.status,
-        payable: c.calc?.payable,
-        net: c.calc?.net,
-        retention: c.calc?.retention,
-        advanceRecovery: c.calc?.advanceRecovery,
-        mode: c.payment?.mode,
-        hasPayment: !!c.payment,
-        receiptDone: !!c.payment?.receipt?.received
-      });
-    }
-    certs.sort((a, b) => a.no < b.no ? 1 : -1);
-    const register = await s.get("register", { type: "json" }) || [];
-    const suppliers = await listSuppliers();
-    const assets = { sign: await s.get("asset/sign") || "", stamp: await s.get("asset/stamp") || "" };
-    const assetCount = (await s.list({ prefix: "asset/MAG-" })).blobs.length;
-    const clientCount = (await s.list({ prefix: "client/" })).blobs.length;
-    const contractCount = (await s.list({ prefix: "contract/" })).blobs.length;
-    const clientCertCount = (await s.list({ prefix: "clientcert/" })).blobs.length;
-    return json({
-      me: { id: me.id, name: me.name, role: me.role },
-      settings,
-      certs,
-      register,
-      suppliers,
-      assets,
-      assetCount,
-      clientCount,
-      contractCount,
-      clientCertCount,
-      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role }))
-    });
-  }
-  if (path === "settings" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
-    const body = await req.json();
-    const merged = { ...settings, ...body, seq: settings.seq, supplierSeq: settings.supplierSeq };
-    await s.setJSON("settings", merged);
-    return json({ ok: true, settings: merged });
-  }
-  if (path === "asset" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
-    const { kind, dataUrl } = await req.json();
-    if (!["sign", "stamp"].includes(kind)) return err("Bad asset kind");
-    if (dataUrl && !/^data:image\/(png|jpeg|jpg|webp);base64,/.test(dataUrl)) return err("Must be a PNG/JPG image");
-    if (dataUrl && dataUrl.length > 7e5) return err("Image too large \u2014 under ~500 KB");
-    await s.set("asset/" + kind, dataUrl || "");
-    return json({ ok: true });
-  }
-  if (path === "users" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
-    const { id, name, role, pin } = await req.json();
-    if (!id || !name || !ROLES.includes(role)) return err("Bad user");
-    const all = await s.get("users", { type: "json" });
-    let u = all.find((x) => x.id === id);
-    if (!u) {
-      u = { id, salt: randomBytes(8).toString("hex"), pinHash: "" };
-      all.push(u);
-    }
-    u.name = name;
-    u.role = role;
-    if (pin) {
-      u.salt = randomBytes(8).toString("hex");
-      u.pinHash = hashPin(String(pin), u.salt);
-      u.mustChangePin = true;
-    }
-    await s.setJSON("users", all);
-    return json({ ok: true });
-  }
-  if (path === "supplier" && req.method === "POST") {
-    if (!can("suppliers")) return err("No rights", 403);
-    const b = await req.json();
-    if (!b.name) return err("Legal name is required");
-    const emailIn = (b.email || "").trim();
-    if (!emailIn || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailIn)) return err("A valid email address is required (mandatory for notifications)");
-    const st = await s.get("settings", { type: "json" });
-    let id = b.id;
-    if (!id) {
-      st.supplierSeq = (st.supplierSeq || 0) + 1;
-      id = "S" + String(st.supplierSeq).padStart(3, "0");
-      await s.setJSON("settings", st);
-    }
-    const existing = b.id ? await s.get("supplier/" + b.id, { type: "json" }) : null;
-    const str = (k) => b[k] === void 0 ? existing?.[k] || "" : b[k] || "";
-    const ptype = b.type === "Supplier" || b.type === "Subcontractor" ? b.type : existing?.type || "Subcontractor";
-    const isSupplier = ptype === "Supplier";
-    const sup = {
-      id,
-      type: ptype,
-      // company
-      name: b.name,
-      tradeName: str("tradeName"),
-      licenseNo: str("licenseNo"),
-      licenseExpiry: str("licenseExpiry"),
-      establishmentCard: str("establishmentCard"),
-      address: str("address"),
-      poBox: str("poBox"),
-      emirate: str("emirate"),
-      website: str("website"),
-      category: str("category"),
-      trade: str("trade") || str("category"),
-      // contact
-      contactName: str("contactName"),
-      contactDesignation: str("contactDesignation"),
-      mobile: str("mobile"),
-      tel: str("tel"),
-      contact: str("contact"),
-      email: str("email"),
-      // tax & bank
-      trn: str("trn"),
-      vatRegistered: b.vatRegistered === void 0 ? existing?.vatRegistered || false : !!b.vatRegistered,
-      bank: str("bank"),
-      accountName: str("accountName"),
-      accountNo: str("accountNo"),
-      iban: str("iban"),
-      swift: str("swift"),
-      // contract / commercial
-      entity: b.entity || existing?.entity || settings.entities[0].short,
-      project: str("project"),
-      lpoRef: str("lpoRef"),
-      signDate: str("signDate"),
-      contractValue: b.contractValue === void 0 ? num(existing?.contractValue) : num(b.contractValue),
-      vatPct: b.vatPct === void 0 || b.vatPct === "" ? existing?.vatPct ?? 0.05 : num(b.vatPct),
-      retentionPct: isSupplier ? 0 : b.retentionPct === void 0 || b.retentionPct === "" ? existing?.retentionPct ?? 0.1 : num(b.retentionPct),
-      dlpMonths: isSupplier ? 0 : b.dlpMonths === void 0 ? num(existing?.dlpMonths) : num(b.dlpMonths),
-      retentionRelease: isSupplier ? "" : str("retentionRelease"),
-      advanceAmount: b.advanceAmount === void 0 ? num(existing?.advanceAmount) : num(b.advanceAmount),
-      advanceRecoveryRate: b.advanceRecoveryRate === void 0 ? num(existing?.advanceRecoveryRate) : num(b.advanceRecoveryRate),
-      advanceDate: str("advanceDate"),
-      advanceRef: str("advanceRef"),
-      notes: str("notes"),
-      status: b.status || existing?.status || "Active",
-      docs: existing?.docs || {},
-      regNo: existing?.regNo || "MA-SUP-" + id,
-      createdAt: existing?.createdAt || now(),
-      createdBy: existing?.createdBy || me.name,
-      updatedAt: now(),
-      updatedBy: me.name
-    };
-    await s.setJSON("supplier/" + id, sup);
-    if (!b.id) await notify(s, "welcome", { sup });
-    return json(sup);
-  }
-  const supGet = path.match(/^supplier\/([^/]+)$/);
-  if (supGet && req.method === "GET") {
-    const v = await s.get("supplier/" + decodeURIComponent(supGet[1]), { type: "json" });
-    if (!v) return err("Not found", 404);
-    const priors = await certsBySupplier(v.id);
-    v.advanceRecoveredToDate = r2(priors.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
-    v.advanceOutstanding = Math.max(0, r2(num(v.advanceAmount) - v.advanceRecoveredToDate));
-    return json(v);
-  }
-  const supDoc = path.match(/^supplier\/([^/]+)\/doc$/);
-  if (supDoc) {
-    const id = decodeURIComponent(supDoc[1]);
-    if (req.method === "GET") {
-      const kind = url.searchParams.get("kind") || "";
-      const dataUrl = await s.get(`supplierdoc/${id}/${kind}`) || "";
-      return json({ dataUrl });
-    }
-    if (req.method === "POST") {
-      if (!can("suppliers")) return err("No rights", 403);
-      const { kind, dataUrl, name } = await req.json();
-      if (!DOC_KINDS.includes(kind)) return err("Bad document type");
-      if (!dataUrl || !/^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/.test(dataUrl)) return err("Attach a PNG/JPG/PDF");
-      if (dataUrl.length > 26e5) return err("File too large \u2014 under ~1.8 MB");
-      const sup = await s.get("supplier/" + id, { type: "json" });
-      if (!sup) return err("Supplier not found", 404);
-      await s.set(`supplierdoc/${id}/${kind}`, dataUrl);
-      sup.docs = sup.docs || {};
-      sup.docs[kind] = { name: name || kind, at: now() };
-      sup.updatedAt = now();
-      await s.setJSON("supplier/" + id, sup);
-      return json({ ok: true, docs: sup.docs });
-    }
-  }
-  const certGet = path.match(/^cert\/([^/]+)$/);
-  if (certGet && req.method === "GET") {
-    const c = await s.get("cert/" + decodeURIComponent(certGet[1]), { type: "json" });
-    return c ? json(c) : err("Not found", 404);
-  }
-  if (path === "cert" && req.method === "POST") {
-    if (!can("create")) return err("Only QS or CEO can create certificates", 403);
-    const b = await req.json();
-    if (!b.supplierId) return err("Choose a supplier");
-    const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
-    if (!sup) return err("Supplier not found");
-    const st = await s.get("settings", { type: "json" });
-    const project = b.project || sup.project || "";
-    const entity = b.entity || sup.entity || settings.entities[0].short;
-    let maxSeq = st.seq || 0;
-    {
-      const { blobs } = await s.list({ prefix: "cert/" });
-      for (const bl of blobs) {
-        const ec = await s.get(bl.key, { type: "json" });
-        if (ec && (ec.seq || 0) > maxSeq) maxSeq = ec.seq;
-      }
-    }
-    let seq = maxSeq + 1;
-    let no = certNo(project, sup.name, seq, st.projects);
-    let guard = 0;
-    while (await s.get("cert/" + no) && guard++ < 50) {
-      seq++;
-      no = certNo(project, sup.name, seq, st.projects);
-    }
-    st.seq = seq;
-    const cert = {
-      no,
-      seq: st.seq,
-      createdBy: me.id,
-      createdAt: now(),
-      date: b.date || now().slice(0, 10),
-      entity,
-      project,
-      supplierId: sup.id,
-      supplier: sup.name,
-      lpoRef: sup.lpoRef || "",
-      invoiceNo: b.invoiceNo || "",
-      trade: sup.trade || sup.category || b.trade || "",
-      periodFrom: b.periodFrom || "",
-      periodTo: b.periodTo || "",
-      originalValue: num(sup.contractValue),
-      variations: num(b.variations),
-      workPct: num(b.workPct),
-      materialsOnSite: num(b.materialsOnSite),
-      retentionPct: num(sup.retentionPct),
-      contra: num(b.contra),
-      vatPct: num(sup.vatPct),
-      notes: b.notes || "",
-      status: "Draft",
-      payment: null,
-      audit: [{ at: now(), by: me.name, action: "Created (Draft)" }]
-    };
-    await s.setJSON("settings", st);
-    await recompute(cert, sup);
-    await s.setJSON("cert/" + no, cert);
-    await notify(s, "initiated", { cert, sup });
-    return json(cert);
-  }
-  const upMatch = path.match(/^cert\/([^/]+)$/);
-  if (upMatch && req.method === "PUT") {
-    const key = "cert/" + decodeURIComponent(upMatch[1]);
-    const c = await s.get(key, { type: "json" });
-    if (!c) return err("Not found", 404);
-    if (["Approved", "Paid", "Cancelled"].includes(c.status) && !can("admin")) return err("Locked after approval", 403);
-    if (!can("editDraft")) return err("No edit rights", 403);
-    const b = await req.json();
-    for (const f of ["date", "invoiceNo", "periodFrom", "periodTo", "notes", "project", "entity"]) if (b[f] !== void 0) c[f] = b[f];
-    for (const f of ["variations", "workPct", "materialsOnSite", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
-    const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
-    if (sup) {
-      c.originalValue = num(sup.contractValue);
-      c.retentionPct = num(sup.retentionPct);
-      c.vatPct = num(sup.vatPct);
-      c.lpoRef = sup.lpoRef;
-      c.supplier = sup.name;
-    }
-    await recompute(c, sup);
-    c.audit.push({ at: now(), by: me.name, action: "Edited" });
-    await s.setJSON(key, c);
-    return json(c);
-  }
-  const trMatch = path.match(/^cert\/([^/]+)\/transition$/);
-  if (trMatch && req.method === "POST") {
-    const key = "cert/" + decodeURIComponent(trMatch[1]);
-    const c = await s.get(key, { type: "json" });
-    if (!c) return err("Not found", 404);
-    const { action, comment, payment } = await req.json();
-    let mailAfter = null;
-    const flow = {
-      submit: ["Draft", "Certified", "submit"],
-      check: ["Certified", "Checked", "check"],
-      approve: ["Checked", "Approved", "approve"],
-      cancel: ["*", "Cancelled", "cancel"]
-    };
-    if (action === "reject") {
-      if (!can("reject")) return err("No rights", 403);
-      if (!comment) return err("Rejection needs a comment");
-      const back = { Certified: "Draft", Checked: "Draft", Approved: "Checked" };
-      if (!back[c.status]) return err("Cannot reject from " + c.status);
-      c.status = back[c.status];
-      c.approvedBy = null;
-      c.approvedAt = null;
-      c.audit.push({ at: now(), by: me.name, action: `Rejected \u2192 ${c.status}`, comment });
-      mailAfter = { type: "action", comment };
-    } else if (action === "pay") {
-      if (!can("pay")) return err("Only Accounts or CEO can record payment", 403);
-      if (c.status !== "Approved") return err("Certificate must be Approved first");
-      if (!payment?.mode) return err("Payment mode required");
-      const amount = num(payment.amount) || c.calc.payable;
-      c.payment = {
-        mode: payment.mode,
-        ref: payment.ref || "",
-        bank: payment.bank || "",
-        date: payment.date || now().slice(0, 10),
-        amount,
-        payee: payment.payee || c.supplier,
-        purpose: payment.purpose || "",
-        by: me.name,
-        printed: false,
-        proof: false,
-        receipt: { received: false }
-      };
-      if (payment.proof && typeof payment.proof === "string" && payment.proof.startsWith("data:")) {
-        if (payment.proof.length > 26e5) return err("Proof file too large \u2014 under ~1.8 MB");
-        await s.set("proof/" + c.no, payment.proof);
-        c.payment.proof = true;
-        c.payment.proofName = payment.proofName || "proof";
-      }
-      c.status = "Paid";
-      c.audit.push({ at: now(), by: me.name, action: `Paid \u2014 ${payment.mode} ${payment.ref || ""} AED ${amount}` });
-      const register = await s.get("register", { type: "json" }) || [];
-      register.push({
-        sr: register.length + 1,
-        at: now(),
-        no: c.no,
-        invoiceNo: c.invoiceNo,
-        entity: c.entity,
-        project: c.project,
-        supplier: c.supplier,
-        payee: c.payment.payee,
-        mode: c.payment.mode,
-        ref: c.payment.ref,
-        bank: c.payment.bank,
-        date: c.payment.date,
-        amount,
-        by: me.name,
-        receiptDone: false
-      });
-      await s.setJSON("register", register);
-      mailAfter = { type: "paid" };
-    } else if (flow[action]) {
-      const [from, to, right] = flow[action];
-      if (!can(right)) return err("No rights for " + action, 403);
-      if (from !== "*" && c.status !== from) return err(`Must be ${from} (is ${c.status})`);
-      c.status = to;
-      if (action === "approve") {
-        c.approvedBy = me.name;
-        c.approvedAt = now();
-        mailAfter = { type: "approved" };
-      }
-      c.audit.push({ at: now(), by: me.name, action: `${action} \u2192 ${to}`, comment: comment || void 0 });
-    } else return err("Unknown action");
-    await s.setJSON(key, c);
-    if (action === "approve" || action === "pay") { try { await upsertCertExpense(s, c); } catch {} }
-    if (mailAfter) {
-      const msup = await s.get("supplier/" + c.supplierId, { type: "json" });
-      await notify(s, mailAfter.type, { cert: c, sup: msup, comment: mailAfter.comment });
-    }
-    return json(c);
-  }
-  const prMatch = path.match(/^cert\/([^/]+)\/printed$/);
-  if (prMatch && req.method === "POST") {
-    const key = "cert/" + decodeURIComponent(prMatch[1]);
-    const c = await s.get(key, { type: "json" });
-    if (!c || !c.payment) return err("Not found", 404);
-    c.payment.printed = true;
-    c.payment.printedAt = now();
-    c.payment.printedBy = me.name;
-    await s.setJSON(key, c);
-    if (c.payment.mode === "Cheque") {
-      const psup = await s.get("supplier/" + c.supplierId, { type: "json" });
-      await notify(s, "cheque", { cert: c, sup: psup });
-    }
-    return json({ ok: true });
-  }
-  const proofM = path.match(/^cert\/([^/]+)\/proof$/);
-  if (proofM) {
-    const no = decodeURIComponent(proofM[1]);
-    const key = "cert/" + no;
-    if (req.method === "GET") return json({ dataUrl: await s.get("proof/" + no) || "" });
-    if (req.method === "POST") {
-      if (!can("pay")) return err("Only Accounts or CEO can attach proof", 403);
-      const c = await s.get(key, { type: "json" });
-      if (!c || !c.payment) return err("Record a payment first", 404);
-      const { dataUrl, name } = await req.json();
-      if (!dataUrl || !/^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/.test(dataUrl)) return err("Attach a PNG/JPG/PDF");
-      if (dataUrl.length > 26e5) return err("Proof file too large \u2014 under ~1.8 MB");
-      await s.set("proof/" + no, dataUrl);
-      c.payment.proof = true;
-      c.payment.proofName = name || "proof";
-      c.audit.push({ at: now(), by: me.name, action: "Payment proof attached" });
-      await s.setJSON(key, c);
-      return json({ ok: true });
-    }
-  }
-  const rcM = path.match(/^cert\/([^/]+)\/receipt$/);
-  if (rcM) {
-    const no = decodeURIComponent(rcM[1]);
-    const key = "cert/" + no;
-    if (req.method === "GET") return json({ dataUrl: await s.get("receipt/" + no) || "" });
-    if (req.method === "POST") {
-      if (!can("pay")) return err("Only Accounts or CEO can record a receipt", 403);
-      const c = await s.get(key, { type: "json" });
-      if (!c || !c.payment) return err("Record a payment first", 404);
-      const { collectorName, collectorEID, collectionDate, dataUrl, name } = await req.json();
-      if (!collectorName || !String(collectorName).trim()) return err("Collector name is required");
-      const eidDigits = String(collectorEID || "").replace(/\D/g, "");
-      if (eidDigits.length !== 15 || !eidDigits.startsWith("784")) return err("A valid 15-digit Emirates ID (784-...) is required");
-      if (!dataUrl || !/^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/.test(dataUrl)) return err("Attach the signed receipt copy (PNG/JPG/PDF)");
-      if (dataUrl.length > 26e5) return err("Receipt file too large \u2014 under ~1.8 MB");
-      await s.set("receipt/" + no, dataUrl);
-      c.payment.receipt = {
-        received: true,
-        collectorName: String(collectorName).trim(),
-        collectorEID: eidDigits.replace(/(\d{3})(\d{4})(\d{7})(\d)/, "$1-$2-$3-$4"),
-        collectionDate: collectionDate || now().slice(0, 10),
-        name: name || "receipt",
-        at: now(),
-        by: me.name
-      };
-      c.audit.push({ at: now(), by: me.name, action: `Receipt captured \u2014 collector ${String(collectorName).trim()} (EID \u2026${eidDigits.slice(-4)})` });
-      await s.setJSON(key, c);
-      const register = await s.get("register", { type: "json" }) || [];
-      let changed = false;
-      for (const row of register) if (row.no === no) {
-        row.receiptDone = true;
-        changed = true;
-      }
-      if (changed) await s.setJSON("register", register);
-      return json({ ok: true, receipt: c.payment.receipt });
-    }
-  }
-  const attM = path.match(/^cert\/([^/]+)\/attachment$/);
-  if (attM) {
-    const ATT_KINDS = ["proforma", "invoice", "lpo", "delivery", "quotation", "other"];
-    const no = decodeURIComponent(attM[1]);
-    const key = "cert/" + no;
-    if (req.method === "GET") {
-      const kind = url.searchParams.get("kind") || "";
-      return json({ dataUrl: await s.get("certdoc/" + no + "/" + kind) || "" });
-    }
-    if (req.method === "POST") {
-      if (!(can("editDraft") || can("pay"))) return err("No rights to attach", 403);
-      const c = await s.get(key, { type: "json" });
-      if (!c) return err("Not found", 404);
-      const { kind, dataUrl, name } = await req.json();
-      if (!ATT_KINDS.includes(kind)) return err("Bad document type");
-      if (!dataUrl || !/^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/.test(dataUrl)) return err("Attach a PNG/JPG/PDF");
-      if (dataUrl.length > 26e5) return err("File too large \u2014 under ~1.8 MB");
-      await s.set("certdoc/" + no + "/" + kind, dataUrl);
-      c.attachments = c.attachments || {};
-      c.attachments[kind] = { name: name || kind, at: now(), by: me.name };
-      c.audit.push({ at: now(), by: me.name, action: `Attached ${kind}` });
-      await s.setJSON(key, c);
-      return json({ ok: true, attachments: c.attachments });
-    }
-  }
-  if (path === "assets" && req.method === "GET") {
-    const assets = await listAssets();
-    const withDep = assets.map((a) => ({ ...a, dep: assetDepreciation(a) }));
-    const byCat = {};
-    let totalValue = 0, totalNbv = 0, active = 0;
-    for (const a of withDep) {
-      const c = a.cat || "?";
-      byCat[c] = byCat[c] || { count: 0, value: 0, nbv: 0 };
-      byCat[c].count++; byCat[c].value = r2(byCat[c].value + num(a.cost)); byCat[c].nbv = r2(byCat[c].nbv + a.dep.nbv);
-      totalValue = r2(totalValue + num(a.cost)); totalNbv = r2(totalNbv + a.dep.nbv);
-      if (!a.status || a.status === "Active") active++;
-    }
-    return json({ assets: withDep, cats: ASSET_CATS, conditions: ASSET_CONDITIONS, statuses: ASSET_STATUS, summary: { count: withDep.length, active, totalValue, totalNbv, byCat } });
-  }
-  if (path === "assets" && req.method === "POST") {
-    if (!can("assets")) return err("No rights to manage assets", 403);
-    const b = await req.json();
-    const catDef = ASSET_CATS.find((c) => c.code === b.cat);
-    if (!catDef) return err("Choose a valid category");
-    if (!b.description) return err("Asset description is required");
-    let code = b.code;
-    const existing = code ? await s.get("asset/" + code, { type: "json" }) : null;
-    if (!code) {
-      const all = await listAssets();
-      let maxSeq = 0;
-      for (const a of all) { const m = String(a.code || "").match(new RegExp("^MAG-" + b.cat + "-(\\d+)$")); if (m && +m[1] > maxSeq) maxSeq = +m[1]; }
-      let seq = maxSeq + 1, guard = 0;
-      code = assetCode(b.cat, seq);
-      while (await s.get("asset/" + code) && guard++ < 200) { seq++; code = assetCode(b.cat, seq); }
-    }
-    const str = (k) => b[k] === void 0 ? existing?.[k] || "" : b[k] || "";
-    const asset = {
-      code,
-      cat: b.cat,
-      description: b.description,
-      model: str("model"),
-      year: str("year"),
-      serial: str("serial"),
-      location: str("location"),
-      custodian: str("custodian"),
-      owner: b.owner || existing?.owner || "MA Group",
-      purchaseDate: str("purchaseDate"),
-      condition: b.condition || existing?.condition || "Good",
-      cost: b.cost === void 0 ? num(existing?.cost) : num(b.cost),
-      life: b.life === void 0 || b.life === "" ? existing?.life ?? catDef.life : num(b.life),
-      residPct: b.residPct === void 0 || b.residPct === "" ? existing?.residPct ?? 0 : num(b.residPct),
-      status: b.status || existing?.status || "Active",
-      remarks: str("remarks"),
-      createdAt: existing?.createdAt || now(),
-      createdBy: existing?.createdBy || me.name,
-      updatedAt: now(),
-      updatedBy: me.name
-    };
-    await s.setJSON("asset/" + code, asset);
-    return json({ ...asset, dep: assetDepreciation(asset) });
-  }
-  const assetGet = path.match(/^assets\/([^/]+)$/);
-  if (assetGet && assetGet[1] !== "import" && req.method === "GET") {
-    const v = await s.get("asset/" + decodeURIComponent(assetGet[1]), { type: "json" });
-    if (!v) return err("Not found", 404);
-    return json({ ...v, dep: assetDepreciation(v) });
-  }
-  if (assetGet && req.method === "DELETE") {
-    if (!can("assetsDelete")) return err("Only the CEO can permanently delete an asset. Use 'Dispose' instead.", 403);
-    const code = decodeURIComponent(assetGet[1]);
-    const v = await s.get("asset/" + code, { type: "json" });
-    if (!v) return err("Not found", 404);
-    await s.delete("asset/" + code);
-    return json({ ok: true });
-  }
-  if (path === "assets/import" && req.method === "POST") {
-    if (!can("assets")) return err("No rights to manage assets", 403);
-    const b = await req.json();
-    const rows = Array.isArray(b.assets) ? b.assets : [];
-    if (!rows.length) return err("Nothing to import");
-    let created = 0, updated = 0, skipped = 0;
-    const overwrite = !!b.overwrite;
-    for (const r of rows) {
-      const code = String(r.code || "").trim();
-      if (!/^MAG-[A-Z]{2,3}-\d{3,5}$/.test(code)) { skipped++; continue; }
-      const cat = String(r.cat || code.split("-")[1] || "").trim();
-      const catDef = ASSET_CATS.find((c) => c.code === cat);
-      if (!catDef) { skipped++; continue; }
-      const exists = await s.get("asset/" + code, { type: "json" });
-      if (exists && !overwrite) { skipped++; continue; }
-      const asset = {
-        code, cat,
-        description: String(r.description || "").trim() || "(no description)",
-        model: String(r.model || "").trim(),
-        year: String(r.year || "").trim(),
-        serial: String(r.serial || "").trim(),
-        location: String(r.location || "").trim(),
-        custodian: String(r.custodian || "").trim(),
-        owner: String(r.owner || "").trim() || "MA Group",
-        purchaseDate: String(r.purchaseDate || "").trim(),
-        condition: String(r.condition || "").trim() || "Good",
-        cost: num(r.cost),
-        life: r.life === void 0 || r.life === "" ? catDef.life : num(r.life),
-        residPct: num(r.residPct),
-        status: String(r.status || "").trim() || "Active",
-        remarks: String(r.remarks || "").trim(),
-        createdAt: exists?.createdAt || now(),
-        createdBy: exists?.createdBy || me.name,
-        updatedAt: now(),
-        updatedBy: me.name
-      };
-      await s.setJSON("asset/" + code, asset);
-      if (exists) updated++; else created++;
-    }
-    return json({ ok: true, created, updated, skipped, total: rows.length });
-  }
-  if (path === "clients" && req.method === "GET") {
-    return json(await listClients());
-  }
-  if (path === "client" && req.method === "POST") {
-    if (!can("clients")) return err("No rights to manage clients", 403);
-    const b = await req.json();
-    if (!b.name) return err("Client legal name is required");
-    const stg = await s.get("settings", { type: "json" });
-    let id = b.id;
-    if (!id) { stg.clientSeq = (stg.clientSeq || 0) + 1; id = "C" + String(stg.clientSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
-    const ex = b.id ? await s.get("client/" + b.id, { type: "json" }) : null;
-    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
-    const cl = {
-      id, type: "Client",
-      name: b.name, tradeName: str("tradeName"), trn: str("trn"),
-      address: str("address"), poBox: str("poBox"), emirate: str("emirate"),
-      contactName: str("contactName"), contactDesignation: str("contactDesignation"),
-      mobile: str("mobile"), tel: str("tel"), email: str("email"),
-      notes: str("notes"), status: b.status || ex?.status || "Active",
-      regNo: ex?.regNo || "MA-CLI-" + id,
-      createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
-      updatedAt: now(), updatedBy: me.name
-    };
-    await s.setJSON("client/" + id, cl);
-    return json(cl);
-  }
-  const clGet = path.match(/^client\/([^/]+)$/);
-  if (clGet && req.method === "GET") {
-    const v = await s.get("client/" + decodeURIComponent(clGet[1]), { type: "json" });
-    return v ? json(v) : err("Not found", 404);
-  }
-  if (path === "contracts" && req.method === "GET") {
-    const contracts = await listContracts();
-    const clients = await listClients();
-    const cmap = {}; for (const c of clients) cmap[c.id] = c.name;
-    return json(contracts.map((c) => ({ ...c, clientName: cmap[c.clientId] || "" })));
-  }
-  if (path === "contract" && req.method === "POST") {
-    if (!can("contracts")) return err("No rights to manage contracts", 403);
-    const b = await req.json();
-    if (!b.clientId) return err("Choose the client");
-    if (!b.project) return err("Project name is required");
-    const client = await s.get("client/" + b.clientId, { type: "json" });
-    if (!client) return err("Client not found");
-    const stg = await s.get("settings", { type: "json" });
-    let id = b.id;
-    if (!id) { stg.contractSeq = (stg.contractSeq || 0) + 1; id = "K" + String(stg.contractSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
-    const ex = b.id ? await s.get("contract/" + b.id, { type: "json" }) : null;
-    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
-    const contractSum = b.contractSum === void 0 ? num(ex?.contractSum) : num(b.contractSum);
-    const variations = b.variations === void 0 ? num(ex?.variations) : num(b.variations);
-    const advancePct = b.advancePct === void 0 || b.advancePct === "" ? (ex?.advancePct ?? 0.2) : num(b.advancePct);
-    let advanceAmount = b.advanceAmount === void 0 || b.advanceAmount === "" ? (ex?.advanceAmount ?? null) : num(b.advanceAmount);
-    if (advanceAmount === null || advanceAmount === void 0) advanceAmount = r2(contractSum * advancePct);
-    const ct = {
-      id, clientId: b.clientId,
-      entity: b.entity || ex?.entity || settings.entities[0].short,
-      project: b.project, certPrefix: str("certPrefix") || "PC",
-      projShort: (str("projShort") || String(b.project || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 3)).toUpperCase().slice(0, 3),
-      subcontractRef: str("subcontractRef"), offerRef: str("offerRef"),
-      mainContractor: str("mainContractor") || client.name,
-      contractSum, variations,
-      advancePct, advanceAmount,
-      retentionPct: b.retentionPct === void 0 || b.retentionPct === "" ? (ex?.retentionPct ?? 0.1) : num(b.retentionPct),
-      recoveryRate: b.recoveryRate === void 0 || b.recoveryRate === "" ? (ex?.recoveryRate ?? 0.2) : num(b.recoveryRate),
-      vatPct: b.vatPct === void 0 || b.vatPct === "" ? (ex?.vatPct ?? 0.05) : num(b.vatPct),
-      retentionRelease: str("retentionRelease"), dlpMonths: b.dlpMonths === void 0 ? num(ex?.dlpMonths) : num(b.dlpMonths),
-      startDate: str("startDate"), notes: str("notes"),
-      status: b.status || ex?.status || "Active",
-      createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
-      updatedAt: now(), updatedBy: me.name
-    };
-    await s.setJSON("contract/" + id, ct);
-    return json(ct);
-  }
-  const ctGet = path.match(/^contract\/([^/]+)$/);
-  if (ctGet && req.method === "GET") {
-    const v = await s.get("contract/" + decodeURIComponent(ctGet[1]), { type: "json" });
-    if (!v) return err("Not found", 404);
-    const certs = await clientCertsByContract(v.id);
-    const certifiedNet = r2(certs.reduce((a, c) => a + (c.calc?.net || 0), 0));
-    const recovered = r2(certs.reduce((a, c) => a + (c.calc?.advanceRecovery || 0), 0));
-    const retentionHeld = r2(certs.reduce((a, c) => Math.max(a, c.calc?.retention || 0), 0));
-    v.summary = {
-      certCount: certs.length,
-      certifiedNet,
-      advanceRecovered: recovered,
-      advanceOutstanding: Math.max(0, r2(num(v.advanceAmount) - recovered)),
-      retentionHeld
-    };
-    const client = await s.get("client/" + v.clientId, { type: "json" });
-    v.clientName = client?.name || "";
-    return json(v);
-  }
-  if (path === "clientcerts" && req.method === "GET") {
-    const { blobs } = await s.list({ prefix: "clientcert/" });
-    const clist = await listContracts();
-    const cmap = {}; for (const c of clist) cmap[c.id] = c;
-    const out = [];
-    for (const b of blobs) {
-      const c = await s.get(b.key, { type: "json" });
-      if (!c) continue;
-      const ct = cmap[c.contractId] || {};
-      out.push({ no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status });
-    }
-    out.sort((a, b) => a.no < b.no ? 1 : -1);
-    return json(out);
-  }
-  if (path === "clientcert" && req.method === "POST") {
-    if (!can("clientcert")) return err("No rights to create client certificates", 403);
-    const b = await req.json();
-    if (!b.contractId) return err("Choose the contract");
-    const contract = await s.get("contract/" + b.contractId, { type: "json" });
-    if (!contract) return err("Contract not found");
-    const client = await s.get("client/" + contract.clientId, { type: "json" });
-    let maxSeq = 0;
-    { const { blobs } = await s.list({ prefix: "clientcert/" }); for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && ec.contractId === b.contractId && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; } }
-    const date = b.date || now().slice(0, 10);
-    let seq = maxSeq + 1, key = clientCertKey(contract.id, seq), guard = 0;
-    while (await s.get("clientcert/" + key) && guard++ < 200) { seq++; key = clientCertKey(contract.id, seq); }
-    const no = clientCertNo(contract, client, seq, date);
-    const cert = {
-      no, key, seq, contractId: contract.id, clientId: contract.clientId,
-      createdBy: me.id, createdAt: now(),
-      date,
-      periodFrom: b.periodFrom || "", periodTo: b.periodTo || "",
-      grossCum: num(b.grossCum), mos: num(b.mos), contra: num(b.contra),
-      notes: b.notes || "", status: "Draft",
-      audit: [{ at: now(), by: me.name, action: "Created (Draft)" }]
-    };
-    await recomputeClientCert(cert, contract);
-    await s.setJSON("clientcert/" + key, cert);
-    return json(cert);
-  }
-  const ccGet = path.match(/^clientcert\/([^/]+)$/);
-  if (ccGet && req.method === "GET") {
-    const r = await resolveClientCert(s, ccGet[1]);
-    if (!r) return err("Not found", 404);
-    const c = r.c;
-    const contract = await s.get("contract/" + c.contractId, { type: "json" });
-    const client = await s.get("client/" + c.clientId, { type: "json" });
-    return json({ ...c, key: r.derivedKey, contract, client });
-  }
-  const ccPut = path.match(/^clientcert\/([^/]+)$/);
-  if (ccPut && req.method === "PUT") {
-    const r = await resolveClientCert(s, ccPut[1]);
-    if (!r) return err("Not found", 404);
-    const c = r.c, key = r.storeKey;
-    if (["Issued", "Approved"].includes(c.status) && !can("admin")) return err("Locked after issue", 403);
-    if (!can("clientcert")) return err("No edit rights", 403);
-    const b = await req.json();
-    for (const f of ["date", "periodFrom", "periodTo", "notes"]) if (b[f] !== void 0) c[f] = b[f];
-    for (const f of ["grossCum", "mos", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
-    const contract = await s.get("contract/" + c.contractId, { type: "json" });
-    await recomputeClientCert(c, contract);
-    c.audit.push({ at: now(), by: me.name, action: "Edited" });
-    await s.setJSON(key, c);
-    return json(c);
-  }
-  const ccTr = path.match(/^clientcert\/([^/]+)\/transition$/);
-  if (ccTr && req.method === "POST") {
-    const r = await resolveClientCert(s, ccTr[1]);
-    if (!r) return err("Not found", 404);
-    const c = r.c, key = r.storeKey;
-    const { action, comment } = await req.json();
-    if (action === "issue") {
-      if (!can("clientcertIssue")) return err("No rights to issue", 403);
-      if (c.status !== "Draft") return err("Must be Draft");
-      c.status = "Issued"; c.issuedBy = me.name; c.issuedAt = now();
-      c.audit.push({ at: now(), by: me.name, action: "Issued", comment: comment || void 0 });
-      const reg = await s.get("clientregister", { type: "json" }) || [];
-      reg.push({ sr: reg.length + 1, at: now(), no: c.no, contractId: c.contractId, date: c.date, gross: c.calc?.gross, net: c.calc?.net, vat: c.calc?.vat, payable: c.calc?.payable, by: me.name });
-      await s.setJSON("clientregister", reg);
-      try {
-        const contract = await s.get("contract/" + c.contractId, { type: "json" });
-        const client = await s.get("client/" + c.clientId, { type: "json" });
-        await notify(s, "client_issued", { cert: c, contract, client });
-      } catch {}
-    } else if (action === "approve") {
-      if (!can("admin")) return err("CEO only", 403);
-      if (c.status !== "Issued") return err("Must be Issued first");
-      c.status = "Approved"; c.approvedBy = me.name; c.approvedAt = now();
-      c.audit.push({ at: now(), by: me.name, action: "Approved", comment: comment || void 0 });
-      try {
-        const contract = await s.get("contract/" + c.contractId, { type: "json" });
-        const client = await s.get("client/" + c.clientId, { type: "json" });
-        await notify(s, "client_approved", { cert: c, contract, client });
-      } catch {}
-    } else if (action === "cancel") {
-      if (!can("admin")) return err("CEO only", 403);
-      c.status = "Cancelled";
-      c.audit.push({ at: now(), by: me.name, action: "Cancelled", comment: comment || void 0 });
-    } else if (action === "reopen") {
-      if (!can("admin")) return err("CEO only", 403);
-      c.status = "Draft"; c.issuedBy = null; c.issuedAt = null; c.approvedBy = null; c.approvedAt = null;
-      c.audit.push({ at: now(), by: me.name, action: "Reopened to Draft", comment: comment || void 0 });
-    } else return err("Unknown action");
-    await s.setJSON(key, c);
-    return json(c);
-  }
-  if (path === "clientregister" && req.method === "GET") {
-    return json(await s.get("clientregister", { type: "json" }) || []);
-  }
-  if (path === "costmeta" && req.method === "GET") {
-    return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects: await projectNames(s) });
-  }
-  if (path === "expenses" && req.method === "GET") {
-    return json(await listExpenses(url.searchParams.get("project") || ""));
-  }
-  if (path === "expense" && req.method === "POST") {
-    if (!can("expense")) return err("No rights to log expenses", 403);
-    const b = await req.json();
-    if (!b.project) return err("Choose or type a project");
-    if (!b.date) return err("Date is required");
-    const stg = await s.get("settings", { type: "json" });
-    let id = b.id;
-    const ex = id ? await s.get("expense/" + id, { type: "json" }) : null;
-    if (!id) { stg.expenseSeq = (stg.expenseSeq || 0) + 1; id = "X" + String(stg.expenseSeq).padStart(5, "0"); await s.setJSON("settings", stg); }
-    if (ex && ex.source === "supplier-ipc" && b.__fromForm) {
-      // allow editing the classification of an auto-posted line, keep the link/amounts
-    }
-    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : String(b[k] || "");
-    const exp = {
-      id, seq: ex?.seq || (Number(String(id).replace(/\D/g, "")) || 0),
-      project: String(b.project).trim(),
-      date: String(b.date).slice(0, 10),
-      area: str("area"), category: str("category") || "General / Other", costType: str("costType") || "Material Supply",
-      supplier: str("supplier"), description: str("description"), poRef: str("poRef"), boqRef: str("boqRef"),
-      budgeted: b.budgeted === void 0 ? num(ex?.budgeted) : num(b.budgeted),
-      amount: b.amount === void 0 ? num(ex?.amount) : num(b.amount),
-      status: str("status") || "Pending",
-      paid: b.paid === void 0 ? num(ex?.paid) : num(b.paid),
-      notes: str("notes"),
-      supplierCertNo: ex?.supplierCertNo || b.supplierCertNo || null,
-      source: ex?.source || "manual",
-      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
-    };
-    await s.setJSON("expense/" + id, exp);
-    return json(exp);
-  }
-  const expGet = path.match(/^expense\/([^/]+)$/);
-  if (expGet && req.method === "GET") {
-    const v = await s.get("expense/" + decodeURIComponent(expGet[1]), { type: "json" });
-    return v ? json(v) : err("Not found", 404);
-  }
-  const expDel = path.match(/^expense\/([^/]+)$/);
-  if (expDel && req.method === "DELETE") {
-    if (!can("expenseDelete")) return err("No rights to delete", 403);
-    await s.delete("expense/" + decodeURIComponent(expDel[1]));
-    return json({ ok: true });
-  }
-  if (path === "pnl" && req.method === "GET") {
-    if (!can("pnl")) return err("No rights", 403);
-    return json(await computePnl(s, url.searchParams.get("project") || ""));
-  }
-  return err("Not found: " + path, 404);
 };
-var config = { path: "/api/*" };
 export {
   config,
-  api_default as default
+  cron_pnl_default as default
 };
