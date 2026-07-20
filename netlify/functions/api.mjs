@@ -13340,6 +13340,8 @@ async function listExpenses(project) {
 }
 async function projectNames(s) {
   const set = /* @__PURE__ */ new Set();
+  const st = await s.get("settings", { type: "json" });
+  if (st && Array.isArray(st.projects)) for (const p of st.projects) { if (p && p.name) set.add(String(p.name)); }
   for (const pfx of ["contract/", "cert/", "expense/"]) {
     const { blobs } = await s.list({ prefix: pfx });
     for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v && v.project) set.add(String(v.project)); }

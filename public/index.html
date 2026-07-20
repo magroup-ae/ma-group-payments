@@ -1171,8 +1171,8 @@ function contractForm(ct,clientId){
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add contract":"Edit contract — "+esc(ct.project)}</h2>
    <h3>Project &amp; contract</h3><div class="grid">
      <div><label>Our entity (claimant)</label><select id="k_entity">${opt(S.entities.map(e=>e.short),ct.entity)}</select></div>
-     <div style="grid-column:1/-1"><label>Project name</label><input id="k_project" value="${esc(ct.project||"")}"></div>
-     <div><label>Project short code (3 letters)</label><input id="k_projShort" maxlength="3" style="text-transform:uppercase" value="${esc(ct.projShort||"")}" placeholder="e.g. ASG"></div>
+     <div style="grid-column:1/-1"><label>Project *</label><select id="k_project">${["",...S.projects.map(p=>p.name),...(ct.project&&!S.projects.some(p=>p.name===ct.project)?[ct.project]:[])].map(n=>`<option value="${esc(n)}" ${n===(ct.project||"")?"selected":""}>${n?esc(n):"— select project —"}</option>`).join("")}</select><div class="muted" style="font-size:11px;margin-top:3px">Manage the project list &amp; its 3-letter code in <b>Settings → Projects</b>. Same list is used for Supplier IPCs.</div></div>
+     <div><label>Project short code (from Settings)</label><input id="k_projShort" maxlength="3" style="text-transform:uppercase;background:#f4f5f7" value="${esc(ct.projShort||"")}" readonly></div>
      <div><label>Client name (as on certificate)</label><input id="k_mainContractor" value="${esc(ct.mainContractor||"")}"></div>
      <div><label>Contract / subcontract reference No.</label><input id="k_subcontractRef" value="${esc(ct.subcontractRef||"")}" placeholder="e.g. AFAQ/2026/PS-014"></div>
      <div style="grid-column:1/-1"><div class="note" id="k_pcHint" style="font-size:12px"></div></div>
@@ -1196,8 +1196,9 @@ function contractForm(ct,clientId){
   const yy=String(new Date().getFullYear()).slice(-2);
   const pcHint=()=>{ const cf=(clName.trim().split(/\s+/)[0]||"CLIENT").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
     let ps=($("#k_projShort").value||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase(); if(!ps) ps=($("#k_project").value||"PRJ").replace(/[^A-Za-z0-9]/g,"").toUpperCase().slice(0,3); ps=ps.slice(0,3).padEnd(3,"X");
-    $("#k_pcHint").innerHTML=`Certificates on this project will be numbered <b>PC/MA${yy}/${cf}/${ps}/001</b>, 002, 003 …`; };
-  ["k_projShort","k_project"].forEach(id=>{const el=$("#"+id); if(el) el.addEventListener("input",pcHint);}); pcHint();
+    $("#k_pcHint").innerHTML=`Certificates on this project will be numbered <b>PC/MA${yy}/${cf}/${ps}/001</b>, 002, 003 … &nbsp;<span class="muted">(short code comes from Settings → Projects)</span>`; };
+  const syncProj=()=>{ const sel=$("#k_project").value; const reg=S.projects.find(p=>p.name===sel); if(reg&&$("#k_projShort")) $("#k_projShort").value=(reg.code||"").toUpperCase().slice(0,3); pcHint(); };
+  $("#k_project").onchange=syncProj; pcHint();
   $("#k_save").onclick=async ()=>{ const g=id=>{const el=$("#k_"+id);return el?el.value:"";};
     const body={ clientId:ct.clientId, entity:g("entity"), project:g("project").trim(), certPrefix:"PC", projShort:g("projShort").trim().toUpperCase().slice(0,3),
       mainContractor:g("mainContractor"), subcontractRef:g("subcontractRef"), offerRef:g("offerRef"), startDate:g("startDate"),
