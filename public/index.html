@@ -70,8 +70,8 @@
     body.printing-labels #root, body.printing-labels #printArea, body.printing-labels #chequeArea { display:none !important; }
     body.printing-labels { margin:0; }
     body.printing-labels #labelArea { display:block; }
-    body.printing-labels .lbl { margin:0; page-break-inside:avoid; break-inside:avoid; }
-    body.printing-labels .lbl:not(:last-child) { page-break-after:always; break-after:page; }
+    body.printing-labels .lbl, body.printing-labels .lblrot { margin:0; page-break-inside:avoid; break-inside:avoid; }
+    body.printing-labels .lbl:not(:last-child), body.printing-labels .lblrot:not(:last-child) { page-break-after:always; break-after:page; }
   }
   /* ---- MUNBYN thermal asset label (monochrome) ---- */
   #labelArea { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
@@ -126,6 +126,9 @@
   .lbl.t60x40 .lb { padding-top:1.5mm; } .lbl.t60x40 .lb svg.bc { height:11mm; max-width:52mm; }
   .lbl.t60x40 .lb .code { font-size:4mm; } .lbl.t60x40 .lb .item { font-size:2.4mm; }
   .lbl.t60x40 .lb .plate { font-size:2.8mm; } .lbl.t60x40 .lb .sub { display:none; }
+  /* rotate wrapper — spins the tag 90° so it reads horizontally on printers that feed rotated */
+  .lblrot { display:flex; align-items:center; justify-content:center; overflow:hidden; background:#fff; }
+  .lblrot > .lbl { transform:rotate(90deg); }
   .cert { font-family:Calibri,Arial,sans-serif; color:#000; font-size:11px; }
   .cert .hd { text-align:center; position:relative; }
   .cert .hd img { position:absolute; left:0; top:0; height:46px; }
@@ -1029,6 +1032,7 @@ async function vAssets(){
         <option value="t100x50">100×50 mm</option>
         <option value="t60x40">60×40 mm</option>
       </select>
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap" title="Tick this if labels print sideways"><input type="checkbox" id="asRotate"> Rotate 90°</label>
       <button class="btn" id="asLabels">🖨 Print labels</button></div></div>
     <div id="asSummary" class="muted">Loading…</div>
     <div class="flex" style="margin:10px 0;flex-wrap:wrap"><input id="asQ" placeholder="Search code / item / serial / location / custodian…" style="max-width:300px">
@@ -1039,6 +1043,7 @@ async function vAssets(){
   if(canAsset){ $("#asNew").onclick=()=>{ if(!ASSET_STATE){ toast("Still loading — one moment"); return; } assetForm(null); }; $("#asImport").onclick=importAssetsExcel; }
   $("#asCsv").onclick=exportAssetsCsv;
   const lsz=$("#asLabelSize"); if(lsz){ lsz.value=LABEL_SIZE; lsz.onchange=e=>{ LABEL_SIZE=e.target.value; }; }
+  const lrot=$("#asRotate"); if(lrot){ lrot.checked=LABEL_ROTATE; lrot.onchange=e=>{ LABEL_ROTATE=e.target.checked; }; }
   $("#asLabels").onclick=()=>printAssetLabels(ASSET_FILTERED.length?ASSET_FILTERED:(ASSET_STATE?ASSET_STATE.assets:[]));
   ["asQ","asCat","asStatus"].forEach(id=>$("#"+id).addEventListener("input",renderAssetList));
   let d; try{ d=await api("assets"); }catch(e){ $("#asSummary").textContent=""; $("#asList").textContent="Could not load assets: "+e.message; return; }
@@ -1134,16 +1139,21 @@ function assetLabelHtml(a){
     <div class="sub">If found, contact MA Group<br>maagroup.ae · scan to identify asset</div></div>`;
 }
 var LABEL_SIZE="t3x2";
-var LABEL_PAGES={ t3x2:"76.2mm 50.8mm", t2x3:"50.8mm 76.2mm", t4x6:"100mm 150mm", t100x50:"100mm 50mm", t60x40:"60mm 40mm" };
+var LABEL_ROTATE=false;
+var LABEL_DIMS={ t3x2:{w:76.2,h:50.8}, t2x3:{w:50.8,h:76.2}, t4x6:{w:100,h:150}, t100x50:{w:100,h:50}, t60x40:{w:60,h:40} };
 var LABEL_BC={ t3x2:{height:50,width:2}, t2x3:{height:60,width:1.8}, t4x6:{height:120,width:3}, t100x50:{height:52,width:2.4}, t60x40:{height:42,width:1.8} };
-function printAssetLabels(list,size){
+function printAssetLabels(list,size,rotate){
   size=size||LABEL_SIZE||"t3x2";
+  rotate = (rotate===undefined) ? LABEL_ROTATE : rotate;
   list=(list||[]).filter(Boolean);
   if(!list.length){ toast("No assets to print"); return; }
   if(typeof JsBarcode==="undefined"){ toast("Barcode library not loaded — refresh and retry"); return; }
-  $("#labelPage").textContent="@page { size:"+(LABEL_PAGES[size]||LABEL_PAGES.t3x2)+"; margin:0; }";
+  const d=LABEL_DIMS[size]||LABEL_DIMS.t3x2;
+  const pw = rotate ? d.h : d.w, ph = rotate ? d.w : d.h;
+  $("#labelPage").textContent="@page { size:"+pw+"mm "+ph+"mm; margin:0; }";
   const area=document.getElementById("labelArea");
-  area.innerHTML=list.map(a=>`<div class="lbl ${size}">${assetLabelHtml(a)}</div>`).join("");
+  area.innerHTML=list.map(a=>{ const inner=`<div class="lbl ${size}">${assetLabelHtml(a)}</div>`;
+    return rotate ? `<div class="lblrot" style="width:${pw}mm;height:${ph}mm">${inner}</div>` : inner; }).join("");
   const divs=area.querySelectorAll(".lbl"); const bc=LABEL_BC[size]||LABEL_BC.t3x2;
   list.forEach((a,i)=>{ const svg=divs[i].querySelector("svg.bc"); try{ JsBarcode(svg,a.code,{format:"CODE128",displayValue:false,margin:0,...bc}); }catch(e){} });
   const done=()=>{ document.body.classList.remove("printing-labels"); window.removeEventListener("afterprint",done); };
