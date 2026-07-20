@@ -592,9 +592,30 @@ function printCert(c){
   doPrint();
 }
 function doPrint(){
-  document.body.classList.add("printing-cert");
-  const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
-  window.addEventListener("afterprint",done); window.print();
+  // Print the certificate inside an isolated iframe with @page margin:0.
+  // This removes the browser's own header/footer (page title on top, URL on
+  // bottom, date, page number) which cannot be suppressed on the main window.
+  const styleTags=[...document.querySelectorAll("style")].map(s=>s.outerHTML).join("");
+  const base=location.origin+location.pathname;
+  const inner=$("#printArea").innerHTML;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><base href="${base}">${styleTags}
+   <style>
+     @page { size:A4; margin:0; }
+     html,body { margin:0; padding:0; background:#fff; }
+     #printArea { display:block !important; position:static; }
+     #printArea .cert { width:210mm; max-width:none; margin:0 auto; padding:12mm 12mm; box-sizing:border-box; }
+     #printArea .pagebreak { page-break-before:always; height:0; }
+   </style></head><body class="printing-cert"><div id="printArea">${inner}</div></body></html>`;
+  let f=document.getElementById("printFrame"); if(f) f.remove();
+  f=document.createElement("iframe"); f.id="printFrame";
+  f.setAttribute("style","position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden");
+  document.body.appendChild(f);
+  const d=f.contentWindow.document; d.open(); d.write(html); d.close();
+  const cleanup=()=>{ setTimeout(()=>{ try{ f.remove(); }catch(e){} }, 1500); };
+  const go=()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ window.print(); } cleanup(); };
+  let tries=0;
+  const ready=()=>{ const imgs=[...d.images]; if(imgs.length===0||imgs.every(i=>i.complete)||tries++>50){ go(); } else setTimeout(ready,50); };
+  setTimeout(ready,80);
 }
 
 /* ---------- petty cash voucher (A5-ish, prints on A4) ---------- */
