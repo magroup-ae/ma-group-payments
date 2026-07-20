@@ -13158,7 +13158,9 @@ var CAN = {
   clientcertIssue: ["CEO", "PM"],
   expense: ["CEO", "PM", "QS", "Accounts", "Secretary"],
   expenseDelete: ["CEO", "PM"],
-  pnl: ["CEO", "PM", "QS", "Accounts"]
+  pnl: ["CEO", "PM", "QS", "Accounts"],
+  budget: ["CEO", "PM", "QS", "Accounts"],
+  budgetEdit: ["CEO", "PM", "QS"]
 };
 var DOC_KINDS = ["license", "trn", "bank", "establishment", "other"];
 var ASSET_CATS = [
@@ -13313,6 +13315,15 @@ var EXPENSE_CATEGORIES = [
   "Head Office Overhead", "Financing / Bank Charges", "Insurance & Bonds", "General / Other"
 ];
 var EXPENSE_STATUS = ["Pending", "Partially Paid", "Paid", "On Hold", "Disputed"];
+var BANK_DETAILS = {
+  "Marvellous Art": { bank: "Emirates NBD, Dubai, U.A.E", accountName: "MARVELLOUS ART DECORATION DESIGN & FIT OUT CO. L.L.C", account: "6605844299001", iban: "AE620260006605844299001", currency: "AED" }
+};
+function bankFor(entityShort) { return BANK_DETAILS[entityShort] || BANK_DETAILS["Marvellous Art"]; }
+function proformaNo(seq, dateStr) {
+  const m = String(dateStr || now()).match(/^(\d{4})/);
+  const yr = m ? m[1] : String((/* @__PURE__ */ new Date()).getFullYear());
+  return `MAG/${yr}/PI-${String(seq).padStart(5, "0")}`;
+}
 function costGroup(type) { const t = COST_TYPES.find((x) => x.name === type); return t ? t.group : "Direct"; }
 async function listExpenses(project) {
   const s = store();
@@ -13396,6 +13407,34 @@ async function computePnl(s, project) {
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
     expenses: expenses.slice(0, 800)
   };
+}
+function budgetSlug(p) { return String(p).replace(/[^A-Za-z0-9]+/g, "_"); }
+async function computeBudget(s, project) {
+  const bud = await s.get("budget/" + budgetSlug(project), { type: "json" }) || { project, lines: [] };
+  const expenses = await listExpenses(project);
+  const actualByArea = {}; let totalActual = 0;
+  for (const e of expenses) { const a = num(e.amount); totalActual += a; const k = String(e.area || "").trim() || "(unassigned)"; actualByArea[k] = (actualByArea[k] || 0) + a; }
+  let lines = bud.lines || [];
+  if (!lines.length) { lines = Object.keys(actualByArea).map((area) => ({ area, boq: 0, targetPct: 0.85, pctComplete: 0 })); }
+  const computed = lines.map((l) => {
+    const boq = num(l.boq), tPct = l.targetPct == null ? 0.85 : num(l.targetPct), pct = num(l.pctComplete);
+    const target = r2(boq * tPct), actual = r2(actualByArea[l.area] || 0), ev = r2(target * pct);
+    const eac = pct > 0 ? r2(actual / pct) : (actual > 0 ? r2(actual / 0.01) : target);
+    const bac = target, vac = r2(bac - eac), cpi = actual > 0 ? r2(ev / actual) : null;
+    const status = boq === 0 ? "—" : vac < 0 ? "Overrun" : vac < bac * 0.05 ? "Watch" : "On budget";
+    return { area: l.area, boq, targetPct: tPct, pctComplete: pct, target, actual, ev, eac, bac, vac, cpi, status };
+  });
+  const matched = new Set(lines.map((l) => l.area));
+  let unalloc = 0; for (const k in actualByArea) { if (!matched.has(k)) unalloc += actualByArea[k]; }
+  const sum = (f) => r2(computed.reduce((a, l) => a + f(l), 0));
+  const totEv = sum((l) => l.ev), totTarget = sum((l) => l.target);
+  const totals = {
+    boq: sum((l) => l.boq), target: totTarget, actual: r2(totalActual),
+    eac: r2(sum((l) => l.eac) + unalloc), ev: totEv,
+    overallPct: totTarget ? r2(totEv / totTarget) : 0, cpi: totalActual ? r2(totEv / totalActual) : null
+  };
+  totals.vac = r2(totals.target - totals.eac);
+  return { project, lines: computed, unalloc: r2(unalloc), saved: !!(bud.lines && bud.lines.length), totals };
 }
 var api_default = async (req, context) => {
   const url = new URL(req.url);
@@ -14282,6 +14321,27 @@ var api_default = async (req, context) => {
     await s.setJSON(key, c);
     return json(c);
   }
+  const ccPf = path.match(/^clientcert\/([^/]+)\/proforma$/);
+  if (ccPf && req.method === "POST") {
+    if (!can("clientcert")) return err("No rights", 403);
+    const r = await resolveClientCert(s, ccPf[1]);
+    if (!r) return err("Not found", 404);
+    const c = r.c;
+    if (!["Issued", "Approved"].includes(c.status)) return err("Certificate must be Issued or Approved first", 400);
+    if (!c.proforma || !c.proforma.no) {
+      const stg = await s.get("settings", { type: "json" });
+      stg.proformaSeq = (stg.proformaSeq || 40) + 1;
+      const date = now().slice(0, 10);
+      c.proforma = { no: proformaNo(stg.proformaSeq, date), seq: stg.proformaSeq, date, by: me.name };
+      c.audit.push({ at: now(), by: me.name, action: `Proforma ${c.proforma.no} generated` });
+      await s.setJSON("settings", stg);
+      await s.setJSON(r.storeKey, c);
+    }
+    const contract = await s.get("contract/" + c.contractId, { type: "json" });
+    const client = await s.get("client/" + c.clientId, { type: "json" });
+    const bank = bankFor(contract?.entity);
+    return json({ ...c, contract, client, bank });
+  }
   if (path === "clientregister" && req.method === "GET") {
     return json(await s.get("clientregister", { type: "json" }) || []);
   }
@@ -14434,6 +14494,22 @@ var api_default = async (req, context) => {
   if (path === "pnl" && req.method === "GET") {
     if (!can("pnl")) return err("No rights", 403);
     return json(await computePnl(s, url.searchParams.get("project") || ""));
+  }
+  if (path === "budget" && req.method === "GET") {
+    if (!can("budget")) return err("No rights", 403);
+    const project = url.searchParams.get("project") || "";
+    if (!project) return err("Choose a project");
+    return json(await computeBudget(s, project));
+  }
+  if (path === "budget" && req.method === "POST") {
+    if (!can("budgetEdit")) return err("No rights to edit budget", 403);
+    const b = await req.json();
+    if (!b.project) return err("Project required");
+    const lines = (Array.isArray(b.lines) ? b.lines : []).filter((l) => l && l.area).map((l) => ({
+      area: String(l.area).trim(), boq: num(l.boq), targetPct: l.targetPct == null ? 0.85 : num(l.targetPct), pctComplete: num(l.pctComplete)
+    }));
+    await s.setJSON("budget/" + budgetSlug(b.project), { project: b.project, lines, updatedAt: now(), updatedBy: me.name });
+    return json(await computeBudget(s, b.project));
   }
   return err("Not found: " + path, 404);
 };
