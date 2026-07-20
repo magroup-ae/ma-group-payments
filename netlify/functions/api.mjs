@@ -12480,6 +12480,23 @@ var emDate = (d) => {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 };
+function amountWords(amount) {
+  amount = num(amount);
+  if (!amount) return "UAE Dirhams Zero Only";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const grp = (n) => {
+    let w = "";
+    if (n >= 100) { w += ones[Math.floor(n / 100)] + " Hundred"; n %= 100; if (n) w += " "; }
+    if (n >= 20) { w += tens[Math.floor(n / 10)]; n %= 10; if (n) w += " " + ones[n]; }
+    else if (n) w += ones[n];
+    return w;
+  };
+  const d = Math.floor(amount), f = Math.round((amount - d) * 100);
+  const m = Math.floor(d / 1e6), t = Math.floor(d % 1e6 / 1e3), u = d % 1e3;
+  const w = [m ? grp(m) + " Million" : "", t ? grp(t) + " Thousand" : "", u ? grp(u) : ""].filter(Boolean).join(" ") || "Zero";
+  return "UAE Dirhams " + w + (f ? " and " + grp(f) + " Fils" : "") + " Only";
+}
 var EMAIL_TYPES = {
   welcome: "Registration confirmation",
   initiated: "Payment certificate initiated",
@@ -12488,7 +12505,9 @@ var EMAIL_TYPES = {
   cheque: "Cheque ready for collection",
   action: "Action required (rejection / deduction / missing docs)",
   licence: "Trade licence expiry reminder",
-  soa: "Monthly statement of account request"
+  soa: "Monthly statement of account request",
+  client_issued: "Client payment certificate issued",
+  client_approved: "Client payment certificate approved"
 };
 var COLLECT_WINDOW = "Tuesdays only, between 2:00 PM and 5:00 PM";
 var collectNoteHtml = `<strong>Collection policy:</strong> Cash and cheques are handed over <strong>on ${COLLECT_WINDOW}</strong> at our office. Collection must be made by an <strong>authorised representative</strong> presenting their <strong>original Emirates ID</strong> (the EID number is recorded at handover). A <strong>signed &amp; stamped receipt copy is mandatory</strong> and must be provided at the time of collection.`;
@@ -12729,6 +12748,50 @@ function buildEmail(type, ctx, cfg) {
         note: `Please reply to this email attaching the renewed licence. If already renewed, kindly share the updated copy so we can update our records.`,
         noteColor: expired ? "#fdecea" : "#fff8e6",
         noteBar: expired ? "#c0392b" : "#bf9000"
+      })
+    };
+  }
+  if (type === "client_issued" || type === "client_approved") {
+    const cl = ctx.client || {};
+    const ct = ctx.contract || {};
+    const K = c.calc || {};
+    const cto = cl.email || "";
+    const cgreet = cl.contactName || cl.name || "Sir/Madam";
+    const cproj = ct.project || "\u2014";
+    const period = (c.periodFrom ? emEsc(c.periodFrom) : "") + (c.periodTo ? " \u2013 " + emEsc(c.periodTo) : "");
+    const approved = type === "client_approved";
+    return {
+      to: cto,
+      toName: cgreet,
+      greeting: cgreet,
+      subject: `${approved ? "Approved " : ""}Interim Payment Certificate ${c.no} \u2014 ${cproj} | ${emMoney(K.payable)}`,
+      html: emailShell(cfg, {
+        title: approved ? "Interim Payment Certificate \u2014 Approved" : "Interim Payment Certificate \u2014 Issued",
+        band: approved ? "#2e7d32" : "#1f3864",
+        preheader: `IPC ${c.no} for ${cproj}: amount due ${emMoney(K.payable)} (incl. VAT).`,
+        lead: [
+          `Please find below our <strong>Interim Payment Certificate ${emEsc(c.no)}</strong> in respect of works executed on <strong>${emEsc(cproj)}</strong>${period ? ` for the period ${period}` : ""}.`,
+          approved
+            ? `The certificate has been reviewed and <strong>approved</strong>. We kindly request settlement of the certified amount in accordance with the agreed payment terms. Our proforma / tax invoice will follow.`
+            : `The certificate is submitted for your <strong>review and certification</strong>. Kindly confirm so we may proceed with our proforma / tax invoice.`
+        ],
+        table: [
+          ["Certificate No.", c.no],
+          ["Project", cproj],
+          ["Contract Ref.", ct.subcontractRef || "\u2014"],
+          ["Period", period || "\u2014"],
+          ["Gross value certified", emMoney(K.gross)],
+          ["Less retention", emMoney(K.retention)],
+          ["Less advance recovery", emMoney(K.advanceRecovery)],
+          ["Less previously certified", emMoney(K.prevCertified)],
+          ["Net amount due (excl. VAT)", emMoney(K.net)],
+          ["VAT", emMoney(K.vat)],
+          ["Total payable (incl. VAT)", emMoney(K.payable)]
+        ],
+        note: `<strong>Amount payable in words:</strong> ${emEsc(amountWords(K.payable))}. Kindly quote certificate reference <strong>${emEsc(c.no)}</strong> on your remittance.`,
+        noteColor: "#eef4ff",
+        noteBar: "#1f3864",
+        closing: `The signed certificate is attached / available on request. Thank you for your continued cooperation.`
       })
     };
   }
@@ -13191,9 +13254,16 @@ async function recomputeClientCert(c, contract) {
   c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar);
   return c;
 }
-function clientCertNo(contract, seq) {
-  const pfx = (contract?.certPrefix || "PC").trim().replace(/\s+/g, "");
-  return `${pfx}-${String(seq).padStart(3, "0")}`;
+function clientCertNo(contract, client, seq, dateStr) {
+  let yr = "";
+  const m = String(dateStr || now()).match(/^(\d{4})/);
+  yr = m ? m[1].slice(-2) : String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
+  const first = String(client?.name || contract?.mainContractor || "CLIENT").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "CLIENT";
+  const proj = (String(contract?.projShort || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || String(contract?.project || "PRJ").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3)).slice(0, 3).padEnd(3, "X");
+  return `PC/MA${yr}/${first}/${proj}/${String(seq).padStart(3, "0")}`;
+}
+function clientCertKey(contractId, seq) {
+  return `${contractId}-${String(seq).padStart(3, "0")}`;
 }
 var api_default = async (req, context) => {
   const url = new URL(req.url);
@@ -13937,6 +14007,7 @@ var api_default = async (req, context) => {
       id, clientId: b.clientId,
       entity: b.entity || ex?.entity || settings.entities[0].short,
       project: b.project, certPrefix: str("certPrefix") || "PC",
+      projShort: (str("projShort") || String(b.project || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 3)).toUpperCase().slice(0, 3),
       subcontractRef: str("subcontractRef"), offerRef: str("offerRef"),
       mainContractor: str("mainContractor") || client.name,
       contractSum, variations,
@@ -13981,7 +14052,7 @@ var api_default = async (req, context) => {
       const c = await s.get(b.key, { type: "json" });
       if (!c) continue;
       const ct = cmap[c.contractId] || {};
-      out.push({ no: c.no, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status });
+      out.push({ no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status });
     }
     out.sort((a, b) => a.no < b.no ? 1 : -1);
     return json(out);
@@ -13992,21 +14063,24 @@ var api_default = async (req, context) => {
     if (!b.contractId) return err("Choose the contract");
     const contract = await s.get("contract/" + b.contractId, { type: "json" });
     if (!contract) return err("Contract not found");
+    const client = await s.get("client/" + contract.clientId, { type: "json" });
     let maxSeq = 0;
     { const { blobs } = await s.list({ prefix: "clientcert/" }); for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && ec.contractId === b.contractId && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; } }
-    let seq = maxSeq + 1, no = clientCertNo(contract, seq), guard = 0;
-    while (await s.get("clientcert/" + no) && guard++ < 100) { seq++; no = clientCertNo(contract, seq); }
+    const date = b.date || now().slice(0, 10);
+    let seq = maxSeq + 1, key = clientCertKey(contract.id, seq), guard = 0;
+    while (await s.get("clientcert/" + key) && guard++ < 200) { seq++; key = clientCertKey(contract.id, seq); }
+    const no = clientCertNo(contract, client, seq, date);
     const cert = {
-      no, seq, contractId: contract.id, clientId: contract.clientId,
+      no, key, seq, contractId: contract.id, clientId: contract.clientId,
       createdBy: me.id, createdAt: now(),
-      date: b.date || now().slice(0, 10),
+      date,
       periodFrom: b.periodFrom || "", periodTo: b.periodTo || "",
       grossCum: num(b.grossCum), mos: num(b.mos), contra: num(b.contra),
       notes: b.notes || "", status: "Draft",
       audit: [{ at: now(), by: me.name, action: "Created (Draft)" }]
     };
     await recomputeClientCert(cert, contract);
-    await s.setJSON("clientcert/" + no, cert);
+    await s.setJSON("clientcert/" + key, cert);
     return json(cert);
   }
   const ccGet = path.match(/^clientcert\/([^/]+)$/);
@@ -14047,11 +14121,21 @@ var api_default = async (req, context) => {
       const reg = await s.get("clientregister", { type: "json" }) || [];
       reg.push({ sr: reg.length + 1, at: now(), no: c.no, contractId: c.contractId, date: c.date, gross: c.calc?.gross, net: c.calc?.net, vat: c.calc?.vat, payable: c.calc?.payable, by: me.name });
       await s.setJSON("clientregister", reg);
+      try {
+        const contract = await s.get("contract/" + c.contractId, { type: "json" });
+        const client = await s.get("client/" + c.clientId, { type: "json" });
+        await notify(s, "client_issued", { cert: c, contract, client });
+      } catch {}
     } else if (action === "approve") {
       if (!can("admin")) return err("CEO only", 403);
       if (c.status !== "Issued") return err("Must be Issued first");
       c.status = "Approved"; c.approvedBy = me.name; c.approvedAt = now();
       c.audit.push({ at: now(), by: me.name, action: "Approved", comment: comment || void 0 });
+      try {
+        const contract = await s.get("contract/" + c.contractId, { type: "json" });
+        const client = await s.get("client/" + c.clientId, { type: "json" });
+        await notify(s, "client_approved", { cert: c, contract, client });
+      } catch {}
     } else if (action === "cancel") {
       if (!can("admin")) return err("CEO only", 403);
       c.status = "Cancelled";

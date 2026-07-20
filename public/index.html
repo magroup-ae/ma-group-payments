@@ -129,22 +129,37 @@
   /* rotate wrapper — spins the tag 90° so it reads horizontally on printers that feed rotated */
   .lblrot { display:flex; align-items:center; justify-content:center; overflow:hidden; background:#fff; }
   .lblrot > .lbl { transform:rotate(90deg); }
-  .cert { font-family:Calibri,Arial,sans-serif; color:#000; font-size:11px; }
-  .cert .hd { text-align:center; position:relative; }
-  .cert .hd img { position:absolute; left:0; top:0; height:46px; }
+  .cert { font-family:'Calibri','Segoe UI',Arial,sans-serif; color:#1a1a1a; font-size:11px; max-width:190mm; margin:0 auto; }
+  .cert .letterhead { display:flex; align-items:center; gap:14px; padding-bottom:9px; border-bottom:3px solid var(--gold); }
+  .cert .letterhead img { height:56px; width:auto; max-width:150px; object-fit:contain; }
+  .cert .letterhead .co { flex:1; text-align:right; }
+  .cert .letterhead .n1 { font-size:15.5px; font-weight:800; color:var(--navy); letter-spacing:.2px; line-height:1.15; }
+  .cert .letterhead .n2 { font-size:8.6px; color:#5a5a5a; margin-top:2px; line-height:1.4; }
+  /* legacy centered header (still used by vouchers/SOA) */
+  .cert .hd { text-align:center; position:relative; padding-bottom:8px; border-bottom:3px solid var(--gold); margin-bottom:4px; }
+  .cert .hd img { position:absolute; left:0; top:0; height:48px; }
   .cert .hd .n1 { font-size:15px; font-weight:800; color:var(--navy); }
   .cert .hd .n2 { font-size:9px; color:#555; }
-  .cert .title { background:var(--navy); color:#fff; text-align:center; font-weight:800; font-size:14px; padding:5px; margin:6px 0; }
-  .cert table { width:100%; border-collapse:collapse; font-size:11px; margin-bottom:6px; }
-  .cert td { border:1px solid #bbb; padding:3.5px 6px; }
-  .cert .sec { background:var(--blue); color:#fff; font-weight:700; padding:3.5px 6px; }
+  .cert .title { background:linear-gradient(90deg,var(--navy),#2a4a80); color:#fff; text-align:center; font-weight:800; font-size:13px; letter-spacing:1.2px; padding:7px; margin:10px 0 3px; text-transform:uppercase; }
+  .cert .subtitle { text-align:center; font-weight:700; font-size:11.5px; color:var(--navy); margin:3px 0 8px; }
+  .cert table { width:100%; border-collapse:collapse; font-size:10.6px; margin-bottom:7px; }
+  .cert td { border:1px solid #cfd6e0; padding:4px 7px; vertical-align:top; }
+  .cert .sec { background:var(--blue); color:#fff; font-weight:700; padding:4px 7px; font-size:10.8px; letter-spacing:.3px; }
   .cert .sec.navy { background:var(--navy); }
-  .cert .tot { background:#d9d9d9; font-weight:700; }
-  .cert .pay { background:var(--green); color:#fff; font-weight:800; font-size:12px; }
-  .cert .lab { font-weight:700; width:34%; }
-  .cert .sig td { border:0; border-top:1.5px solid var(--navy); text-align:center; font-size:9.5px; font-weight:700; padding-top:4px; }
-  .cert .sig .nm { border:0; font-weight:400; color:#777; font-size:8.5px; padding-top:34px; }
-  .cert .foot { text-align:center; font-size:8px; color:#888; margin-top:8px; font-style:italic; }
+  .cert .tot { background:#eef2f8; font-weight:700; }
+  .cert .pay { background:var(--navy); color:#fff; font-weight:800; font-size:12px; }
+  .cert .pay td { border-color:var(--navy); color:#fff; }
+  .cert .lab { font-weight:600; color:#33415a; width:34%; background:#fafbfd; }
+  .cert .amt { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cert .amtbox { border:1.5px solid var(--navy); border-left:5px solid var(--gold); background:#f7f9fc; padding:8px 13px; margin:7px 0 9px; display:flex; justify-content:space-between; align-items:center; }
+  .cert .amtbox .l { font-size:10.5px; color:#33415a; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+  .cert .amtbox .v { font-size:16px; font-weight:800; color:var(--navy); }
+  .cert .words { font-style:italic; font-size:9.6px; color:#33415a; }
+  .cert .sig td { border:0; border-top:1.4px solid var(--navy); text-align:center; font-size:8.8px; font-weight:700; color:var(--navy); padding-top:4px; }
+  .cert .sig .nm { border:0; font-weight:400; color:#888; font-size:8.2px; padding-top:32px; }
+  .cert .certify { font-style:italic; font-size:9.2px; color:#444; line-height:1.5; }
+  .cert .stamp-appr { display:inline-block; border:2px solid #2e7d32; color:#2e7d32; font-weight:800; font-size:8.5px; padding:2px 7px; border-radius:4px; transform:rotate(-5deg); letter-spacing:1px; }
+  .cert .foot { text-align:center; font-size:7.7px; color:#98a2b3; margin-top:10px; padding-top:6px; border-top:1px solid #e3e7ee; }
   /* cheque overlay — positioned in mm on the leaf */
   #chequeArea .leaf { position:relative; background:#fff; overflow:hidden; }
   #chequeArea .fld { position:absolute; font-family:Arial,sans-serif; white-space:nowrap; }
@@ -533,9 +548,10 @@ function printCert(c){
   const stampImg=(approved&&ASSETS.stamp)?`<img src="${ASSETS.stamp}" alt="stamp" style="position:absolute;height:88px;opacity:.82;left:60%;top:-8px;pointer-events:none">`:"";
   const approvedTag=(approved&&c.approvedBy)?`<br><span style="font-weight:400;font-size:8px;color:#555">${esc(c.approvedBy)} · ${dmy(c.approvedAt)}</span>`:"";
   $("#printArea").innerHTML=`<div class="cert">
-   <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
-   <div class="title">SUPPLIER / SUBCONTRACTOR PAYMENT CERTIFICATE</div>
-   <table><tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+   ${certLetterhead(ent)}
+   <div class="title">Supplier / Subcontractor Payment Certificate</div>
+   <div class="subtitle">${esc(c.project||"")}</div>
+   <table class="meta"><tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
    <tr><td class="lab">Project</td><td>${esc(c.project)}</td><td class="lab">Trade / Package</td><td>${esc(c.trade||"—")}</td></tr>
    <tr><td class="lab">Supplier / Subcontractor</td><td><b>${esc(c.supplier)}</b></td><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td></tr>
    <tr><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td><td class="lab">Period</td><td>${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
@@ -549,8 +565,9 @@ function printCert(c){
    ${r2r("Less: previously certified (excl VAT)","("+fmt(K.prevCertified)+")")}${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}
    <tr class="tot"><td>NET CERTIFIED THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.net)}</td></tr>
    ${r2r("Add: VAT @ "+pct(c.vatPct),fmt(K.vat))}
-   <tr class="pay"><td>★★ NET PAYABLE THIS CERTIFICATE (incl VAT) ★★</td><td style="text-align:right">${fmt(K.payable)}</td></tr>
-   <tr><td class="lab" style="font-style:italic">Amount payable in words</td><td style="font-style:italic">${esc(words(K.payable))}</td></tr></table>
+   <tr class="pay"><td>NET PAYABLE THIS CERTIFICATE (incl. VAT)</td><td class="amt">${fmt(K.payable)}</td></tr>
+   <tr><td class="lab words">Amount payable in words</td><td class="words">${esc(words(K.payable))}</td></tr></table>
+   <div class="amtbox"><div class="l">Net payable this certificate (incl. VAT)</div><div class="v">AED ${fmt(K.payable)}</div></div>
    ${c.payment?`<table><tr><td class="sec" colspan="4">3. PAYMENT DETAILS</td></tr>
      <tr><td class="lab">Mode</td><td>${esc(c.payment.mode)}</td><td class="lab">Date</td><td>${dmy(c.payment.date)}</td></tr>
      <tr><td class="lab">Reference</td><td>${esc(c.payment.ref||"—")}</td><td class="lab">Bank</td><td>${esc(c.payment.bank||"—")}</td></tr>
@@ -1119,9 +1136,10 @@ function contractForm(ct,clientId){
    <h3>Project &amp; contract</h3><div class="grid">
      <div><label>Our entity (claimant)</label><select id="k_entity">${opt(S.entities.map(e=>e.short),ct.entity)}</select></div>
      <div style="grid-column:1/-1"><label>Project name</label><input id="k_project" value="${esc(ct.project||"")}"></div>
-     <div><label>Certificate ref prefix</label><input id="k_certPrefix" value="${esc(ct.certPrefix||"PC")}" placeholder="e.g. AFAQ/PS/ASG"></div>
+     <div><label>Project short code (3 letters)</label><input id="k_projShort" maxlength="3" style="text-transform:uppercase" value="${esc(ct.projShort||"")}" placeholder="e.g. ASG"></div>
      <div><label>Client name (as on certificate)</label><input id="k_mainContractor" value="${esc(ct.mainContractor||"")}"></div>
-     <div><label>Subcontract / contract ref</label><input id="k_subcontractRef" value="${esc(ct.subcontractRef||"")}"></div>
+     <div><label>Contract / subcontract reference No.</label><input id="k_subcontractRef" value="${esc(ct.subcontractRef||"")}" placeholder="e.g. AFAQ/2026/PS-014"></div>
+     <div style="grid-column:1/-1"><div class="note" id="k_pcHint" style="font-size:12px"></div></div>
      <div><label>Offer letter ref</label><input id="k_offerRef" value="${esc(ct.offerRef||"")}"></div>
      <div><label>Start date</label><input id="k_startDate" type="date" value="${esc(ct.startDate||"")}"></div>
    </div>
@@ -1138,8 +1156,14 @@ function contractForm(ct,clientId){
    </div>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="k_save">${isNew?"Add contract":"Save"}</button><button class="btn ghost" id="k_back">Back</button></div></div>`;
   $("#k_back").onclick=()=>clientDetail(ct.clientId);
+  const clName=(CLIENTS.find(x=>x.id===ct.clientId)||{}).name||"";
+  const yy=String(new Date().getFullYear()).slice(-2);
+  const pcHint=()=>{ const cf=(clName.trim().split(/\s+/)[0]||"CLIENT").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+    let ps=($("#k_projShort").value||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase(); if(!ps) ps=($("#k_project").value||"PRJ").replace(/[^A-Za-z0-9]/g,"").toUpperCase().slice(0,3); ps=ps.slice(0,3).padEnd(3,"X");
+    $("#k_pcHint").innerHTML=`Certificates on this project will be numbered <b>PC/MA${yy}/${cf}/${ps}/001</b>, 002, 003 …`; };
+  ["k_projShort","k_project"].forEach(id=>{const el=$("#"+id); if(el) el.addEventListener("input",pcHint);}); pcHint();
   $("#k_save").onclick=async ()=>{ const g=id=>{const el=$("#k_"+id);return el?el.value:"";};
-    const body={ clientId:ct.clientId, entity:g("entity"), project:g("project").trim(), certPrefix:g("certPrefix").trim()||"PC",
+    const body={ clientId:ct.clientId, entity:g("entity"), project:g("project").trim(), certPrefix:"PC", projShort:g("projShort").trim().toUpperCase().slice(0,3),
       mainContractor:g("mainContractor"), subcontractRef:g("subcontractRef"), offerRef:g("offerRef"), startDate:g("startDate"),
       contractSum:+g("contractSum")||0, variations:+g("variations")||0,
       advancePct:(+g("advancePct")||0)/100, advanceAmount:g("advanceAmount")===""?"":+g("advanceAmount"),
@@ -1165,7 +1189,7 @@ async function contractDetail(id){
     <div class="muted" style="margin-top:6px">Retention ${pct(ct.retentionPct)} · Recovery ${pct(ct.recoveryRate)} · VAT ${pct(ct.vatPct)} · Ref ${esc(ct.subcontractRef||"—")}</div></div>
    <div class="card"><div class="flex"><h2 style="margin:0">Payment certificates</h2>${can?`<button class="btn gold right" id="newCC">+ New certificate</button>`:""}</div><div style="height:8px"></div>
      ${certs.length?`<table><tr><th>No.</th><th>Date</th><th>Period</th><th class="num">Gross cum.</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
-       ${certs.map(c=>`<tr class="click" data-cc="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.gross)}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`:`<div class="muted">No certificates yet.</div>`}
+       ${certs.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.gross)}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`:`<div class="muted">No certificates yet.</div>`}
    </div>`;
   $("#ctBack").onclick=()=>clientDetail(ct.clientId);
   if(can) $("#ctEdit").onclick=()=>contractForm(ct,ct.clientId);
@@ -1184,7 +1208,7 @@ async function vClientCerts(){
   if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates yet. Add a client and contract, then create your first certificate.</div>`; return; }
   $("#ccList").classList.remove("muted");
   $("#ccList").innerHTML=`<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Period</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
-    ${list.map(c=>`<tr class="click" data-cc="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
+    ${list.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
   $("#ccList").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
 }
 async function clientCertForm(contractId){
@@ -1210,13 +1234,35 @@ async function clientCertForm(contractId){
   const loadPrev=async ()=>{ const id=$("#q_contract").value; try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),ct:c}; }catch(e){ PREV={prevNet:0,recovered:0,ct:CONTRACTS.find(x=>x.id===id)}; } preview(); };
   const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
     const calc=ccCalc($("#q_gross").value,$("#q_mos").value,$("#q_contra").value,ct,PREV.prevNet,PREV.recovered);
-    $("#q_preview").innerHTML=`<div class="cert" style="max-width:520px">${sectionB(calc,ct)}</div>
+    const revised=r2(num(ct.contractSum)+num(ct.variations));
+    const nextSeq=(ct.summary?.certCount||0)+1;
+    const yy=String(new Date($("#q_date").value||Date.now()).getFullYear()).slice(-2);
+    const cf=((ct.clientName||"CLIENT").trim().split(/\s+/)[0]||"CLIENT").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+    const ps=((ct.projShort||ct.project||"PRJ").replace(/[^A-Za-z0-9]/g,"").toUpperCase().slice(0,3)).padEnd(3,"X");
+    const nextNo=`PC/MA${yy}/${cf}/${ps}/${String(nextSeq).padStart(3,"0")}`;
+    const isFirst=nextSeq===1;
+    const info=`<div class="card" style="background:#f7f9fc;border:1px solid #e3e7ee;padding:12px 14px;margin-bottom:10px">
+      <div class="flex" style="justify-content:space-between"><b style="color:var(--navy)">Auto-filled from project setup</b><span class="pill st-Draft" style="background:var(--navy)">${esc(nextNo)}</span></div>
+      <table style="width:100%;margin-top:8px;font-size:12.5px"><tr>
+        <td style="padding:2px 8px 2px 0"><span class="muted">Client</span><br><b>${esc(ct.clientName||"—")}</b></td>
+        <td style="padding:2px 8px"><span class="muted">Contract Ref.</span><br><b>${esc(ct.subcontractRef||"—")}</b></td>
+        <td style="padding:2px 8px"><span class="muted">Contract value (excl VAT)</span><br><b>AED ${fmt(ct.contractSum)}</b></td>
+        <td style="padding:2px 8px"><span class="muted">Revised (with variations)</span><br><b>AED ${fmt(revised)}</b></td>
+      </tr><tr>
+        <td style="padding:2px 8px 2px 0"><span class="muted">Down payment (${pct(ct.advancePct)})</span><br><b>AED ${fmt(ct.advanceAmount)}</b></td>
+        <td style="padding:2px 8px"><span class="muted">Advance still to recover</span><br><b>AED ${fmt(ct.summary?.advanceOutstanding)}</b></td>
+        <td style="padding:2px 8px"><span class="muted">Retention</span><br><b>${pct(ct.retentionPct)}</b></td>
+        <td style="padding:2px 8px"><span class="muted">VAT</span><br><b>${pct(ct.vatPct)}</b></td>
+      </tr></table>
+      ${isFirst&&num(ct.advanceAmount)>0?`<div class="note" style="margin-top:8px;font-size:11.5px">This is the <b>first certificate</b> for this project. The down payment of <b>AED ${fmt(ct.advanceAmount)}</b> is treated as paid separately (against the advance-payment guarantee) and is recovered from this and subsequent certificates at ${pct(ct.recoveryRate)} of work value until fully repaid.</div>`:""}
+    </div>`;
+    $("#q_preview").innerHTML=info+`<div class="cert" style="max-width:520px">${sectionB(calc,ct)}</div>
       <div class="muted" style="font-size:11px;margin-top:4px">Advance recovered to date: ${fmt(calc.advRecoveredToDate)} · Advance still to recover: ${fmt(calc.advOutstanding)} · Retention held: ${fmt(calc.retentionHeld)}</div>`; };
-  ["q_gross","q_mos","q_contra"].forEach(id=>$("#"+id).addEventListener("input",preview));
+  ["q_gross","q_mos","q_contra","q_date"].forEach(id=>$("#"+id).addEventListener("input",preview));
   $("#q_contract").onchange=loadPrev; loadPrev();
   $("#q_save").onclick=async ()=>{ const g=id=>$("#q_"+id).value;
     const body={ contractId:$("#q_contract").value, date:g("date"), periodFrom:g("from"), periodTo:g("to"), grossCum:+g("gross")||0, mos:+g("mos")||0, contra:+g("contra")||0, notes:g("notes") };
-    try{ const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.no); }catch(e){ toast(e.message); } };
+    try{ const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.key); }catch(e){ toast(e.message); } };
 }
 async function openClientCert(no){
   let c; try{ c=await api("clientcert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
@@ -1252,7 +1298,7 @@ async function openClientCert(no){
   if(canEdit) $("#ccEdit").onclick=()=>clientCertEdit(c);
   $("#main").querySelectorAll("[data-a]").forEach(b=>b.onclick=async ()=>{ let comment;
     if(b.dataset.a==="cancel"||b.dataset.a==="reopen"){ comment=prompt("Comment (optional):")||""; }
-    try{ await api("clientcert/"+encodeURIComponent(c.no)+"/transition",{method:"POST",body:{action:b.dataset.a,comment}}); toast("Done"); openClientCert(c.no); }catch(e){ toast(e.message); } });
+    try{ await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/transition",{method:"POST",body:{action:b.dataset.a,comment}}); toast("Done"); openClientCert(c.key||c.no); }catch(e){ toast(e.message); } });
 }
 function clientCertEdit(c){
   const ct=c.contract||{};
@@ -1265,40 +1311,50 @@ function clientCertEdit(c){
      <div><label>Other deductions / contra</label><input id="e_contra" type="number" step="0.01" value="${c.contra??0}"></div>
      <div style="grid-column:1/-1"><label>Notes</label><input id="e_notes" value="${esc(c.notes||"")}"></div>
    </div><div style="height:12px"></div><div class="flex"><button class="btn green" id="e_save">Save</button><button class="btn ghost" id="e_back">Back</button></div></div>`;
-  $("#e_back").onclick=()=>openClientCert(c.no);
+  $("#e_back").onclick=()=>openClientCert(c.key||c.no);
   $("#e_save").onclick=async ()=>{ const g=id=>$("#e_"+id).value;
-    try{ await api("clientcert/"+encodeURIComponent(c.no),{method:"PUT",body:{date:g("date"),periodFrom:g("from"),periodTo:g("to"),grossCum:+g("gross")||0,mos:+g("mos")||0,contra:+g("contra")||0,notes:g("notes")}}); toast("Saved"); openClientCert(c.no); }catch(e){ toast(e.message); } };
+    try{ await api("clientcert/"+encodeURIComponent(c.key||c.no),{method:"PUT",body:{date:g("date"),periodFrom:g("from"),periodTo:g("to"),grossCum:+g("gross")||0,mos:+g("mos")||0,contra:+g("contra")||0,notes:g("notes")}}); toast("Saved"); openClientCert(c.key||c.no); }catch(e){ toast(e.message); } };
+}
+function certLetterhead(ent){
+  return `<div class="letterhead"><img src="logo.png" alt="logo">
+    <div class="co"><div class="n1">${esc(ent.name)}</div>
+    ${ent.line2?`<div class="n2">${esc(ent.line2)}</div>`:""}${ent.line3?`<div class="n2">${esc(ent.line3)}</div>`:""}</div></div>`;
 }
 function printClientIPC(c){
   const ct=c.contract||{}, cl=c.client||{}, K=c.calc||{};
   const ent=S.entities.find(e=>e.short===ct.entity)||{name:"MA GROUP",line2:"",line3:""};
   const revised=r2(num(ct.contractSum)+num(ct.variations));
   const approved=["Issued","Approved"].includes(c.status);
-  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:46px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const isApproved=c.status==="Approved";
+  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:44px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const stampBox=isApproved?`<div style="position:absolute;right:6px;top:-6px"><span class="stamp-appr">APPROVED FOR PAYMENT</span></div>`:"";
+  const period=(c.periodFrom||"")+(c.periodTo?" – "+esc(c.periodTo):"");
   $("#printArea").innerHTML=`<div class="cert">
-   <div class="hd"><img src="logo.png"><div class="n1">${esc(ent.name)}</div><div class="n2">${esc(ent.line2)}</div><div class="n2">${esc(ent.line3)}</div></div>
-   <div class="title">INTERIM PAYMENT CERTIFICATE</div>
-   <div style="text-align:center;font-weight:700;font-size:11px;margin-bottom:4px">${esc(ct.project||"")}</div>
-   <table>
-     <tr><td class="lab">Certificate Ref.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
-     <tr><td class="lab">Period Covered</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="lab">Certificate No.</td><td>No. ${c.seq}</td></tr>
-     <tr><td class="lab">Client / Main Contractor</td><td>${esc(ct.mainContractor||cl.name||"")}</td><td class="lab">Claimant (Subcontractor)</td><td>${esc(ent.name)}</td></tr>
-     <tr><td class="lab">Contract / Subcontract Ref.</td><td>${esc(ct.subcontractRef||"—")}</td><td class="lab">Contract Sum (excl. VAT)</td><td>${fmt(ct.contractSum)}</td></tr>
-     <tr><td class="lab">Approved Variations</td><td>${fmt(ct.variations)}</td><td class="lab">Revised Contract Sum</td><td>${fmt(revised)}</td></tr>
+   ${certLetterhead(ent)}
+   <div class="title">Interim Payment Certificate</div>
+   <div class="subtitle">${esc(ct.project||"")}</div>
+   <table class="meta">
+     <tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+     <tr><td class="lab">Sequence</td><td>No. ${c.seq} for this project</td><td class="lab">Period Covered</td><td>${esc(period)||"—"}</td></tr>
+     <tr><td class="lab">Employer / Client</td><td>${esc(ct.mainContractor||cl.name||"")}${cl.trn?"<br><span style='font-size:8.5px;color:#777'>TRN: "+esc(cl.trn)+"</span>":""}</td><td class="lab">Claimant</td><td>${esc(ent.name)}</td></tr>
+     <tr><td class="lab">Contract / Subcontract Ref.</td><td>${esc(ct.subcontractRef||"—")}</td><td class="lab">Contract Sum (excl. VAT)</td><td class="amt">AED ${fmt(ct.contractSum)}</td></tr>
+     <tr><td class="lab">Approved Variations</td><td class="amt">AED ${fmt(ct.variations)}</td><td class="lab">Revised Contract Sum</td><td class="amt">AED ${fmt(revised)}</td></tr>
    </table>
-   <table><tr><td class="sec" colspan="2">A. VALUE OF WORK EXECUTED (cumulative, per site measurement)</td></tr>
-     <tr><td class="lab">Gross value of work executed to date</td><td style="text-align:right">${fmt(K.cumValue)}</td></tr>
-     <tr><td class="lab">Materials on site</td><td style="text-align:right">${fmt(K.mos)}</td></tr>
-     <tr class="tot"><td>Total gross value certified</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
+   <table><tr><td class="sec" colspan="2">A. VALUE OF WORK EXECUTED &mdash; cumulative, per site measurement (prepared by project team)</td></tr>
+     <tr><td class="lab">Gross value of work executed to date</td><td class="amt">${fmt(K.cumValue)}</td></tr>
+     <tr><td class="lab">Materials &amp; goods on site</td><td class="amt">${fmt(K.mos)}</td></tr>
+     <tr class="tot"><td>Total gross value certified (cumulative)</td><td class="amt">${fmt(K.gross)}</td></tr></table>
    ${sectionB(K,ct)}
+   <div class="amtbox"><div class="l">Amount certified for payment (incl. VAT)</div><div class="v">AED ${fmt(K.payable)}</div></div>
    <table><tr><td class="sec navy" colspan="4">C. ADVANCE (DOWN PAYMENT) &amp; RETENTION STATUS</td></tr>
-     <tr><td class="lab">Advance / down payment (${pct(ct.advancePct)})</td><td style="text-align:right">${fmt(ct.advanceAmount)}</td><td class="lab">Advance recovered to date</td><td style="text-align:right">${fmt(K.advanceRecoveredToDate)}</td></tr>
-     <tr><td class="lab">Advance balance to recover</td><td style="text-align:right">${fmt(K.advanceOutstanding)}</td><td class="lab">Retention held to date (${pct(ct.retentionPct)})</td><td style="text-align:right">${fmt(K.retention)}</td></tr>
+     <tr><td class="lab">Advance / down payment (${pct(ct.advancePct)})</td><td class="amt">${fmt(ct.advanceAmount)}</td><td class="lab">Advance recovered to date</td><td class="amt">${fmt(K.advanceRecoveredToDate)}</td></tr>
+     <tr><td class="lab">Advance balance to recover</td><td class="amt">${fmt(K.advanceOutstanding)}</td><td class="lab">Retention held to date (${pct(ct.retentionPct)})</td><td class="amt">${fmt(K.retention)}</td></tr>
      <tr><td class="lab">Retention release</td><td colspan="3">${esc(ct.retentionRelease||"—")}</td></tr></table>
-   <div style="position:relative"><table class="sig"><tr>
+   <table><tr><td class="certify">We certify that the value of work properly executed to the date of valuation, after deduction of retention, advance recovery and previous certificates, amounts to the net sum stated above, and recommend the said amount for payment in accordance with the terms of the Contract.</td></tr></table>
+   <div style="position:relative">${stampBox}<table class="sig"><tr>
      <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
-     <tr><td>Prepared by — MA Group (QS)</td><td>Checked by — Client (PM)</td><td>Certified by — Client (Authorised Signatory)</td></tr></table></div>
-   <div class="foot">MA Group Payment Certificate System — interim payment certificate (client) — ${esc(c.no)} — status: ${esc(c.status)} — printed ${dmy(new Date())}</div>
+     <tr><td>Prepared &amp; Certified by<br>MA Group — Quantity Surveyor</td><td>Reviewed by<br>Client — Project Manager</td><td>Approved by<br>Client — Authorised Signatory</td></tr></table></div>
+   <div class="foot">MA Group Payment Certificate System &nbsp;•&nbsp; Interim Payment Certificate (Client) &nbsp;•&nbsp; ${esc(c.no)} &nbsp;•&nbsp; Status: ${esc(c.status)}${isApproved&&c.approvedBy?" (approved by "+esc(c.approvedBy)+" on "+dmy(c.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated certificate issued under the MA Group financial control system.</div>
   </div>`;
   doPrint();
 }
