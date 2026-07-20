@@ -1656,12 +1656,12 @@ async function vBudget(){
   const load=async ()=>{ const p=$("#bProj").value; if(!p){ $("#bBody").innerHTML=`<div class="muted">Add a project (log an expense or a client contract) first.</div>`; $("#bKpis").innerHTML=""; return; }
     try{ BUD=await api("budget?project="+encodeURIComponent(p)); }catch(e){ $("#bBody").textContent=e.message; return; } renderBudget(); };
   $("#bProj").onchange=load;
-  if(canEdit){ $("#bAdd").onclick=()=>{ if(!BUD) return; collectBudget(); BUD.lines.push({area:"",boq:0,targetPct:0.85,pctComplete:0,target:0,actual:0,eac:0,vac:0,cpi:null,status:"—"}); renderBudget(); };
+  if(canEdit){ $("#bAdd").onclick=()=>{ if(!BUD) return; collectBudget(); BUD.lines.push({area:"",boq:0,targetPct:0.85,pctComplete:0,actualMatched:0,actualOverride:null,target:0,actual:0,eac:0,vac:0,cpi:null,status:"—"}); renderBudget(); };
     $("#bSave").onclick=async ()=>{ collectBudget(); const p=$("#bProj").value;
-      try{ BUD=await api("budget",{method:"POST",body:{project:p,lines:BUD.lines.map(l=>({area:l.area,boq:l.boq,targetPct:l.targetPct,pctComplete:l.pctComplete}))}}); toast("Budget saved"); renderBudget(); }catch(e){ toast(e.message); } }; }
+      try{ BUD=await api("budget",{method:"POST",body:{project:p,lines:BUD.lines.map(l=>({area:l.area,boq:l.boq,targetPct:l.targetPct,pctComplete:l.pctComplete,actualOverride:l.actualOverride}))}}); toast("Budget saved"); renderBudget(); }catch(e){ toast(e.message); } }; }
   await load();
 }
-function collectBudget(){ if(!BUD) return; BUD.lines.forEach((l,i)=>{ const a=$("#bl_area_"+i), b=$("#bl_boq_"+i), p=$("#bl_pct_"+i); if(a)l.area=a.value; if(b)l.boq=+b.value||0; if(p)l.pctComplete=(+p.value||0)/100; }); }
+function collectBudget(){ if(!BUD) return; BUD.lines.forEach((l,i)=>{ const a=$("#bl_area_"+i), b=$("#bl_boq_"+i), p=$("#bl_pct_"+i), ac=$("#bl_act_"+i); if(a)l.area=a.value; if(b)l.boq=+b.value||0; if(p)l.pctComplete=(+p.value||0)/100; if(ac)l.actualOverride=ac.value===""?null:(+ac.value||0); }); }
 function renderBudget(){
   const canEdit=["CEO","PM","QS"].includes(ME.role), t=BUD.totals||{};
   const stCol=s=>s==="Overrun"?"var(--red)":s==="Watch"?"var(--gold)":s==="On budget"?"var(--green)":"#888";
@@ -1677,14 +1677,14 @@ function renderBudget(){
     <td>${canEdit?`<input id="bl_area_${i}" value="${esc(l.area)}" style="min-width:150px">`:esc(l.area)}</td>
     <td class="num">${canEdit?`<input id="bl_boq_${i}" type="number" step="0.01" value="${l.boq||0}" style="width:110px;text-align:right">`:fmt(l.boq)}</td>
     <td class="num">${fmt(l.target)}</td>
-    <td class="num">${fmt(l.actual)}</td>
+    <td class="num">${canEdit?`<input id="bl_act_${i}" type="number" step="0.01" value="${l.actualOverride!=null?l.actualOverride:""}" placeholder="${fmt(l.actualMatched)}" title="Auto from cost log: ${fmt(l.actualMatched)}. Leave blank to use it, or type a value to override." style="width:120px;text-align:right">`:fmt(l.actual)}</td>
     <td class="num">${canEdit?`<input id="bl_pct_${i}" type="number" step="1" value="${Math.round((l.pctComplete||0)*100)}" style="width:64px;text-align:right">`:fmt((l.pctComplete||0)*100)}${canEdit?"":"%"}</td>
     <td class="num">${fmt(l.eac)}</td>
     <td class="num" style="color:${l.vac<0?"var(--red)":"inherit"}">${fmt(l.vac)}</td>
     <td class="num">${l.cpi==null?"—":fmt(l.cpi)}</td>
     <td><span style="color:${stCol(l.status)};font-weight:700">${l.status==="Overrun"?"🔴":l.status==="Watch"?"🟡":l.status==="On budget"?"🟢":"—"} ${esc(l.status)}</span>${canEdit?` <a href="#" data-rm="${i}" style="color:#c00">✕</a>`:""}</td></tr>`).join("");
   $("#bBody").classList.remove("muted");
-  $("#bBody").innerHTML=`<div class="muted" style="font-size:11px;margin:6px 0">Target cost = BOQ × 85%. Actual = matched from the cost log by <b>Area</b>. EAC = Actual ÷ %complete. VAC = Target − EAC. CPI = Earned Value ÷ Actual.${BUD.unalloc?` <b style="color:#c60">Unassigned actual not matching any area: AED ${fmt(BUD.unalloc)}</b> — name an area exactly as in the cost log to absorb it.`:""}</div>
+  $("#bBody").innerHTML=`<div class="muted" style="font-size:11px;margin:6px 0">Target cost = BOQ × 85%. <b>Actual</b> auto-matches the cost log by Area — or type a value in the Actual box to override it (leave blank to go back to auto). EAC = Actual ÷ %complete. VAC = Target − EAC. CPI = Earned Value ÷ Actual.${BUD.unalloc?` <b style="color:#c60">Unassigned actual not matching any area: AED ${fmt(BUD.unalloc)}</b> — name an area exactly as in the cost log to absorb it, or add it as its own line.`:""}</div>
     <table><tr><th>Area / Building</th><th class="num">BOQ + VOs</th><th class="num">Target (85%)</th><th class="num">Actual</th><th class="num">% Comp</th><th class="num">EAC</th><th class="num">VAC</th><th class="num">CPI</th><th>Status</th></tr>
     ${rows||`<tr><td colspan="9" class="muted">No areas yet. Click “+ Area”, name it exactly as in the cost log, enter BOQ and % complete, then Save.</td></tr>`}
     ${BUD.lines&&BUD.lines.length?`<tr class="tot"><td>TOTAL</td><td class="num">${fmt(t.boq)}</td><td class="num">${fmt(t.target)}</td><td class="num">${fmt(t.actual)}</td><td class="num">${fmt((t.overallPct||0)*100)}%</td><td class="num">${fmt(t.eac)}</td><td class="num" style="color:${vacColor}">${fmt(t.vac)}</td><td class="num">${t.cpi==null?"—":fmt(t.cpi)}</td><td></td></tr>`:""}</table>`;
