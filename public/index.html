@@ -270,6 +270,13 @@ function render(){
 }
 
 function supById(id){ return SUPS.find(s=>s.id===id); }
+async function adminDelete(kind,id,name,after){
+  if(ME.role!=="CEO"){ toast("Only the CEO can delete records"); return; }
+  const pin=prompt("⚠ PERMANENT DELETE — enter CEO password to confirm.\n\nDelete: "+name); if(pin===null||pin==="") return;
+  try{ const r=await api("admin/delete",{method:"POST",body:{kind,id,pin}}); toast("Deleted"+(r&&r.deleted!=null?" ("+r.deleted+" records)":"")); if(after) after(); }catch(e){ toast(e.message); }
+}
+function delBtn(kind,id,name){ return ME.role==="CEO"?`<button class="btn red" data-del-kind="${esc(kind)}" data-del-id="${esc(id)}" data-del-name="${esc(name)}">Delete</button>`:""; }
+function wireDelBtns(after){ $("#main").querySelectorAll("[data-del-kind]").forEach(b=>b.onclick=()=>adminDelete(b.dataset.delKind,b.dataset.delId,b.dataset.delName,after)); }
 
 /* ---------- dashboard ---------- */
 function vDash(){
@@ -392,7 +399,7 @@ async function openCert(no){
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
         <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${cashBtn}${rvBtn}${proofBtn}
-        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}
+        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
       <div><h3>Certificate calculation (AED)</h3><table>
@@ -431,6 +438,7 @@ async function openCert(no){
       inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; if(f.size>8000000){toast("Under ~8 MB");return;} fileToDataUrl(f,async d=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/proof",{method:"POST",body:{dataUrl:d,name:f.name}}); toast("Proof attached"); openCert(c.no);}catch(e){toast(e.message);} }); }; inp.click(); };
   }
   document.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>doAction(c,b.dataset.a));
+  wireDelBtns(()=>{VIEW="certs";render();});
 }
 
 const ATT_LABELS={proforma:"Proforma invoice",invoice:"Supplier invoice",lpo:"LPO / Purchase order",delivery:"Delivery note",quotation:"Quotation",other:"Other document"};
@@ -817,7 +825,7 @@ function supForm(s){
         ${has?`<button class="btn ghost" data-docview="${k}" style="padding:5px 10px">View</button>`:""}
         <button class="btn ghost" data-docadd="${k}" style="padding:5px 10px">${has?"Replace":"Upload"}</button></div>`; }).join("");
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${isNew?"New Supplier / Subcontractor Registration":"Edit — "+esc(s.name)}</h2>
-     <div class="right flex"><button class="btn ghost" id="printReg">Print registration form</button><button class="btn ghost" id="backSup">Back</button></div></div>
+     <div class="right flex"><button class="btn ghost" id="printReg">Print registration form</button>${!isNew?delBtn("supplier",s.id,s.name):""}<button class="btn ghost" id="backSup">Back</button></div></div>
   ${!isNew?`<div class="muted" style="margin-top:4px">Registration No. <b>${esc(s.regNo||("MA-SUP-"+s.id))}</b>${s.createdBy?" · registered by "+esc(s.createdBy):""}</div>`:""}
   <h3>Party type</h3><div class="grid">
     <div><label>Type *</label><select id="s_type"><option ${s.type!=="Supplier"?"selected":""}>Subcontractor</option><option ${s.type==="Supplier"?"selected":""}>Supplier</option></select></div>
@@ -875,6 +883,7 @@ function supForm(s){
   <div class="note" style="margin-top:8px">Retention 0% = none. Advance recovery is deducted automatically on every certificate (rate × gross) until recovered.</div>
   <div style="height:14px"></div><div class="flex"><button class="btn green" id="saveSup">${isNew?"Register supplier":"Save changes"}</button><button class="btn ghost" id="backSup2">Back</button></div></div>`;
   $("#backSup").onclick=vSups; $("#backSup2").onclick=vSups;
+  wireDelBtns(vSups);
   const applyType=()=>{ const isSup=$("#s_type").value==="Supplier";
     ["s_retentionPct","s_dlpMonths","s_retentionRelease"].forEach(id=>{ const el=$("#"+id); if(!el) return; el.disabled=isSup; if(isSup&&id==="s_retentionPct") el.value=0; el.style.background=isSup?"#eee":""; });
     $("#typeHint").innerHTML=isSup?"<b>Supplier</b> — material/goods. No retention is withheld (retention forced to 0)."
@@ -1141,13 +1150,14 @@ async function clientDetail(id){
   const can=["CEO","PM","QS"].includes(ME.role), canEdit=["CEO","PM","QS","Secretary"].includes(ME.role);
   const contracts=CONTRACTS.filter(c=>c.clientId===id);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(cl.name)}</h2><span class="muted">${esc(cl.regNo||cl.id)}${cl.trn?" · TRN "+esc(cl.trn):""}</span>
-     <div class="right flex">${canEdit?`<button class="btn ghost" id="clEdit">Edit client</button>`:""}<button class="btn ghost" id="clBack">Back</button></div></div>
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="clEdit">Edit client</button>`:""}${delBtn("client",cl.id,cl.name)}<button class="btn ghost" id="clBack">Back</button></div></div>
      <div class="muted" style="margin-top:4px">${esc([cl.address,cl.emirate].filter(Boolean).join(", "))}${cl.contactName?" · "+esc(cl.contactName):""}${cl.mobile?" · "+esc(cl.mobile):""}${cl.email?" · "+esc(cl.email):""}</div></div>
    <div class="card"><div class="flex"><h2 style="margin:0">Contracts / Projects</h2>${can?`<button class="btn gold right" id="newContract">+ Add contract</button>`:""}</div><div style="height:8px"></div>
      ${contracts.length?`<table><tr><th>Project</th><th>Cert ref</th><th class="num">Contract sum</th><th class="num">Advance</th><th class="num">Retention</th><th></th></tr>
        ${contracts.map(c=>`<tr class="click" data-ct="${esc(c.id)}"><td><b>${esc(c.project)}</b></td><td>${esc(c.certPrefix)}</td><td class="num">${fmt(c.contractSum)}</td><td class="num">${pct(c.advancePct)}</td><td class="num">${pct(c.retentionPct)}</td><td><a href="#">open →</a></td></tr>`).join("")}</table>`:`<div class="muted">No contracts yet for this client.</div>`}
    </div>`;
   $("#clBack").onclick=()=>{VIEW="clients";render();};
+  wireDelBtns(()=>{VIEW="clients";render();});
   if(canEdit) $("#clEdit").onclick=()=>clientForm(cl);
   if(can) $("#newContract").onclick=()=>contractForm(null,id);
   $("#main").querySelectorAll("[data-ct]").forEach(r=>r.onclick=()=>contractDetail(r.dataset.ct));
@@ -1202,7 +1212,7 @@ async function contractDetail(id){
   const can=["CEO","PM","QS"].includes(ME.role), sm=ct.summary||{};
   let certs=[]; try{ certs=(await api("clientcerts")).filter(c=>c.contractId===id); }catch(e){}
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(ct.project)}</h2><span class="muted">${esc(ct.clientName||"")} · ${esc(ct.certPrefix)}</span>
-    <div class="right flex">${can?`<button class="btn ghost" id="ctEdit">Edit contract</button>`:""}<button class="btn ghost" id="ctBack">Back</button></div></div>
+    <div class="right flex">${can?`<button class="btn ghost" id="ctEdit">Edit contract</button>`:""}${ME.role==="CEO"?`<button class="btn ghost" style="color:var(--red)" data-del-kind="clientcerts-contract" data-del-id="${esc(ct.id)}" data-del-name="ALL certificates for ${esc(ct.project)}">Delete all certs</button>`:""}${delBtn("contract",ct.id,ct.project)}<button class="btn ghost" id="ctBack">Back</button></div></div>
     <div class="kpis" style="margin-top:10px">
       <div class="kpi"><div class="v">AED ${fmt(ct.contractSum)}</div><div class="l">Contract sum</div></div>
       <div class="kpi"><div class="v">AED ${fmt(ct.advanceAmount)}</div><div class="l">Advance (${pct(ct.advancePct)})</div></div>
@@ -1216,6 +1226,7 @@ async function contractDetail(id){
        ${certs.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.gross)}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`:`<div class="muted">No certificates yet.</div>`}
    </div>`;
   $("#ctBack").onclick=()=>clientDetail(ct.clientId);
+  wireDelBtns(()=>clientDetail(ct.clientId));
   if(can) $("#ctEdit").onclick=()=>contractForm(ct,ct.clientId);
   if(can) $("#newCC").onclick=()=>clientCertForm(ct.id);
   $("#main").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
@@ -1315,7 +1326,7 @@ async function openClientCert(no){
      <span class="muted">${esc(ct.project||"")} · ${esc(c.client?.name||"")}</span>
      <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
        ${["Issued","Approved"].includes(c.status)?`<button class="btn gold" id="ccProforma">Proforma invoice</button>`:""}
-       ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}<button class="btn ghost" id="ccBack">Back</button></div></div>
+       ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("clientcert",c.key||c.no,c.no)}<button class="btn ghost" id="ccBack">Back</button></div></div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
      <div><h3>Certificate</h3><table>
        ${row("Certificate date",dmy(c.date))}${row("Period",(c.periodFrom||"")+(c.periodTo?" – "+c.periodTo:""))}
@@ -1331,6 +1342,7 @@ async function openClientCert(no){
      <div><h3>History</h3><ul class="audit">${(c.audit||[]).slice().reverse().map(a=>`<li>${dmy(a.at)} — <b>${esc(a.by)}</b>: ${esc(a.action)}${a.comment?" — <i>"+esc(a.comment)+"</i>":""}</li>`).join("")}</ul></div>
    </div></div>`;
   $("#ccBack").onclick=()=>{VIEW="ccerts";render();};
+  wireDelBtns(()=>{VIEW="ccerts";render();});
   $("#ccPrint").onclick=()=>printClientIPC(c);
   if($("#ccProforma")) $("#ccProforma").onclick=async ()=>{ toast("Preparing proforma…");
     try{ const pf=await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/proforma",{method:"POST"}); printProforma(pf); }catch(e){ toast(e.message); } };
@@ -1448,7 +1460,7 @@ async function vExpenses(){
   const projOpts=`<option value="">All projects</option>`+COSTMETA.projects.map(p=>`<option>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Daily Cost Log</h2>
      <span class="muted">project expenses — the source of truth for the P&amp;L. Supplier IPCs auto-post here; add anything else manually.</span>
-     <div class="right flex">${can?`<button class="btn gold" id="xNew">+ Add expense</button>`:""}${can?`<button class="btn ghost" id="xImport">Import Excel</button>`:""}<button class="btn ghost" id="xCsv">Export CSV</button></div></div>
+     <div class="right flex">${can?`<button class="btn gold" id="xNew">+ Add expense</button>`:""}${can?`<button class="btn ghost" id="xImport">Import Excel</button>`:""}<button class="btn ghost" id="xCsv">Export CSV</button>${ME.role==="CEO"?`<button class="btn ghost" style="color:var(--red)" id="xClear">Clear project…</button>`:""}</div></div>
    <div class="flex" style="margin:10px 0;flex-wrap:wrap">
      <select id="xProj" style="max-width:280px">${projOpts}</select>
      <input id="xQ" placeholder="Search supplier / description / PO / area…" style="max-width:280px">
@@ -1459,6 +1471,7 @@ async function vExpenses(){
   if(can) $("#xNew").onclick=()=>expenseForm(null);
   if(can) $("#xImport").onclick=importExpensesExcel;
   $("#xCsv").onclick=exportExpensesCsv;
+  if($("#xClear")) $("#xClear").onclick=()=>{ const p=$("#xProj").value; if(!p){ toast("Pick a project in the filter first"); return; } adminDelete("expenses-project",p,"ALL expenses for project: "+p,()=>{ COSTMETA=null; reloadExp(); }); };
   ["xProj","xQ","xType"].forEach(id=>$("#"+id).addEventListener("input",renderExpList));
   await reloadExp();
 }
@@ -1476,14 +1489,13 @@ function renderExpList(){
     <div class="kpi"><div class="v">AED ${fmt(totPaid)}</div><div class="l">Paid (cash out)</div></div>
     <div class="kpi"><div class="v">AED ${fmt(Math.max(0,totCost-totPaid))}</div><div class="l">Outstanding to pay</div></div>
     <div class="kpi"><div class="v">AED ${fmt(totBud)}</div><div class="l">Budgeted</div></div></div>`;
-  const can=["CEO","PM"].includes(ME.role);
+  const can=ME.role==="CEO";
   if(!list.length){ $("#xList").innerHTML=`<div class="muted">No expenses yet. Click “Add expense” to log a cost, or approve a Supplier IPC and it will appear here automatically.</div>`; return; }
   $("#xList").classList.remove("muted");
   $("#xList").innerHTML=`<table><tr><th>Date</th><th>Project</th><th>Area</th><th>Category</th><th>Cost Type</th><th>Supplier</th><th>Description</th><th class="num">Cost</th><th>Status</th><th class="num">Paid</th><th>Src</th><th></th></tr>
     ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td>${esc(e.category)}</td><td>${esc(e.costType)}</td><td>${esc(e.supplier||"—")}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
   $("#xList").querySelectorAll("[data-x]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del) return; expenseForm(EXP.find(x=>x.id===r.dataset.x)); });
-  $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); e.stopPropagation(); if(!confirm("Delete this expense line?")) return;
-    try{ await api("expense/"+encodeURIComponent(a.dataset.del),{method:"DELETE"}); toast("Deleted"); reloadExp(); }catch(x){ toast(x.message); } });
+  $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const ex=EXP.find(x=>x.id===a.dataset.del); adminDelete("expense",a.dataset.del,(ex?ex.description||ex.supplier:"")+" — AED "+fmt(ex?ex.amount:0),reloadExp); });
 }
 function expenseForm(x){
   const isNew=!x; x=x||{status:"Pending",date:new Date().toISOString().slice(0,10)};
@@ -1779,8 +1791,7 @@ function assetForm(a){
    </div></div>`;
   $("#a_back").onclick=()=>{VIEW="assets";render();};
   if(!isNew) $("#a_label").onclick=()=>printAssetLabels([a]);
-  if(!isNew&&ME.role==="CEO") $("#a_del").onclick=async ()=>{ if(!confirm(`Permanently delete ${a.code}?\n\nThis cannot be undone. To retire an asset you still own, set Status = Disposed instead.`)) return;
-    try{ await api("assets/"+encodeURIComponent(a.code),{method:"DELETE"}); toast("Deleted"); VIEW="assets"; render(); }catch(e){toast(e.message);} };
+  if(!isNew&&ME.role==="CEO") $("#a_del").onclick=()=>adminDelete("asset",a.code,a.code+" — "+(a.description||""),()=>{VIEW="assets";render();});
   $("#a_save").onclick=async ()=>{ const g=id=>{const el=$("#a_"+id);return el?el.value:"";};
     const body={ cat:g("cat"), description:g("description").trim(), model:g("model"), serial:g("serial"), year:g("year"),
       location:g("location"), custodian:g("custodian"), owner:g("owner"), purchaseDate:g("purchaseDate"),

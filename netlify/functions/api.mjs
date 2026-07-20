@@ -13468,6 +13468,45 @@ var api_default = async (req, context) => {
     const { pin } = await req.json();
     return json({ ok: hashPin(String(pin || ""), me.salt) === me.pinHash });
   }
+  if (path === "admin/delete" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const { kind, id, pin } = await req.json();
+    if (hashPin(String(pin || ""), me.salt) !== me.pinHash) return err("Wrong CEO password", 401);
+    const del = async (k) => { try { await s.delete(k); } catch {} };
+    if (kind === "supplier") await del("supplier/" + id);
+    else if (kind === "client") await del("client/" + id);
+    else if (kind === "contract") await del("contract/" + id);
+    else if (kind === "expense") await del("expense/" + id);
+    else if (kind === "asset") await del("asset/" + id);
+    else if (kind === "budget") await del("budget/" + budgetSlug(id));
+    else if (kind === "cert") {
+      await del("cert/" + id); await del("proof/" + id);
+      const reg = await s.get("register", { type: "json" }) || [];
+      const nr = reg.filter((r) => r.no !== id);
+      if (nr.length !== reg.length) await s.setJSON("register", nr);
+      const xid = "XPC-" + String(id).replace(/[^A-Za-z0-9]+/g, "_");
+      await del("expense/" + xid);
+    } else if (kind === "clientcert") {
+      const r = await resolveClientCert(s, id);
+      const no = r ? r.c.no : id;
+      if (r) await del(r.storeKey); else await del("clientcert/" + id);
+      const creg = await s.get("clientregister", { type: "json" }) || [];
+      const nr = creg.filter((x) => x.no !== no);
+      if (nr.length !== creg.length) await s.setJSON("clientregister", nr);
+      return json({ ok: true });
+    } else if (kind === "expenses-project") {
+      const { blobs } = await s.list({ prefix: "expense/" });
+      let n = 0;
+      for (const b of blobs) { const e = await s.get(b.key, { type: "json" }); if (e && e.project === id) { await del(b.key); n++; } }
+      return json({ ok: true, deleted: n });
+    } else if (kind === "clientcerts-contract") {
+      const { blobs } = await s.list({ prefix: "clientcert/" });
+      let n = 0;
+      for (const b of blobs) { const c = await s.get(b.key, { type: "json" }); if (c && c.contractId === id) { await del(b.key); n++; } }
+      return json({ ok: true, deleted: n });
+    } else return err("Unknown delete kind: " + kind);
+    return json({ ok: true });
+  }
   if (path === "usage") {
     if (!can("admin")) return err("CEO only", 403);
     const count = async (prefix) => (await s.list({ prefix })).blobs.length;
