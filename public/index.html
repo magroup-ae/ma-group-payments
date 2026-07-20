@@ -551,10 +551,12 @@ function printCert(c){
    ${certLetterhead(ent)}
    <div class="title">Supplier / Subcontractor Payment Certificate</div>
    <div class="subtitle">${esc(c.project||"")}</div>
-   <table class="meta"><tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+   <table class="meta"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup>
+   <tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
+   <tr><td class="lab">Supplier / Subcontractor</td><td colspan="3"><b>${esc(c.supplier)}</b></td></tr>
    <tr><td class="lab">Project</td><td>${esc(c.project)}</td><td class="lab">Trade / Package</td><td>${esc(c.trade||"—")}</td></tr>
-   <tr><td class="lab">Supplier / Subcontractor</td><td><b>${esc(c.supplier)}</b></td><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td></tr>
-   <tr><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td><td class="lab">Period</td><td>${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
+   <tr><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td></tr>
+   <tr><td class="lab">Period</td><td colspan="3">${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
    <table><tr><td class="sec" colspan="2">1. VALUATION OF WORK / SUPPLY TO DATE (AED)</td></tr>
    ${r2r("Original order value (excl VAT)",fmt(c.originalValue))}${r2r("Approved variations (net)",fmt(c.variations))}
    ${r2r("Adjusted order value",fmt(K.adjusted))}${r2r("Cumulative work done",pct(c.workPct))}
@@ -1333,10 +1335,11 @@ function printClientIPC(c){
    ${certLetterhead(ent)}
    <div class="title">Interim Payment Certificate</div>
    <div class="subtitle">${esc(ct.project||"")}</div>
-   <table class="meta">
+   <table class="meta"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup>
      <tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
      <tr><td class="lab">Sequence</td><td>No. ${c.seq} for this project</td><td class="lab">Period Covered</td><td>${esc(period)||"—"}</td></tr>
-     <tr><td class="lab">Employer / Client</td><td>${esc(ct.mainContractor||cl.name||"")}${cl.trn?"<br><span style='font-size:8.5px;color:#777'>TRN: "+esc(cl.trn)+"</span>":""}</td><td class="lab">Claimant</td><td>${esc(ent.name)}</td></tr>
+     <tr><td class="lab">Employer / Client</td><td colspan="3"><b>${esc(ct.mainContractor||cl.name||"")}</b>${cl.trn?" &nbsp;·&nbsp; <span style='font-size:9px;color:#777'>TRN: "+esc(cl.trn)+"</span>":""}</td></tr>
+     <tr><td class="lab">Claimant</td><td colspan="3">${esc(ent.name)}</td></tr>
      <tr><td class="lab">Contract / Subcontract Ref.</td><td>${esc(ct.subcontractRef||"—")}</td><td class="lab">Contract Sum (excl. VAT)</td><td class="amt">AED ${fmt(ct.contractSum)}</td></tr>
      <tr><td class="lab">Approved Variations</td><td class="amt">AED ${fmt(ct.variations)}</td><td class="lab">Revised Contract Sum</td><td class="amt">AED ${fmt(revised)}</td></tr>
    </table>
