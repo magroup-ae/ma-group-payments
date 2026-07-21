@@ -13047,6 +13047,7 @@ async function ensureInit() {
   }
   if (ensureHQProject(settings)) patched = true;
   if (patched) await s.setJSON("settings", settings);
+  try { await runProjectMergeMigration(s, settings); } catch (e) { }
   let users = await s.get("users", { type: "json" });
   if (!users) {
     users = DEFAULT_USERS.map((u) => ({ ...u, salt: randomBytes(8).toString("hex") }));
@@ -13317,6 +13318,37 @@ function ensureHQProject(st) {
     return ch;
   }
   st.projects.push({ code: HQ_CODE, name: HQ_PROJECT, fixed: true, kind: "overhead" });
+  return true;
+}
+// One-time server-side consolidation of the duplicate project names that the
+// various imports created, per the CEO's instruction. Runs once (guarded by a
+// flag), moving every contract/IPC/expense/register/budget onto the kept name
+// and dropping the duplicates from the registry. No password needed — it runs
+// inside the trusted backend at bootstrap.
+var PROJECT_MERGES_V1 = [
+  { from: ["The Square 2.0 - Nad Al Sheba", "The Square 2.0 Infrastructure"], to: "The Square 2.0 construction", code: "SQU" },
+  { from: ["Aster Garden Hospital @ Jabal Ali", "Aster Garden Jabal Ali"], to: "Aster Garden Hospital", code: "AGH" }
+];
+async function runProjectMergeMigration(s, settings) {
+  if (settings.projMergeV1) return false;
+  for (const m of PROJECT_MERGES_V1) {
+    const fromSet = new Set(m.from.map((x) => x.toLowerCase()));
+    const isFrom = (p) => fromSet.has(String(p || "").trim().toLowerCase());
+    for (const bl of (await s.list({ prefix: "contract/" })).blobs) { const c = await s.get(bl.key, { type: "json" }); if (c && isFrom(c.project)) { c.project = m.to; c.projShort = m.code; c.updatedAt = now(); await s.setJSON(bl.key, c); } }
+    for (const bl of (await s.list({ prefix: "cert/" })).blobs) { const c = await s.get(bl.key, { type: "json" }); if (c && isFrom(c.project)) { c.project = m.to; c.updatedAt = now(); await s.setJSON(bl.key, c); } }
+    for (const bl of (await s.list({ prefix: "expense/" })).blobs) { const e = await s.get(bl.key, { type: "json" }); if (e && isFrom(e.project)) { e.project = m.to; e.updatedAt = now(); await s.setJSON(bl.key, e); } }
+    const reg = await s.get("register", { type: "json" }) || []; let rc = false; for (const r of reg) { if (r && isFrom(r.project)) { r.project = m.to; rc = true; } } if (rc) await s.setJSON("register", reg);
+    const toSlug = budgetSlug(m.to); const target = await s.get("budget/" + toSlug, { type: "json" }) || { project: m.to, lines: [] };
+    for (const f of m.from) { if (f.toLowerCase() === m.to.toLowerCase()) continue; const bud = await s.get("budget/" + budgetSlug(f), { type: "json" }); if (bud && Array.isArray(bud.lines) && bud.lines.length) target.lines = (target.lines || []).concat(bud.lines); try { await s.delete("budget/" + budgetSlug(f)); } catch {} }
+    target.project = m.to; await s.setJSON("budget/" + toSlug, target);
+    const keep = []; let toEntry = null;
+    for (const p of (settings.projects || [])) { if (!p) continue; if (String(p.name).trim().toLowerCase() === m.to.toLowerCase()) { toEntry = p; keep.push(p); continue; } if (isFrom(p.name)) continue; keep.push(p); }
+    if (!toEntry) { toEntry = { code: m.code, name: m.to }; keep.push(toEntry); } else toEntry.code = m.code;
+    settings.projects = keep;
+  }
+  ensureHQProject(settings);
+  settings.projMergeV1 = true;
+  await s.setJSON("settings", settings);
   return true;
 }
 var BANK_DETAILS = {
