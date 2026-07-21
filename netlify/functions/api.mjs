@@ -13915,6 +13915,13 @@ var api_default = async (req, context) => {
     await recompute(c, sup);
     c.audit.push({ at: now(), by: me.name, action: "Edited" });
     await s.setJSON(key, c);
+    // Keep the auto-posted cost line in sync when a linked IPC is edited — so
+    // changing a certificate's project/amount re-tags its expense too (the
+    // expense mirrors the certificate and can't be edited on its own).
+    try {
+      const xpcId = "expense/XPC-" + c.no.replace(/[^A-Za-z0-9]+/g, "_");
+      if (["Approved", "Paid"].includes(c.status) || await s.get(xpcId)) await upsertCertExpense(s, c);
+    } catch {}
     return json(c);
   }
   const trMatch = path.match(/^cert\/([^/]+)\/transition$/);
