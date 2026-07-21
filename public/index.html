@@ -354,6 +354,15 @@ async function vDash(){
   const maxg={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const g=+c.gross||0; if(g>(maxg[c.contractId]||0)) maxg[c.contractId]=g; });
   const projRev={}; Object.keys(maxg).forEach(cid=>{ const p=contractProj[cid]; if(p) projRev[p]=(projRev[p]||0)+maxg[cid]; });
   const projCost=(pnl&&pnl.byProject)||{};
+  // ---- per-project audit breakdown (revenue attribution) ----
+  const projContractVal={}; contracts.forEach(c=>{ if(c.project) projContractVal[c.project]=(projContractVal[c.project]||0)+(+c.contractSum||0)+(+c.variations||0); });
+  const netByContract={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; netByContract[c.contractId]=(netByContract[c.contractId]||0)+(+c.net||0); });
+  const projNet={}; Object.keys(netByContract).forEach(cid=>{ const p=contractProj[cid]; if(p) projNet[p]=(projNet[p]||0)+netByContract[cid]; });
+  const projIpc={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const p=contractProj[c.contractId]; if(p) projIpc[p]=(projIpc[p]||0)+1; });
+  const orphMax={}; let orphanCnt=0; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; if(contractProj[c.contractId])return; orphanCnt++; const g=+c.gross||0; if(g>(orphMax[c.contractId]||0)) orphMax[c.contractId]=g; });
+  const orphanRev=Object.values(orphMax).reduce((a,v)=>a+v,0);
+  const auditRows=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...Object.keys(projContractVal)])].filter(p=>p&&p!=="MA HQ – Operations").sort();
+  const issuedTot=ccerts.filter(c=>["Issued","Approved"].includes(c.status)).length;
   const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...contracts.map(c=>c.project),...S.projects.map(p=>p.name)])].filter(Boolean).sort();
   const projRows=projNames.map(p=>({label:p,a:projRev[p]||0,b:projCost[p]||0})).sort((x,y)=>(y.a+y.b)-(x.a+x.b)).slice(0,8);
   const typeRows=pnl?Object.entries(pnl.byType||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value):[];
@@ -389,6 +398,13 @@ async function vDash(){
    </div>
    ${(rcPend.length||pendCheck)?`<div class="kpis" style="margin-top:12px">${rcPend.length?kpi(`<span style="color:var(--red)">${rcPend.length}</span>`,"Receipts pending","alert"):""}${pendCheck?kpi(pendCheck,"Awaiting check / approval"):""}</div>`:""}
    <div style="height:6px"></div>
+   <div class="card"><h2 style="margin:0 0 8px">Revenue &amp; cost by project <span class="muted" style="font-size:12px;font-weight:400">— audit: what makes up the totals above</span></h2>
+     <table><tr><th>Project</th><th class="num">Contract value</th><th class="num">Revenue certified (ex-VAT)</th><th class="num">Net due</th><th class="num">Cost incurred</th><th class="num">Issued IPCs</th></tr>
+     ${auditRows.map(p=>`<tr><td>${esc(p)}</td><td class="num">${fmt(projContractVal[p]||0)}</td><td class="num">${fmt(projRev[p]||0)}</td><td class="num">${fmt(projNet[p]||0)}</td><td class="num">${fmt(projCost[p]||0)}</td><td class="num">${projIpc[p]||0}</td></tr>`).join("")}
+     ${projCost["MA HQ – Operations"]?`<tr><td>MA HQ – Operations <span class="muted" style="font-size:10px">(overhead)</span></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${fmt(projCost["MA HQ – Operations"]||0)}</td><td class="num">—</td></tr>`:""}
+     ${orphanRev>0?`<tr style="color:var(--red)"><td>⚠ IPCs with no matching contract <span class="muted" style="font-size:10px">(deleted/renamed — not in totals)</span></td><td class="num">—</td><td class="num">${fmt(orphanRev)}</td><td class="num">—</td><td class="num">—</td><td class="num">${orphanCnt}</td></tr>`:""}
+     <tr class="tot"><td>TOTAL (all projects)</td><td class="num">${fmt(contractValue)}</td><td class="num">${fmt(revenue)}</td><td class="num">${fmt(netDue)}</td><td class="num">${fmt(cost)}</td><td class="num">${issuedTot}</td></tr></table>
+     <div class="muted" style="margin-top:8px">Revenue certified = for each contract, the highest cumulative gross (ex-VAT) across its Issued/Approved IPCs, summed over all projects. If a project shows revenue you didn't expect, an IPC is issued under that contract — open <b>Client IPCs</b> to review it, or delete a stale/test contract. This top-line dashboard is company-wide; use the <b>project selector</b> below for a single project.</div></div>
    <div class="chartgrid">
      ${chartCard("Revenue vs Cost by project", hbars2(projRows), "certified income vs cost incurred")}
      ${chartCard("Cost by type", donut(typeRows,"AED "+fmt(cost)))}
