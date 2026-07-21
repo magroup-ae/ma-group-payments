@@ -361,8 +361,10 @@ async function vDash(){
   const projIpc={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const p=contractProj[c.contractId]; if(p) projIpc[p]=(projIpc[p]||0)+1; });
   const orphMax={}; let orphanCnt=0; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; if(contractProj[c.contractId])return; orphanCnt++; const g=+c.gross||0; if(g>(orphMax[c.contractId]||0)) orphMax[c.contractId]=g; });
   const orphanRev=Object.values(orphMax).reduce((a,v)=>a+v,0);
-  const projDown={}, projRet={}, projCV={};
-  S.projects.forEach(p=>{ if(p&&p.name&&!p.fixed){ projDown[p.name]=+p.downPayment||0; projRet[p.name]=+p.retention||0; if(+p.contractValue>0) projCV[p.name]=+p.contractValue; } });
+  const projDown={}, projRetPct={}, projCV={};
+  S.projects.forEach(p=>{ if(p&&p.name&&!p.fixed){ projDown[p.name]=+p.downPayment||0; projRetPct[p.name]=(p.retentionPct!=null?+p.retentionPct:0.10); if(+p.contractValue>0) projCV[p.name]=+p.contractValue; } });
+  // Retention held = the client's retention rate × certified revenue to date.
+  const projRet={}; Object.keys(projRetPct).forEach(p=>{ projRet[p]=r2((projRev[p]||0)*projRetPct[p]); });
   const totalDown=Object.values(projDown).reduce((a,v)=>a+v,0);
   const totalRet=Object.values(projRet).reduce((a,v)=>a+v,0);
   const auditRows=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...Object.keys(projContractVal),...Object.keys(projCV),...Object.keys(projDown)])].filter(p=>p&&p!=="MA HQ – Operations").sort();
@@ -411,7 +413,7 @@ async function vDash(){
      ${projCost["MA HQ – Operations"]?`<tr><td>MA HQ – Operations <span class="muted" style="font-size:10px">(overhead)</span></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${fmt(projCost["MA HQ – Operations"]||0)}</td><td class="num">—</td></tr>`:""}
      ${orphanRev>0?`<tr style="color:var(--red)"><td>⚠ IPCs with no matching contract <span class="muted" style="font-size:10px">(not in totals)</span></td><td class="num">—</td><td class="num">${fmt(orphanRev)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${orphanCnt}</td></tr>`:""}
      <tr class="tot"><td>TOTAL (all projects)</td><td class="num">${fmt(totalCV)}</td><td class="num">${fmt(revenue)}</td><td class="num">${fmt(netDue)}</td><td class="num">${fmt(totalDown)}</td><td class="num">${fmt(totalRet)}</td><td class="num">${fmt(cost)}</td><td class="num">${issuedTot}</td></tr></table></div>
-     <div class="muted" style="margin-top:8px">Down payment received &amp; retention held (client) are set per project in <b>Settings → Projects</b>. Revenue certified = the highest cumulative gross (ex-VAT) across each contract's Issued/Approved IPCs. Company-wide view; use the <b>project selector</b> below for one project.</div></div>
+     <div class="muted" style="margin-top:8px">Down payment received and retention % are set per project in <b>Settings → Projects</b> (retention default 10%). Retention held is computed = rate × certified revenue; standard release 5% on completion + 5% after the 12-month DLP. Revenue certified = the highest cumulative gross (ex-VAT) across each contract's Issued/Approved IPCs. Company-wide view; use the <b>project selector</b> below for one project.</div></div>
    <div class="chartgrid">
      ${chartCard("Revenue vs Cost by project", hbars2(projRows), "certified income vs cost incurred")}
      ${chartCard("Cost by type", donut(typeRows,"AED "+fmt(cost)))}
@@ -439,7 +441,7 @@ async function projectDash(p,ctx){
   const contracts=(ctx.contracts||[]).filter(c=>c.project===p);
   const cids=new Set(contracts.map(c=>c.id));
   const sp=(S.projects||[]).find(x=>x&&x.name===p)||{};
-  const sDown={ down:+sp.downPayment||0, ret:+sp.retention||0, cv:+sp.contractValue||0 };
+  const sDown={ down:+sp.downPayment||0, retPct:(sp.retentionPct!=null?+sp.retentionPct:0.10), cv:+sp.contractValue||0 };
   const cval=contracts.reduce((a,c)=>a+(+c.contractSum||0)+(+c.variations||0),0);
   const live=(ctx.ccerts||[]).filter(c=>cids.has(c.contractId)&&["Issued","Approved"].includes(c.status));
   const certified=num(pnl.revenue), netDue=num(pnl.netDue), cost=num(pnl.cost), gp=num(pnl.grossProfit);
@@ -476,12 +478,13 @@ async function projectDash(p,ctx){
      ${kpi("AED "+fmt(netDue),"Net due from client")}
      ${kpi(live.length,"Client IPCs issued/approved")}
    </div>
-   ${(sDown.down||sDown.ret)?`<div class="kpis" style="margin-top:10px">
+   <div class="kpis" style="margin-top:10px">
      ${kpi("AED "+fmt(sDown.down),"Down payment received")}
-     ${kpi("AED "+fmt(sDown.ret),"Retention held by client")}
+     ${kpi("AED "+fmt(certified*sDown.retPct),`Retention held @ ${fmt(sDown.retPct*100)}%`)}
      ${kpi("AED "+fmt((cval||sDown.cv)-certified),"Balance to certify")}
-     ${kpi("AED "+fmt(certified-num(pnl.paidOut||0)),"Certified not yet paid")}
-   </div>`:""}
+     ${kpi("AED "+fmt(certified*sDown.retPct/2),"Retention due at completion (½)")}
+   </div>
+   <div class="note" style="margin-top:8px">Retention @ ${fmt(sDown.retPct*100)}% of certified revenue. Release: 5% on completion / taking-over, 5% after the 12-month DLP.</div>
    <div class="kpis" style="margin-top:10px">
      ${kpi("AED "+fmt(cost),"Cost incurred to date")}
      ${kpi("AED "+fmt(supCost),"Certified to suppliers (ex VAT)")}
@@ -1441,8 +1444,9 @@ function contractForm(ct,clientId){
     $("#k_pcHint").innerHTML=`Certificates on this project will be numbered <b>PC/MA${yy}/${cf}/${ps}/001</b>, 002, 003 … &nbsp;<span class="muted">(short code comes from Settings → Projects)</span>`; };
   const syncProj=()=>{ const sel=$("#k_project").value; const reg=S.projects.find(p=>p.name===sel);
     if(reg&&$("#k_projShort")) $("#k_projShort").value=(reg.code||"").toUpperCase().slice(0,3);
-    // Pre-fill the contract sum from the Settings project value when empty/zero.
+    // Pre-fill the contract sum and retention % from the Settings project when empty.
     if(reg&&(+reg.contractValue>0)&&$("#k_contractSum")&&!(+$("#k_contractSum").value>0)) $("#k_contractSum").value=reg.contractValue;
+    if(reg&&reg.retentionPct!=null&&$("#k_retentionPct")) $("#k_retentionPct").value=Math.round(reg.retentionPct*1000)/10;
     pcHint(); };
   $("#k_project").onchange=syncProj; pcHint();
   $("#k_save").onclick=async ()=>{ const g=id=>{const el=$("#k_"+id);return el?el.value:"";};
@@ -2151,7 +2155,7 @@ function vSettings(){
   const admin=ME.role==="CEO";
   $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
    <h3>Projects</h3><div id="projList"></div>
-   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.01" placeholder="Retention held" style="max-width:150px"><button class="btn" id="npAdd">Add project</button></div>
+   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.1" placeholder="Retention % (10)" style="max-width:130px"><button class="btn" id="npAdd">Add project</button></div>
    <div class="card" style="margin-top:14px;background:#f7f9fc"><h3 style="margin-top:0">Merge duplicate projects</h3>
      <div class="note">If the same project was created under two or more names, tick them below, type the single name and code to keep, then Merge. Every contract, client &amp; supplier IPC, expense and budget under the ticked names moves to the kept name, and the duplicates are removed from the list. CEO password required.</div>
      <div id="mgList" style="margin:10px 0"></div>
@@ -2169,11 +2173,13 @@ function vSettings(){
    ${admin?chequeLayoutCard():""}`;
   const renderLists=()=>{
     const pjCell=(p,i,field)=>(admin&&!p.fixed)?`<input type="number" step="0.01" class="pjEdit" data-i="${i}" data-field="${field}" value="${p[field]??""}" placeholder="—" style="width:130px;text-align:right">`:(p[field]?fmt(p[field]):"—");
-    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention held (client)</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"retention")}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>
-    <div class="muted" style="font-size:11px;margin-top:4px">Down payment received = advance paid to you by the client. Retention held (client) = amount the client withholds from your certified payments. These feed the dashboard cash view.</div>`;
+    const pjPct=(p,i)=>(admin&&!p.fixed)?`<input type="number" step="0.1" class="pjPctEdit" data-i="${i}" value="${p.retentionPct!=null?Math.round(p.retentionPct*1000)/10:10}" style="width:70px;text-align:right">%`:(p.retentionPct!=null?pct(p.retentionPct):"10%");
+    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention %</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjPct(p,i)}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>
+    <div class="muted" style="font-size:11px;margin-top:4px">Down payment received = advance paid to you by the client. Retention % (default 10%) is withheld by the client from your certified payments — the dashboard computes the retention held from your certified revenue. Standard release: 5% on completion + 5% after the 12-month DLP.</div>`;
     $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
       document.querySelectorAll(".pjEdit").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i][inp.dataset.field]=+inp.value||0; await saveS(); } });
+      document.querySelectorAll(".pjPctEdit").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i].retentionPct=(+inp.value||0)/100; await saveS(); } });
       document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
   };
   const renderMerge=()=>{ const ml=$("#mgList"); if(!ml) return;
@@ -2191,7 +2197,7 @@ function vSettings(){
   if(admin) bindSignature();
   if(admin) bindEmail();
   if(admin){
-    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(), cv=+$("#npValue").value||0, dp=+$("#npDown").value||0, rt=+$("#npRet").value||0; if(!code||!name) return toast("Code and name required"); if(S.projects.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast("That project name already exists"); if(S.projects.some(p=>(p.code||"").toUpperCase()===code)) return toast("That code is already used — pick a unique 3-letter code"); S.projects.push({code,name,contractValue:cv,downPayment:dp,retention:rt}); await saveS(); };
+    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(), cv=+$("#npValue").value||0, dp=+$("#npDown").value||0, rt=$("#npRet").value===""?10:(+$("#npRet").value||0); if(!code||!name) return toast("Code and name required"); if(S.projects.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast("That project name already exists"); if(S.projects.some(p=>(p.code||"").toUpperCase()===code)) return toast("That code is already used — pick a unique 3-letter code"); S.projects.push({code,name,contractValue:cv,downPayment:dp,retentionPct:rt/100}); await saveS(); };
     renderMerge();
     $("#mgBtn").onclick=()=>{ const from=[...document.querySelectorAll(".mgChk:checked")].map(c=>c.value); const to=$("#mgName").value.trim(); const toCode=$("#mgCode").value.trim().toUpperCase().slice(0,3);
       if(from.length<1){ toast("Tick the projects to merge"); return; }
