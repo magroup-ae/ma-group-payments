@@ -14608,6 +14608,19 @@ var api_default = async (req, context) => {
     exp.vat = r2(exp.amount * exp.vatPct);
     exp.gross = r2(exp.amount + exp.vat);
     await s.setJSON("expense/" + id, exp);
+    // Reallocation: if a linked Supplier-IPC cost line is moved to another
+    // project, move its parent certificate too so the two never diverge.
+    if (exp.source === "supplier-ipc" && exp.supplierCertNo) {
+      try {
+        const pc = await s.get("cert/" + exp.supplierCertNo, { type: "json" });
+        if (pc && String(pc.project || "") !== String(exp.project || "")) {
+          pc.project = exp.project;
+          pc.audit = pc.audit || [];
+          pc.audit.push({ at: now(), by: me.name, action: `Project reallocated to ${exp.project} (via cost log)` });
+          await s.setJSON("cert/" + pc.no, pc);
+        }
+      } catch {}
+    }
     return json(exp);
   }
   if (path === "expenses/import" && req.method === "POST") {

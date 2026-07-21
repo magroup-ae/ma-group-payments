@@ -1737,10 +1737,10 @@ async function expenseForm(x, presetProject){
   const opt=(arr,sel)=>arr.map(v=>`<option ${v===sel?"selected":""}>${esc(v)}</option>`).join("");
   const projOpts=`<option value="">— select project —</option>`+projList.map(p=>`<option ${p===x.project?"selected":""}>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
-   ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its activity / category / cost type here.</div>`:""}
+   ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate. You can refine its activity / category / cost type, and <b>reallocate it to the correct project</b> below — doing so moves the Supplier IPC to that project too, so they stay in step.${ME.role!=="CEO"?" (Project reallocation is CEO-only.)":""}</div>`:""}
    <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log). For recurring head-office / running costs not tied to a client project, choose <b>MA HQ – Operations</b> — it is a fixed overhead cost centre and its costs are reported as company overhead, not project cost.</div>
    <div class="grid" style="margin-top:10px">
-     <div style="grid-column:1/-1"><label>1 · Project *</label><select id="x_project" ${linked?"disabled":""}>${projOpts}</select></div>
+     <div style="grid-column:1/-1"><label>1 · Project * ${linked?`<span class="muted" style="font-size:11px">— reallocate (also moves Supplier IPC ${esc(x.supplierCertNo||"")})</span>`:""}</label><select id="x_project" ${linked&&ME.role!=="CEO"?"disabled":""}>${projOpts}</select></div>
      <div style="grid-column:1/-1"><label>2 · Activity / Area within project *</label><input id="x_area" list="x_areas" value="${esc(x.area||"")}" placeholder="select the project first…" ${linked?"":""}><datalist id="x_areas"></datalist><div class="muted" id="x_areaHint" style="font-size:11px;margin-top:3px"></div></div>
      <div><label>Category / Trade</label><select id="x_category">${opt(COSTMETA.categories,x.category||"General / Other")}</select></div>
      <div><label>Cost Type</label><select id="x_costType">${opt(COSTMETA.costTypes.map(t=>t.name),x.costType||"Material Supply")}</select></div>
