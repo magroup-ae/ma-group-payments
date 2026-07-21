@@ -14562,6 +14562,64 @@ var api_default = async (req, context) => {
     }
     return json({ projects: results });
   }
+  if (path === "project/merge" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const b = await req.json();
+    const fromRaw = (Array.isArray(b.from) ? b.from : [b.from]).map((x) => String(x || "").trim()).filter(Boolean);
+    const to = String(b.to || "").trim();
+    let toCode = String(b.toCode || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
+    if (!fromRaw.length || !to) return err("Choose the project(s) to merge and the name to keep");
+    const fromSet = new Set(fromRaw.map((x) => x.toLowerCase()));
+    const isFrom = (p) => fromSet.has(String(p || "").trim().toLowerCase());
+    const counts = { contracts: 0, supplierCerts: 0, expenses: 0, register: 0, budgets: 0 };
+    // contracts (client IPCs inherit their project from the contract, so this covers them too)
+    for (const bl of (await s.list({ prefix: "contract/" })).blobs) {
+      const c = await s.get(bl.key, { type: "json" });
+      if (c && isFrom(c.project)) { c.project = to; if (toCode) c.projShort = toCode; c.updatedAt = now(); await s.setJSON(bl.key, c); counts.contracts++; }
+    }
+    // supplier certificates
+    for (const bl of (await s.list({ prefix: "cert/" })).blobs) {
+      const c = await s.get(bl.key, { type: "json" });
+      if (c && isFrom(c.project)) { c.project = to; c.updatedAt = now(); await s.setJSON(bl.key, c); counts.supplierCerts++; }
+    }
+    // expenses (incl. auto-posted supplier-IPC cost lines)
+    for (const bl of (await s.list({ prefix: "expense/" })).blobs) {
+      const e = await s.get(bl.key, { type: "json" });
+      if (e && isFrom(e.project)) { e.project = to; e.updatedAt = now(); await s.setJSON(bl.key, e); counts.expenses++; }
+    }
+    // payment register
+    const reg = await s.get("register", { type: "json" }) || [];
+    let regChanged = false;
+    for (const r of reg) { if (r && isFrom(r.project)) { r.project = to; counts.register++; regChanged = true; } }
+    if (regChanged) await s.setJSON("register", reg);
+    // budgets: merge lines from each source into the kept project's budget, then remove the old ones
+    const toSlug = budgetSlug(to);
+    const target = await s.get("budget/" + toSlug, { type: "json" }) || { project: to, lines: [] };
+    for (const f of fromRaw) {
+      if (f.toLowerCase() === to.toLowerCase()) continue;
+      const bud = await s.get("budget/" + budgetSlug(f), { type: "json" });
+      if (bud && Array.isArray(bud.lines) && bud.lines.length) { target.lines = (target.lines || []).concat(bud.lines); counts.budgets++; }
+      try { await s.delete("budget/" + budgetSlug(f)); } catch {}
+    }
+    target.project = to;
+    await s.setJSON("budget/" + toSlug, target);
+    // settings project list: drop the merged-away names, ensure the kept one exists
+    const st = await s.get("settings", { type: "json" });
+    const keep = [];
+    let toEntry = null;
+    for (const p of (st.projects || [])) {
+      if (!p) continue;
+      if (String(p.name).trim().toLowerCase() === to.toLowerCase()) { toEntry = p; keep.push(p); continue; }
+      if (isFrom(p.name)) continue; // merged away
+      keep.push(p);
+    }
+    if (!toEntry) { toEntry = { code: toCode || to.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3), name: to }; keep.push(toEntry); }
+    else if (toCode) toEntry.code = toCode;
+    st.projects = keep;
+    ensureHQProject(st);
+    await s.setJSON("settings", st);
+    return json({ ok: true, to, code: toEntry.code, counts });
+  }
   if (path === "costmeta" && req.method === "GET") {
     const [projects, sups] = await Promise.all([projectNames(s), listSuppliers()]);
     return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects, suppliers: sups.map((x) => x.name).filter(Boolean).sort() });

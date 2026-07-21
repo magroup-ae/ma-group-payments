@@ -2130,7 +2130,12 @@ function vSettings(){
   const admin=ME.role==="CEO";
   $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
    <h3>Projects</h3><div id="projList"></div>
-   ${admin?`<div class="flex"><input id="npCode" placeholder="Code (3 letters)" style="max-width:130px"><input id="npName" placeholder="Project name" style="max-width:320px"><button class="btn" id="npAdd">Add project</button></div>`:""}
+   ${admin?`<div class="flex"><input id="npCode" placeholder="Code (3 letters)" style="max-width:130px"><input id="npName" placeholder="Project name" style="max-width:320px"><button class="btn" id="npAdd">Add project</button></div>
+   <div class="card" style="margin-top:14px;background:#f7f9fc"><h3 style="margin-top:0">Merge duplicate projects</h3>
+     <div class="note">If the same project was created under two or more names, tick them below, type the single name and code to keep, then Merge. Every contract, client &amp; supplier IPC, expense and budget under the ticked names moves to the kept name, and the duplicates are removed from the list. CEO password required.</div>
+     <div id="mgList" style="margin:10px 0"></div>
+     <div class="flex"><input id="mgName" placeholder="Name to keep" style="max-width:320px"><input id="mgCode" maxlength="3" placeholder="Code" style="max-width:90px;text-transform:uppercase"><button class="btn gold" id="mgBtn">Merge selected →</button></div>
+     <div class="muted" id="mgHint" style="font-size:11px;margin-top:6px"></div></div>`:""}
    <h3>Banks / accounts</h3><div id="bankList"></div>
    ${admin?`<div class="flex"><input id="nbName" placeholder="Bank — account" style="max-width:320px"><button class="btn" id="nbAdd">Add bank</button></div>`:""}
    ${admin?`<h3>Users</h3><table><tr><th>User</th><th>Role</th><th></th></tr>
@@ -2147,7 +2152,10 @@ function vSettings(){
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
       document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
   };
-  const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; renderLists(); toast("Saved"); }catch(e){ toast(e.message); } };
+  const renderMerge=()=>{ const ml=$("#mgList"); if(!ml) return;
+    ml.innerHTML=S.projects.map((p,i)=>`<label style="display:inline-flex;align-items:center;gap:6px;margin:3px 14px 3px 0"><input type="checkbox" class="mgChk" value="${esc(p.name)}" data-code="${esc(p.code||"")}"> <b>${esc(p.code||"")}</b> ${esc(p.name)}${p.fixed?' <span class="muted" style="font-size:10px">(fixed)</span>':""}</label>`).join("");
+    ml.querySelectorAll(".mgChk").forEach(c=>c.onchange=()=>{ const checked=[...ml.querySelectorAll(".mgChk:checked")]; if(checked.length && !$("#mgName").value){ $("#mgName").value=checked[0].value; $("#mgCode").value=checked[0].dataset.code||""; } }); };
+  const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; renderLists(); renderMerge(); toast("Saved"); }catch(e){ toast(e.message); } };
   renderLists();
   if(admin){ api("usage").then(u=>{ const b=$("#usageBox"); if(!b) return;
     b.innerHTML=`<div class="kpis"><div class="kpi"><div class="v">${u.certs}</div><div class="l">Certificates</div></div>
@@ -2160,6 +2168,14 @@ function vSettings(){
   if(admin) bindEmail();
   if(admin){
     $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(); if(!code||!name) return toast("Code and name required"); S.projects.push({code,name}); await saveS(); };
+    renderMerge();
+    $("#mgBtn").onclick=()=>{ const from=[...document.querySelectorAll(".mgChk:checked")].map(c=>c.value); const to=$("#mgName").value.trim(); const toCode=$("#mgCode").value.trim().toUpperCase().slice(0,3);
+      if(from.length<1){ toast("Tick the projects to merge"); return; }
+      if(!to){ toast("Type the name to keep"); return; }
+      const others=from.filter(n=>n.toLowerCase()!==to.toLowerCase());
+      if(!others.length && !S.projects.some(p=>p.name.toLowerCase()===to.toLowerCase())){ /* renaming a single project to a new name is fine */ }
+      if(!confirm(`Merge ${from.length} project name(s) into "${to}"?\n\nAll contracts, IPCs, expenses and budgets under:\n• ${from.join("\n• ")}\n\n…will move to "${to}". This cannot be undone automatically.`)) return;
+      ceoUnlock(async ()=>{ try{ const r=await api("project/merge",{method:"POST",body:{from,to,toCode}}); toast(`Merged → ${to}: ${r.counts.contracts} contracts, ${r.counts.supplierCerts} supplier IPCs, ${r.counts.expenses} expenses`); COSTMETA=null; await load(); vSettings(); }catch(e){ toast(e.message); } }); };
     $("#nbAdd").onclick=async ()=>{ const b=$("#nbName").value.trim(); if(!b) return; S.banks.push(b); await saveS(); };
     document.querySelectorAll("[data-reset]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const pin=prompt("New PIN (4-8 digits):"); if(!pin) return; const u=USERS.find(x=>x.id===a.dataset.reset);
       try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,pin}}); toast("PIN reset"); }catch(x){ toast(x.message); } });
