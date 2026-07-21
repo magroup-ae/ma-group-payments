@@ -1424,7 +1424,11 @@ function contractForm(ct,clientId){
   const pcHint=()=>{ const cf=(clName.trim().split(/\s+/)[0]||"CLIENT").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
     let ps=($("#k_projShort").value||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase(); if(!ps) ps=($("#k_project").value||"PRJ").replace(/[^A-Za-z0-9]/g,"").toUpperCase().slice(0,3); ps=ps.slice(0,3).padEnd(3,"X");
     $("#k_pcHint").innerHTML=`Certificates on this project will be numbered <b>PC/MA${yy}/${cf}/${ps}/001</b>, 002, 003 … &nbsp;<span class="muted">(short code comes from Settings → Projects)</span>`; };
-  const syncProj=()=>{ const sel=$("#k_project").value; const reg=S.projects.find(p=>p.name===sel); if(reg&&$("#k_projShort")) $("#k_projShort").value=(reg.code||"").toUpperCase().slice(0,3); pcHint(); };
+  const syncProj=()=>{ const sel=$("#k_project").value; const reg=S.projects.find(p=>p.name===sel);
+    if(reg&&$("#k_projShort")) $("#k_projShort").value=(reg.code||"").toUpperCase().slice(0,3);
+    // Pre-fill the contract sum from the Settings project value when empty/zero.
+    if(reg&&(+reg.contractValue>0)&&$("#k_contractSum")&&!(+$("#k_contractSum").value>0)) $("#k_contractSum").value=reg.contractValue;
+    pcHint(); };
   $("#k_project").onchange=syncProj; pcHint();
   $("#k_save").onclick=async ()=>{ const g=id=>{const el=$("#k_"+id);return el?el.value:"";};
     const body={ clientId:ct.clientId, entity:g("entity"), project:g("project").trim(), certPrefix:"PC", projShort:g("projShort").trim().toUpperCase().slice(0,3),
@@ -2132,7 +2136,7 @@ function vSettings(){
   const admin=ME.role==="CEO";
   $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
    <h3>Projects</h3><div id="projList"></div>
-   ${admin?`<div class="flex"><input id="npCode" placeholder="Code (3 letters)" style="max-width:130px"><input id="npName" placeholder="Project name" style="max-width:320px"><button class="btn" id="npAdd">Add project</button></div>
+   ${admin?`<div class="flex"><input id="npCode" placeholder="Code (3 letters)" style="max-width:130px"><input id="npName" placeholder="Project name" style="max-width:300px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:190px"><button class="btn" id="npAdd">Add project</button></div>
    <div class="card" style="margin-top:14px;background:#f7f9fc"><h3 style="margin-top:0">Merge duplicate projects</h3>
      <div class="note">If the same project was created under two or more names, tick them below, type the single name and code to keep, then Merge. Every contract, client &amp; supplier IPC, expense and budget under the ticked names moves to the kept name, and the duplicates are removed from the list. CEO password required.</div>
      <div id="mgList" style="margin:10px 0"></div>
@@ -2149,9 +2153,10 @@ function vSettings(){
    ${admin?signatureCard():""}
    ${admin?chequeLayoutCard():""}`;
   const renderLists=()=>{
-    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>`;
+    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th><th class="num">Contract value (ex-VAT)</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td class="num">${(admin&&!p.fixed)?`<input type="number" step="0.01" class="pjVal" data-i="${i}" value="${p.contractValue??""}" placeholder="—" style="width:150px;text-align:right">`:(p.contractValue?fmt(p.contractValue):"—")}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>`;
     $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
+      document.querySelectorAll(".pjVal").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i].contractValue=+inp.value||0; await saveS(); } });
       document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
   };
   const renderMerge=()=>{ const ml=$("#mgList"); if(!ml) return;
@@ -2169,7 +2174,7 @@ function vSettings(){
   if(admin) bindSignature();
   if(admin) bindEmail();
   if(admin){
-    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(); if(!code||!name) return toast("Code and name required"); S.projects.push({code,name}); await saveS(); };
+    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(), cv=+$("#npValue").value||0; if(!code||!name) return toast("Code and name required"); if(S.projects.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast("That project name already exists"); if(S.projects.some(p=>(p.code||"").toUpperCase()===code)) return toast("That code is already used — pick a unique 3-letter code"); S.projects.push({code,name,contractValue:cv}); await saveS(); };
     renderMerge();
     $("#mgBtn").onclick=()=>{ const from=[...document.querySelectorAll(".mgChk:checked")].map(c=>c.value); const to=$("#mgName").value.trim(); const toCode=$("#mgCode").value.trim().toUpperCase().slice(0,3);
       if(from.length<1){ toast("Tick the projects to merge"); return; }
