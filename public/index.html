@@ -354,7 +354,7 @@ async function vDash(){
   const maxg={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const g=+c.gross||0; if(g>(maxg[c.contractId]||0)) maxg[c.contractId]=g; });
   const projRev={}; Object.keys(maxg).forEach(cid=>{ const p=contractProj[cid]; if(p) projRev[p]=(projRev[p]||0)+maxg[cid]; });
   const projCost=(pnl&&pnl.byProject)||{};
-  const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost)])];
+  const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...contracts.map(c=>c.project)])].filter(Boolean).sort();
   const projRows=projNames.map(p=>({label:p,a:projRev[p]||0,b:projCost[p]||0})).sort((x,y)=>(y.a+y.b)-(x.a+x.b)).slice(0,8);
   const typeRows=pnl?Object.entries(pnl.byType||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value):[];
   const grpRows=pnl?[{label:"Direct",value:num(pnl.byGroup.Direct),color:"#2E75B6"},{label:"Indirect",value:num(pnl.byGroup.Indirect),color:"#BF9000"},{label:"Overhead",value:num(pnl.byGroup.Overhead),color:"#375623"}]:[];
@@ -382,7 +382,7 @@ async function vDash(){
    </div>
    <div class="kpigrp">Profitability · Assets</div>
    <div class="kpis">
-     ${kpi("AED "+fmt(cost),"Total cost incurred")}
+     ${kpi("AED "+fmt(cost),(pnl&&num(pnl.hqCost)>0)?`Total cost — projects ${fmt(num(pnl.projectCost))} + HQ ${fmt(num(pnl.hqCost))}`:"Total cost incurred")}
      ${kpi(`<span style="color:${gpc}">AED ${fmt(gp)}</span>`,"Gross profit",gp>=0?"good":"alert")}
      ${kpi(`<span style="color:${gpc}">${fmt(margin*100)}%</span>`,"Gross margin",gp>=0?"good":"alert")}
      ${kpi("AED "+fmt(assetVal),assetCnt+" assets · net value","","kpiAssets")}
@@ -398,11 +398,52 @@ async function vDash(){
      ${chartCard("Supplier IPC status", hbars(stRows,v=>v))}
    </div>
    <div class="chartcard" style="margin-bottom:16px"><div class="dash-h">Cumulative cash paid to suppliers</div>${areaChart(cash)}</div>
+   <div class="card" style="margin-bottom:16px"><div class="flex"><h2 style="margin:0">Project dashboard</h2>
+     <select id="pd_sel" style="max-width:340px;margin-left:14px"><option value="">— choose a project —</option>${projNames.filter(p=>p!=="MA - HQ Expenses").map(p=>`<option>${esc(p)}</option>`).join("")}</select></div>
+     <div id="pd_body" style="margin-top:12px"><div class="muted">Pick a project to see its own KPIs and charts — contract vs certified, cost by activity, cost split and monthly spend.</div></div></div>
    ${rcPend.length?`<div class="card"><h2>Receipts pending <span class="muted" style="font-size:12px;font-weight:400">— signed receipt + collector Emirates ID required</span></h2>${certTable(rcPend)}</div>`:""}
    <div class="card"><h2>Needs action — supplier certificates</h2>${certTable(live.filter(c=>c.status!=="Paid"))}</div>
    <div class="card"><h2>Advance recovery by supplier</h2>${advTable()}</div>`;
   bindRows();
   const ka=$("#kpiAssets"); if(ka) ka.onclick=()=>{VIEW="assets";render();};
+  $("#pd_sel").onchange=()=>projectDash($("#pd_sel").value,{contracts,ccerts});
+}
+async function projectDash(p,ctx){
+  const box=$("#pd_body"); if(!box) return;
+  if(!p){ box.innerHTML=`<div class="muted">Pick a project to see its own KPIs and charts.</div>`; return; }
+  box.innerHTML=`<div class="muted">Loading ${esc(p)}…</div>`;
+  let pnl=null; try{ pnl=await api("pnl?project="+encodeURIComponent(p)); }catch(e){ box.innerHTML=`<div class="muted">${esc(e.message)}</div>`; return; }
+  const contracts=(ctx.contracts||[]).filter(c=>c.project===p);
+  const cids=new Set(contracts.map(c=>c.id));
+  const cval=contracts.reduce((a,c)=>a+(+c.contractSum||0)+(+c.variations||0),0);
+  const live=(ctx.ccerts||[]).filter(c=>cids.has(c.contractId)&&["Issued","Approved"].includes(c.status));
+  const certified=num(pnl.revenue), netDue=num(pnl.netDue), cost=num(pnl.cost), gp=num(pnl.grossProfit);
+  const pctDone=cval>0?certified/cval:0;
+  const supCost=CERTS.filter(c=>c.project===p&&c.status!=="Cancelled").reduce((a,c)=>a+(c.net||c.payable||0),0);
+  const catRows=Object.entries(pnl.byCat||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value).slice(0,10);
+  const grpRows=[{label:"Direct",value:num(pnl.byGroup.Direct),color:"#2E75B6"},{label:"Indirect",value:num(pnl.byGroup.Indirect),color:"#BF9000"},{label:"Overhead",value:num(pnl.byGroup.Overhead),color:"#375623"}];
+  const mm={}; (pnl.byDate||[]).forEach(d=>{ const k=String(d.date).slice(0,7); mm[k]=(mm[k]||0)+num(d.cost); });
+  const mk=Object.keys(mm).sort(); const trend=mk.map(k=>{const[y,mo]=k.split("-");return {label:mo+"/"+y.slice(2),value:mm[k]};});
+  const gpc=gp>=0?"var(--green)":"var(--red)";
+  const kpi=(v,l,cls="")=>`<div class="kpi ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  box.innerHTML=`
+   <div class="kpis">
+     ${kpi("AED "+fmt(cval),"Contract value (incl variations)")}
+     ${kpi("AED "+fmt(certified),`Certified to client (${fmt(pctDone*100)}%)`)}
+     ${kpi("AED "+fmt(netDue),"Net due from client")}
+     ${kpi(live.length,"Client IPCs issued/approved")}
+   </div>
+   <div class="kpis" style="margin-top:10px">
+     ${kpi("AED "+fmt(cost),"Cost incurred to date")}
+     ${kpi("AED "+fmt(supCost),"Certified to suppliers (ex VAT)")}
+     ${kpi(`<span style="color:${gpc}">AED ${fmt(gp)}</span>`,"Profit to date",gp>=0?"good":"alert")}
+     ${kpi(`<span style="color:${gpc}">${certified?fmt(pnl.margin*100)+"%":"—"}</span>`,"Margin on certified",gp>=0?"good":"alert")}
+   </div>
+   <div class="chartgrid" style="margin-top:12px">
+     ${chartCard("Cost by activity / trade — "+esc(p), hbars(catRows))}
+     ${chartCard("Cost split — Direct / Indirect / Overhead", donut(grpRows,"AED "+fmt(cost)))}
+   </div>
+   <div class="chartcard"><div class="dash-h">Monthly spend — ${esc(p)}</div>${areaChart(trend)}</div>`;
 }
 function advTable(){
   const rows=SUPS.filter(s=>(+s.advanceAmount)>0).map(s=>{
@@ -451,24 +492,33 @@ function certForm(c){
     <div><label>Period to</label><input id="f_periodTo" type="date" value="${esc(c.periodTo||"")}"></div>
   </div>
   <div class="note" id="supInfo" style="margin-top:8px"></div>
-  <h3>Progress this certificate</h3><div class="grid">
-    <div><label>Approved variations (net, AED)</label><input id="f_variations" type="number" step="0.01" value="${c.variations??0}"></div>
-    <div><label>Cumulative work done %</label><input id="f_workPct" type="number" step="0.1" value="${c.workPct!==undefined?Math.round(c.workPct*1000)/10:""}" placeholder="e.g. 45"></div>
+  <h3 id="progH">Progress this certificate</h3><div class="grid">
+    <div id="w_variations"><label>Approved variations (net, AED)</label><input id="f_variations" type="number" step="0.01" value="${c.variations??0}"></div>
+    <div id="w_workPct"><label>Cumulative work done %</label><input id="f_workPct" type="number" step="0.1" value="${c.workPct!==undefined?Math.round(c.workPct*1000)/10:""}" placeholder="e.g. 45"></div>
+    <div id="w_invoiceAmount" style="display:none"><label>Invoice amount this certificate (AED, excl VAT)</label><input id="f_invoiceAmount" type="number" step="0.01" value="${c.invoiceAmount??""}" placeholder="value of the submitted invoice"></div>
     <div><label>Materials on site (AED)</label><input id="f_materialsOnSite" type="number" step="0.01" value="${c.materialsOnSite??0}"></div>
     <div><label>Contra / back-charges (AED)</label><input id="f_contra" type="number" step="0.01" value="${c.contra??0}"></div>
   </div>
-  <div class="note" style="margin-top:8px">Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance.</div>
+  <div class="note" id="calcNote" style="margin-top:8px">Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance.</div>
   <div style="height:14px"></div><div class="flex">
     <button class="btn green" id="saveBtn">${isNew?"Create draft":"Save changes"}</button>
     <button class="btn ghost" id="backBtn">Back</button></div></div>`;
   const showSup=()=>{ const sp=supById($("#f_supplierId").value)||sup;
-    $("#supInfo").innerHTML = sp?`Contract: <b>AED ${fmt(sp.contractValue)}</b> · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · Advance AED ${fmt(sp.advanceAmount)} @ ${pct(sp.advanceRecoveryRate)} · LPO ${esc(sp.lpoRef||"—")} (signed ${dmy(sp.signDate)})`:""; };
+    const rate=sp&&sp.contractType==="Rate";
+    $("#supInfo").innerHTML = sp?(rate
+      ?`<b>Rate contract (services)</b> · certify per submitted invoice · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · LPO ${esc(sp.lpoRef||"—")}`
+      :`Contract: <b>AED ${fmt(sp.contractValue)}</b> · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · Advance AED ${fmt(sp.advanceAmount)} @ ${pct(sp.advanceRecoveryRate)} · LPO ${esc(sp.lpoRef||"—")} (signed ${dmy(sp.signDate)})`):"";
+    $("#w_workPct").style.display=rate?"none":""; $("#w_variations").style.display=rate?"none":""; $("#w_invoiceAmount").style.display=rate?"":"none";
+    $("#progH").textContent=rate?"This certificate (per invoice)":"Progress this certificate";
+    $("#calcNote").innerHTML=rate
+      ?"<b>Rate-based certification:</b> the certificate is valued at the submitted invoice amount. Retention and VAT come from the supplier record; previous certificates are <b>not</b> deducted — each invoice is certified on its own."
+      :"Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance."; };
   showSup(); $("#f_supplierId").onchange=showSup;
   $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
   $("#saveBtn").onclick=async ()=>{ const g=id=>$("#f_"+id).value;
     const body={ supplierId:g("supplierId"), project:g("project"), entity:g("entity"), invoiceNo:g("invoiceNo"),
       date:g("date"), periodFrom:g("periodFrom"), periodTo:g("periodTo"),
-      variations:+g("variations")||0, workPct:(+g("workPct")||0)/100, materialsOnSite:+g("materialsOnSite")||0, contra:+g("contra")||0 };
+      variations:+g("variations")||0, workPct:(+g("workPct")||0)/100, invoiceAmount:+g("invoiceAmount")||0, materialsOnSite:+g("materialsOnSite")||0, contra:+g("contra")||0 };
     try{ const d = isNew ? await api("cert",{method:"POST",body}) : await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body});
       toast(isNew?("Created "+d.no):"Saved"); await load(); openCert(d.no);
     }catch(e){ toast(e.message); } };
@@ -506,7 +556,14 @@ async function openCert(no){
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
-      <div><h3>Certificate calculation (AED)</h3><table>
+      <div><h3>Certificate calculation (AED)${c.basis==="rate"?' <span class="muted" style="font-size:11px;font-weight:400">— rate contract, per invoice</span>':""}</h3><table>
+        ${c.basis==="rate"?`
+        ${row("Invoice amount (this certificate)",fmt(K.cumValue))}
+        ${row("Materials on site",fmt(c.materialsOnSite))}
+        ${row("Gross this certificate",fmt(K.gross),"tot")}
+        ${row("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}
+        ${row("Less: advance recovery (auto)","("+fmt(K.advanceRecovery)+")")}
+        ${row("Less: contra / back-charges","("+fmt(c.contra)+")")}`:`
         ${row("Adjusted order value",fmt(K.adjusted))}
         ${row("Cumulative work done",pct(c.workPct))}
         ${row("Cumulative value of work",fmt(K.cumValue))}
@@ -515,7 +572,7 @@ async function openCert(no){
         ${row("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}
         ${row("Less: advance recovery (auto)","("+fmt(K.advanceRecovery)+")")}
         ${row("Less: previously certified","("+fmt(K.prevCertified)+")")}
-        ${row("Less: contra / back-charges","("+fmt(c.contra)+")")}
+        ${row("Less: contra / back-charges","("+fmt(c.contra)+")")}`}
         ${row("NET this certificate (excl VAT)",fmt(K.net),"tot")}
         ${row("VAT @ "+pct(c.vatPct),fmt(K.vat))}
         ${row("<b>NET PAYABLE (incl VAT)</b>","<b>"+fmt(K.payable)+"</b>")}
@@ -671,14 +728,21 @@ function printCert(c){
    <tr><td class="lab">Project</td><td>${esc(c.project)}</td><td class="lab">Trade / Package</td><td>${esc(c.trade||"—")}</td></tr>
    <tr><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td></tr>
    <tr><td class="lab">Period</td><td colspan="3">${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
-   <table><tr><td class="sec" colspan="2">1. VALUATION OF WORK / SUPPLY TO DATE (AED)</td></tr>
+   ${c.basis==="rate"?`<table><tr><td class="sec" colspan="2">1. VALUATION OF SERVICES / SUPPLY — RATE CONTRACT (AED)</td></tr>
+   ${r2r("Basis of certification","Rate contract — certified against submitted invoice")}
+   ${r2r("Invoice amount this certificate (excl VAT)",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
+   <tr class="tot"><td>GROSS VALUE THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
+   <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>
+   ${r2r("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}${r2r("Less: advance / mobilisation recovery","("+fmt(K.advanceRecovery)+")")}
+   ${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}`
+   :`<table><tr><td class="sec" colspan="2">1. VALUATION OF WORK / SUPPLY TO DATE (AED)</td></tr>
    ${r2r("Original order value (excl VAT)",fmt(c.originalValue))}${r2r("Approved variations (net)",fmt(c.variations))}
    ${r2r("Adjusted order value",fmt(K.adjusted))}${r2r("Cumulative work done",pct(c.workPct))}
    ${r2r("Cumulative value of work executed",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
    <tr class="tot"><td>TOTAL GROSS VALUE TO DATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
    <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>
    ${r2r("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}${r2r("Less: advance / mobilisation recovery","("+fmt(K.advanceRecovery)+")")}
-   ${r2r("Less: previously certified (excl VAT)","("+fmt(K.prevCertified)+")")}${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}
+   ${r2r("Less: previously certified (excl VAT)","("+fmt(K.prevCertified)+")")}${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}`}
    <tr class="tot"><td>NET CERTIFIED THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.net)}</td></tr>
    ${r2r("Add: VAT @ "+pct(c.vatPct),fmt(K.vat))}
    <tr class="pay"><td>NET PAYABLE THIS CERTIFICATE (incl. VAT)</td><td class="amt">${fmt(K.payable)}</td></tr>
@@ -884,7 +948,7 @@ function supStatement(id){
      ${kpi(a.retention,"Retention held","border-top-color:#7a5c00")}
      ${kpi(advOut,"Advance outstanding")}
    </div>
-   <div class="note" style="margin-top:10px"><b>${esc(s.type||"Subcontractor")}</b> · Contract AED ${fmt(s.contractValue)} · Retention ${(+s.retentionPct)===0?"none":pct(s.retentionPct)}${s.dlpMonths?` · DLP ${s.dlpMonths}m`:""}${s.retentionRelease?` · Release: ${esc(s.retentionRelease)}`:""}${(+s.advanceAmount)>0?` · Advance AED ${fmt(s.advanceAmount)} @ ${pct(s.advanceRecoveryRate)} (outstanding ${fmt(advOut)})`:""}</div>
+   <div class="note" style="margin-top:10px"><b>${esc(s.type||"Subcontractor")}</b> · ${s.contractType==="Rate"?`<b style="color:#7A5C00">Rate contract (per invoice)</b>${(+s.contractValue)>0?` · budget AED ${fmt(s.contractValue)}`:""}`:`Contract AED ${fmt(s.contractValue)}`} · Retention ${(+s.retentionPct)===0?"none":pct(s.retentionPct)}${s.dlpMonths?` · DLP ${s.dlpMonths}m`:""}${s.retentionRelease?` · Release: ${esc(s.retentionRelease)}`:""}${(+s.advanceAmount)>0?` · Advance AED ${fmt(s.advanceAmount)} @ ${pct(s.advanceRecoveryRate)} (outstanding ${fmt(advOut)})`:""}</div>
    <h3 style="margin-top:14px">Certificates & accumulation</h3>
    <table><tr><th>Cert No.</th><th>Date</th><th>Project</th><th class="num">This Cert (incl VAT)</th><th class="num">Cumulative</th><th class="num">Retention</th><th>Status</th></tr>
    ${rows||`<tr><td colspan="7" class="muted">No certificates yet.</td></tr>`}</table>
@@ -971,8 +1035,12 @@ function supForm(s){
     <div><label>Default project</label><select id="s_project"><option value=""></option>${opt(S.projects.map(p=>p.name),s.project)}</select></div>
     <div><label>Subcontract / LPO ref</label><input id="s_lpoRef" value="${esc(s.lpoRef||"")}"></div>
     <div><label>Sign date</label><input id="s_signDate" type="date" value="${esc(s.signDate||"")}"></div>
-    <div><label>Contract value (excl VAT)</label><input id="s_contractValue" type="number" step="0.01" value="${s.contractValue??""}"></div>
+    <div><label>Commercial basis</label><select id="s_contractType">
+      <option value="Fixed" ${(s.contractType||"Fixed")!=="Rate"?"selected":""}>Fixed contract (lump sum — certify by % complete)</option>
+      <option value="Rate" ${s.contractType==="Rate"?"selected":""}>Rate contract (services — certify per submitted invoice)</option></select></div>
+    <div><label id="s_cvLab">Contract value (excl VAT)</label><input id="s_contractValue" type="number" step="0.01" value="${s.contractValue??""}"></div>
     <div><label>VAT %</label><input id="s_vatPct" type="number" step="0.1" value="${Math.round((s.vatPct??.05)*1000)/10}"></div>
+    <div class="muted" id="s_ctHint" style="grid-column:1/-1;font-size:11px"></div>
   </div>
   <h3 id="retH">Retention <span class="muted" style="font-weight:400;font-size:11px">(subcontractors only)</span></h3><div class="grid" id="retGrid">
     <div><label>Retention % (0 = none)</label><input id="s_retentionPct" type="number" step="0.1" value="${Math.round((s.retentionPct??.1)*1000)/10}"></div>
@@ -996,6 +1064,10 @@ function supForm(s){
     $("#typeHint").innerHTML=isSup?"<b>Supplier</b> — material/goods. No retention is withheld (retention forced to 0)."
       :"<b>Subcontractor</b> — retention applies only if their contract requires it (set 0% if none)."; };
   applyType(); $("#s_type").onchange=applyType;
+  const applyCT=()=>{ const rate=$("#s_contractType").value==="Rate";
+    $("#s_cvLab").textContent=rate?"Estimated / budget value (optional, excl VAT)":"Contract value (excl VAT)";
+    $("#s_ctHint").innerHTML=rate?"<b>Rate contract:</b> works are done on site as required and certified when the supplier submits an invoice. Each certificate is valued at the invoice amount — no % complete, no deduction of previous certificates.":""; };
+  applyCT(); $("#s_contractType").onchange=applyCT;
   $("#printReg").onclick=()=>printSupplierReg(collectSup(s));
   if(!isNew){
     document.querySelectorAll("[data-docview]").forEach(b=>b.onclick=async ()=>{ try{ const d=await api("supplier/"+encodeURIComponent(s.id)+"/doc?kind="+b.dataset.docview); if(!d.dataUrl){toast("Not found");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(e){toast(e.message);} });
@@ -1015,7 +1087,7 @@ function collectSup(s){ const g=id=>{const el=$("#s_"+id); return el?el.value:""
     address:g("address"), website:g("website"), contactName:g("contactName"), contactDesignation:g("contactDesignation"),
     mobile:g("mobile"), tel:g("tel"), email:g("email"), trn:g("trn"), vatRegistered:g("vatRegistered")==="yes",
     bank:g("bank"), accountName:g("accountName"), accountNo:g("accountNo"), iban:g("iban"), swift:g("swift"),
-    entity:g("entity"), project:g("project"), lpoRef:g("lpoRef"), signDate:g("signDate"),
+    entity:g("entity"), project:g("project"), lpoRef:g("lpoRef"), signDate:g("signDate"), contractType:g("contractType")||"Fixed",
     contractValue:+g("contractValue")||0, vatPct:(+g("vatPct")||0)/100, retentionPct:(+g("retentionPct")||0)/100,
     dlpMonths:+g("dlpMonths")||0, retentionRelease:g("retentionRelease"),
     advanceAmount:+g("advanceAmount")||0, advanceRecoveryRate:(+g("advanceRecoveryRate")||0)/100,
@@ -1603,7 +1675,7 @@ function renderExpList(){
   if(!list.length){ $("#xList").innerHTML=`<div class="muted">No expenses yet. Click “Add expense” to log a cost, or approve a Supplier IPC and it will appear here automatically.</div>`; return; }
   $("#xList").classList.remove("muted");
   $("#xList").innerHTML=`<table><tr><th>Date</th><th>Project</th><th>Activity / Area</th><th>Supplier</th><th>Invoice No.</th><th>Cost Type</th><th>Description</th><th class="num">Cost</th><th>Status</th><th class="num">Paid</th><th>Src</th><th></th></tr>
-    ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td><b>${esc(e.supplier||"—")}</b></td><td>${esc(e.invoiceNo||e.poRef||"—")}</td><td>${esc(e.costType)}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
+    ${list.map(e=>`<tr class="click" data-x="${esc(e.id)}"><td>${dmy(e.date)}</td><td>${esc(e.project)}</td><td>${esc(e.area||"—")}</td><td><b>${esc(e.supplier||"—")}</b></td><td>${esc(e.invoiceNo||e.poRef||"—")}</td><td>${esc(e.costType)}</td><td>${esc(e.description||"—")}${e.supplierCertNo?` <span class="muted">· ${esc(e.supplierCertNo)}</span>`:""}</td><td class="num">${fmt(e.amount)}${(+e.vatPct)>0?`<span class="muted" style="font-size:10px"> +VAT</span>`:""}</td><td><span class="pill" style="background:${e.status==="Paid"?"var(--green)":e.status==="On Hold"||e.status==="Disputed"?"var(--red)":"var(--gold)"}">${esc(e.status)}</span></td><td class="num">${fmt(e.paid)}</td><td>${e.source==="supplier-ipc"?"🔗 IPC":"✎"}</td><td>${can?`<a href="#" data-del="${esc(e.id)}">✕</a>`:""}</td></tr>`).join("")}</table>`;
   $("#xList").querySelectorAll("[data-x]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del) return; expenseForm(EXP.find(x=>x.id===r.dataset.x)); });
   $("#xList").querySelectorAll("[data-del]").forEach(a=>a.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const ex=EXP.find(x=>x.id===a.dataset.del); adminDelete("expense",a.dataset.del,(ex?ex.description||ex.supplier:"")+" — AED "+fmt(ex?ex.amount:0),reloadExp); });
 }
@@ -1616,7 +1688,7 @@ async function expenseForm(x, presetProject){
   const projOpts=`<option value="">— select project —</option>`+projList.map(p=>`<option ${p===x.project?"selected":""}>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
    ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its activity / category / cost type here.</div>`:""}
-   <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log).</div>
+   <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log). For head-office costs not related to a project, choose <b>MA - HQ Expenses</b> — they are reported as company overhead, not project cost.</div>
    <div class="grid" style="margin-top:10px">
      <div style="grid-column:1/-1"><label>1 · Project *</label><select id="x_project" ${linked?"disabled":""}>${projOpts}</select></div>
      <div style="grid-column:1/-1"><label>2 · Activity / Area within project *</label><input id="x_area" list="x_areas" value="${esc(x.area||"")}" placeholder="select the project first…" ${linked?"":""}><datalist id="x_areas"></datalist><div class="muted" id="x_areaHint" style="font-size:11px;margin-top:3px"></div></div>
@@ -1630,6 +1702,10 @@ async function expenseForm(x, presetProject){
      <div><label>BOQ Ref</label><input id="x_boqRef" value="${esc(x.boqRef||"")}"></div>
      <div><label>Budgeted (AED)</label><input id="x_budgeted" type="number" step="0.01" value="${x.budgeted??""}"></div>
      <div><label>Cost / Invoice (AED, excl VAT)</label><input id="x_amount" type="number" step="0.01" value="${x.amount??""}" ${linked?"readonly":""}></div>
+     <div><label>VAT</label><select id="x_vatPct">
+       <option value="0" ${!(+x.vatPct)?"selected":""}>No VAT — labour / petty cash / exempt</option>
+       <option value="0.05" ${(+x.vatPct)===0.05?"selected":""}>5% VAT (tax invoice)</option></select>
+       <div class="muted" id="x_vatHint" style="font-size:11px;margin-top:3px"></div></div>
      <div><label>Payment Status</label><select id="x_status">${opt(COSTMETA.statuses,x.status||"Pending")}</select></div>
      <div><label>Paid (AED)</label><input id="x_paid" type="number" step="0.01" value="${x.paid??""}" ${linked?"readonly":""}></div>
      <div style="grid-column:1/-1"><label>Notes</label><input id="x_notes" value="${esc(x.notes||"")}"></div>
@@ -1641,13 +1717,20 @@ async function expenseForm(x, presetProject){
     dl.innerHTML=areas.map(a=>`<option>${esc(a)}</option>`).join("");
     hint.innerHTML=areas.length?`${areas.length} activit${areas.length===1?"y":"ies"} defined for this project — pick one, or type a new one.`:`No activities yet for this project. Type the activity/area name (define BOQ areas in the Budget tab to build the list).`; };
   $("#x_project").onchange=()=>{ if(isNew){ $("#x_area").value=""; } loadAreas(); };
+  const HQP="MA - HQ Expenses";
+  const vatHint=()=>{ const a=+$("#x_amount").value||0, v=+$("#x_vatPct").value||0;
+    $("#x_vatHint").textContent=v>0?`VAT AED ${fmt(a*v)} — total incl VAT AED ${fmt(a*(1+v))}`:"No VAT applies (e.g. daily labour paid via petty cash)."; };
+  const vatByType=()=>{ const t=$("#x_costType").value; $("#x_vatPct").value=/labour/i.test(t)?"0":"0.05"; vatHint(); };
+  if(isNew){ vatByType(); $("#x_costType").onchange=vatByType; }
+  vatHint(); $("#x_vatPct").onchange=vatHint; $("#x_amount").oninput=vatHint;
   $("#x_back").onclick=()=>{VIEW="expenses";render();};
   $("#x_save").onclick=async ()=>{ const g=id=>{const el=$("#x_"+id);return el?el.value:"";};
     const body={ project:g("project").trim(), date:g("date"), area:g("area").trim(), category:g("category"), costType:g("costType"),
       supplier:g("supplier").trim(), invoiceNo:g("invoiceNo").trim(), description:g("description"), poRef:g("poRef"), boqRef:g("boqRef"),
-      budgeted:+g("budgeted")||0, amount:+g("amount")||0, status:g("status"), paid:+g("paid")||0, notes:g("notes") };
+      budgeted:+g("budgeted")||0, amount:+g("amount")||0, vatPct:+g("vatPct")||0, status:g("status"), paid:+g("paid")||0, notes:g("notes") };
     if(!isNew) body.id=x.id;
     if(!body.project){ toast("Choose the project first"); return; }
+    if(body.project===HQP && !body.area) body.area="General / Office";
     if(!body.area){ toast("Choose the activity / area inside the project"); return; }
     try{ await api("expense",{method:"POST",body}); COSTMETA=null; toast("Saved"); VIEW="expenses"; render(); }catch(e){ toast(e.message); } };
   if(x.project) loadAreas();

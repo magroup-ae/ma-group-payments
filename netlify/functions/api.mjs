@@ -13083,8 +13083,12 @@ async function certsBySupplier(supplierId, excludeNo) {
   return out.filter((c) => c && c.no !== excludeNo && c.status !== "Cancelled" && c.supplierId === supplierId);
 }
 function computeCert(c, supplier, prevNet, recoveredSoFar) {
-  const adjusted = num(c.originalValue) + num(c.variations);
-  const cumValue = r2(adjusted * num(c.workPct));
+  const isRate = c.basis === "rate";
+  const adjusted = isRate ? 0 : num(c.originalValue) + num(c.variations);
+  // Rate-based (services) contracts: each certificate stands alone, certified
+  // against the supplier's submitted invoice amount — no cumulative % of a
+  // fixed contract sum and no deduction of previous certificates.
+  const cumValue = isRate ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct));
   const gross = r2(cumValue + num(c.materialsOnSite));
   const retention = r2(gross * num(c.retentionPct));
   const afterRet = r2(gross - retention);
@@ -13097,7 +13101,7 @@ function computeCert(c, supplier, prevNet, recoveredSoFar) {
       advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
     }
   } else advanceRecovery = num(c.advanceRecovery);
-  const net = r2(afterRet - advanceRecovery - prevNet - num(c.contra));
+  const net = r2(afterRet - advanceRecovery - (isRate ? 0 : prevNet) - num(c.contra));
   const vat = r2(net * num(c.vatPct));
   return {
     adjusted,
@@ -13295,6 +13299,7 @@ var EXPENSE_CATEGORIES = [
   "Head Office Overhead", "Financing / Bank Charges", "Insurance & Bonds", "General / Other"
 ];
 var EXPENSE_STATUS = ["Pending", "Partially Paid", "Paid", "On Hold", "Disputed"];
+var HQ_PROJECT = "MA - HQ Expenses";
 var BANK_DETAILS = {
   "Marvellous Art": { bank: "Emirates NBD, Dubai, U.A.E", accountName: "MARVELLOUS ART DECORATION DESIGN & FIT OUT CO. L.L.C", account: "6605844299001", iban: "AE620260006605844299001", currency: "AED" }
 };
@@ -13313,6 +13318,7 @@ async function listExpenses(project) {
 }
 async function projectNames(s) {
   const set = /* @__PURE__ */ new Set();
+  set.add(HQ_PROJECT);
   const st = await s.get("settings", { type: "json" });
   if (st && Array.isArray(st.projects)) for (const p of st.projects) { if (p && p.name) set.add(String(p.name)); }
   const parts = await Promise.all(["contract/", "cert/", "expense/"].map((pfx) => getAllJSON(s, pfx)));
@@ -13365,12 +13371,15 @@ async function computePnl(s, project) {
   const expenses = await listExpenses(project);
   let cost = 0, paidOut = 0;
   const byType = {}, byCat = {}, byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byDate = {}, byProject = {};
+  let hqCost = 0;
   for (const e of expenses) {
     const a = num(e.amount), p = num(e.paid);
+    const isHQ = e.project === HQ_PROJECT;
     cost += a; paidOut += p;
+    if (isHQ) hqCost += a;
     byType[e.costType] = (byType[e.costType] || 0) + a;
     byCat[e.category] = (byCat[e.category] || 0) + a;
-    byGroup[costGroup(e.costType)] = (byGroup[costGroup(e.costType)] || 0) + a;
+    byGroup[isHQ ? "Overhead" : costGroup(e.costType)] = (byGroup[isHQ ? "Overhead" : costGroup(e.costType)] || 0) + a;
     byProject[e.project] = (byProject[e.project] || 0) + a;
     const d = String(e.date || "").slice(0, 10);
     if (d) { byDate[d] = byDate[d] || { cost: 0, paid: 0 }; byDate[d].cost += a; byDate[d].paid += p; }
@@ -13394,7 +13403,7 @@ async function computePnl(s, project) {
   const margin = revenue ? grossProfit / revenue : 0;
   return {
     project: project || "", scope: project || "All projects",
-    revenue, netDue: r2(netDue), cost: r2(cost), paidOut: r2(paidOut),
+    revenue, netDue: r2(netDue), cost: r2(cost), paidOut: r2(paidOut), hqCost: r2(hqCost), projectCost: r2(cost - hqCost),
     grossProfit, margin, byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
@@ -13717,6 +13726,7 @@ var api_default = async (req, context) => {
       project: str("project"),
       lpoRef: str("lpoRef"),
       signDate: str("signDate"),
+      contractType: b.contractType === void 0 ? existing?.contractType || "Fixed" : b.contractType === "Rate" ? "Rate" : "Fixed",
       contractValue: b.contractValue === void 0 ? num(existing?.contractValue) : num(b.contractValue),
       vatPct: b.vatPct === void 0 || b.vatPct === "" ? existing?.vatPct ?? 0.05 : num(b.vatPct),
       retentionPct: isSupplier ? 0 : b.retentionPct === void 0 || b.retentionPct === "" ? existing?.retentionPct ?? 0.1 : num(b.retentionPct),
@@ -13818,6 +13828,8 @@ var api_default = async (req, context) => {
       periodFrom: b.periodFrom || "",
       periodTo: b.periodTo || "",
       originalValue: num(sup.contractValue),
+      basis: sup.contractType === "Rate" ? "rate" : "fixed",
+      invoiceAmount: num(b.invoiceAmount),
       variations: num(b.variations),
       workPct: num(b.workPct),
       materialsOnSite: num(b.materialsOnSite),
@@ -13844,10 +13856,11 @@ var api_default = async (req, context) => {
     if (!can("editDraft")) return err("No edit rights", 403);
     const b = await req.json();
     for (const f of ["date", "invoiceNo", "periodFrom", "periodTo", "notes", "project", "entity"]) if (b[f] !== void 0) c[f] = b[f];
-    for (const f of ["variations", "workPct", "materialsOnSite", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    for (const f of ["variations", "workPct", "materialsOnSite", "contra", "invoiceAmount"]) if (b[f] !== void 0) c[f] = num(b[f]);
     const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
     if (sup) {
       c.originalValue = num(sup.contractValue);
+      c.basis = sup.contractType === "Rate" ? "rate" : "fixed";
       c.retentionPct = num(sup.retentionPct);
       c.vatPct = num(sup.vatPct);
       c.lpoRef = sup.lpoRef;
@@ -14491,6 +14504,7 @@ var api_default = async (req, context) => {
       supplier: supplierName, supplierId, invoiceNo: str("invoiceNo"), description: str("description"), poRef: str("poRef"), boqRef: str("boqRef"),
       budgeted: b.budgeted === void 0 ? num(ex?.budgeted) : num(b.budgeted),
       amount: b.amount === void 0 ? num(ex?.amount) : num(b.amount),
+      vatPct: b.vatPct === void 0 ? num(ex?.vatPct) : num(b.vatPct),
       status: str("status") || "Pending",
       paid: b.paid === void 0 ? num(ex?.paid) : num(b.paid),
       notes: str("notes"),
@@ -14498,6 +14512,8 @@ var api_default = async (req, context) => {
       source: ex?.source || "manual",
       createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
     };
+    exp.vat = r2(exp.amount * exp.vatPct);
+    exp.gross = r2(exp.amount + exp.vat);
     await s.setJSON("expense/" + id, exp);
     return json(exp);
   }
@@ -14524,7 +14540,7 @@ var api_default = async (req, context) => {
         area: String(r.area || ""), category: String(r.category || "General / Other"), costType,
         supplier: String(r.supplier || ""), supplierId: null, invoiceNo: String(r.invoiceNo || ""), description: String(r.description || ""),
         poRef: String(r.poRef || ""), boqRef: String(r.boqRef || ""),
-        budgeted: num(r.budgeted), amount: num(r.amount), status, paid: num(r.paid),
+        budgeted: num(r.budgeted), amount: num(r.amount), vatPct: num(r.vatPct), vat: r2(num(r.amount) * num(r.vatPct)), gross: r2(num(r.amount) * (1 + num(r.vatPct))), status, paid: num(r.paid),
         notes: String(r.notes || ""), supplierCertNo: null, source: "import",
         createdBy: me.name, createdAt: now(), updatedAt: now()
       });
