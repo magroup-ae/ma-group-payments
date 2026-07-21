@@ -1877,10 +1877,32 @@ async function vPnl(){
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Project P&amp;L</h2>
      <span class="muted">revenue (client IPCs certified) vs cost (daily cost log)</span>
      <div class="right flex"><select id="pProj" style="max-width:300px">${projOpts}</select><button class="btn ghost" id="pCsv">Export CSV</button></div></div>
-   <div id="pBody" class="muted" style="margin-top:10px">Loading…</div></div>`;
+   <div id="pBody" class="muted" style="margin-top:10px">Loading…</div></div>
+   <div class="card"><div class="flex"><h2 style="margin:0">Work-in-Progress · Over / Under Billing</h2>
+     <span class="muted">earned (cost-based) vs billed — are you billing ahead of, or behind, the work?</span></div>
+     <div id="wipBody" class="muted" style="margin-top:10px">Loading…</div></div>`;
   const load=async ()=>{ const proj=$("#pProj").value; $("#pBody").innerHTML=`<div class="muted">Loading…</div>`;
     let d; try{ d=await api("pnl"+(proj?("?project="+encodeURIComponent(proj)):"")); }catch(e){ $("#pBody").textContent=e.message; return; } renderPnl(d); };
   $("#pProj").onchange=load; await load();
+  try{ renderWip(await api("wip")); }catch(e){ const w=$("#wipBody"); if(w) w.textContent=e.message; }
+}
+function renderWip(w){
+  const el=$("#wipBody"); if(!el) return; el.classList.remove("muted");
+  const rows=(w.rows||[]).filter(r=>r.contractValue>0||r.costToDate>0);
+  if(!rows.length){ el.innerHTML=`<div class="muted">No project data yet — add a contract value in Settings or log costs to see WIP.</div>`; return; }
+  const t=w.totals||{}; const GOLD="#BF9000", BLUE="#2E75B6";
+  const c=(v)=>`<td class="num">${fmt(v)}</td>`;
+  el.innerHTML=`
+   <div class="kpis" style="margin-bottom:12px">
+     <div class="kpi"><div class="v">AED ${fmt(t.earned)}</div><div class="l">Earned revenue (cost-based)</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(t.billed)}</div><div class="l">Billed / certified to date</div></div>
+     <div class="kpi" style="border-top-color:${GOLD}"><div class="v" style="color:${GOLD}">AED ${fmt(t.overBilling)}</div><div class="l">Over-billed (liability)</div></div>
+     <div class="kpi" style="border-top-color:${BLUE}"><div class="v" style="color:${BLUE}">AED ${fmt(t.underBilling)}</div><div class="l">Under-billed (asset)</div></div>
+   </div>
+   <div style="overflow-x:auto"><table><tr><th>Project</th><th class="num">Contract value</th><th class="num">Est. cost</th><th class="num">Est. margin</th><th class="num">Cost to date</th><th class="num">% complete</th><th class="num">Earned</th><th class="num">Billed</th><th class="num">Over-billed</th><th class="num">Under-billed</th><th>Cost basis</th></tr>
+   ${rows.map(x=>`<tr><td>${esc(x.project)}</td>${c(x.contractValue)}${c(x.estCost)}<td class="num">${fmt(x.estMargin*100)}%</td>${c(x.costToDate)}<td class="num">${fmt(x.pctComplete*100)}%</td>${c(x.earned)}${c(x.billed)}<td class="num" style="color:${x.overBilling>0?GOLD:'inherit'};font-weight:${x.overBilling>0?'700':'400'}">${x.overBilling?fmt(x.overBilling):'—'}</td><td class="num" style="color:${x.underBilling>0?BLUE:'inherit'};font-weight:${x.underBilling>0?'700':'400'}">${x.underBilling?fmt(x.underBilling):'—'}</td><td class="muted" style="font-size:11px">${esc(x.basis)}</td></tr>`).join("")}
+   <tr class="tot"><td>TOTAL</td>${c(t.contractValue)}${c(t.estCost)}<td></td>${c(t.costToDate)}<td></td>${c(t.earned)}${c(t.billed)}<td class="num" style="color:${GOLD}">${fmt(t.overBilling)}</td><td class="num" style="color:${BLUE}">${fmt(t.underBilling)}</td><td></td></tr></table></div>
+   <div class="muted" style="font-size:11px;margin-top:8px"><b>% complete</b> = cost to date ÷ estimated total cost (cost-to-cost). <b>Earned</b> = % complete × contract value. <b style="color:${GOLD}">Over-billed</b> = you've certified ahead of work done (a liability — margin you haven't earned yet). <b style="color:${BLUE}">Under-billed</b> = work done not yet certified (an asset — bill it to release cash). Est. cost uses the project budget/BOQ where set, otherwise contract × (1 − target margin ${fmt(w.targetMargin*100)}%).</div>`;
 }
 let PNL=null;
 function renderPnl(d){

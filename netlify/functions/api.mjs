@@ -13506,6 +13506,47 @@ async function computePnl(s, project) {
     expenses: expenses.slice(0, 800)
   };
 }
+// Work-in-Progress / over-under-billing schedule (construction CFO standard).
+// For each project: % complete (cost-to-cost) → earned revenue vs billed
+// (certified) → over-billing (billed ahead of work, a liability) or
+// under-billing (earned but not yet billed, an asset).
+async function computeWip(s) {
+  const st = await s.get("settings", { type: "json" }) || {};
+  const targetMargin = st.targetMargin != null ? num(st.targetMargin) : 0.15;
+  const [contracts, expenses, allCC] = await Promise.all([listContracts(), listExpenses(""), getAllJSON(s, "clientcert/")]);
+  const costByProj = {};
+  for (const e of expenses) { if (!e || e.project === HQ_PROJECT) continue; costByProj[e.project] = (costByProj[e.project] || 0) + num(e.amount); }
+  const contractProj = {}, cvByProj = {};
+  for (const c of contracts) { contractProj[c.id] = c.project; cvByProj[c.project] = (cvByProj[c.project] || 0) + num(c.contractSum) + num(c.variations); }
+  const maxGross = {};
+  for (const c of allCC) { if (!c || !["Issued", "Approved"].includes(c.status)) continue; const g = num(c.calc?.gross); if (g > (maxGross[c.contractId] || 0)) maxGross[c.contractId] = g; }
+  const billedByProj = {};
+  for (const cid in maxGross) { const p = contractProj[cid]; if (p) billedByProj[p] = (billedByProj[p] || 0) + maxGross[cid]; }
+  const projSet = {};
+  for (const p of (st.projects || [])) { if (p && !p.fixed) projSet[p.name] = { cv: num(p.contractValue), estCost: num(p.estCost) }; }
+  const names = [...new Set([...Object.keys(costByProj), ...Object.keys(cvByProj), ...Object.keys(projSet)])].filter((n) => n && n !== HQ_PROJECT);
+  const rows = [];
+  for (const p of names) {
+    const cv = r2(cvByProj[p] || projSet[p]?.cv || 0);
+    const cost = r2(num(costByProj[p]));
+    const bud = await s.get("budget/" + budgetSlug(p), { type: "json" });
+    let estCost = 0, basis = "target margin";
+    if (bud && Array.isArray(bud.lines) && bud.lines.length) { estCost = bud.lines.reduce((a, l) => a + num(l.boq), 0); if (estCost > 0) basis = "budget/BOQ"; }
+    if (!estCost && projSet[p]?.estCost) { estCost = projSet[p].estCost; basis = "set"; }
+    if (!estCost && cv) estCost = r2(cv * (1 - targetMargin));
+    const pct = estCost > 0 ? Math.min(1, cost / estCost) : 0;
+    const earned = r2(pct * cv);
+    const billed = r2(billedByProj[p] || 0);
+    const over = Math.max(0, r2(billed - earned));
+    const under = Math.max(0, r2(earned - billed));
+    rows.push({ project: p, contractValue: cv, estCost: r2(estCost), estProfit: r2(cv - estCost), estMargin: cv ? (cv - estCost) / cv : 0, costToDate: cost, pctComplete: pct, earned, billed, overBilling: over, underBilling: under, basis });
+  }
+  rows.sort((a, b) => b.contractValue - a.contractValue);
+  const t = { contractValue: 0, estCost: 0, costToDate: 0, earned: 0, billed: 0, overBilling: 0, underBilling: 0 };
+  for (const r of rows) { t.contractValue += r.contractValue; t.estCost += r.estCost; t.costToDate += r.costToDate; t.earned += r.earned; t.billed += r.billed; t.overBilling += r.overBilling; t.underBilling += r.underBilling; }
+  for (const k in t) t[k] = r2(t[k]);
+  return { rows, totals: t, targetMargin };
+}
 function budgetSlug(p) { return String(p).replace(/[^A-Za-z0-9]+/g, "_"); }
 async function projectAreas(s, project) {
   const set = /* @__PURE__ */ new Set();
@@ -14837,6 +14878,10 @@ var api_default = async (req, context) => {
   if (path === "pnl" && req.method === "GET") {
     if (!can("pnl")) return err("No rights", 403);
     return json(await computePnl(s, url.searchParams.get("project") || ""));
+  }
+  if (path === "wip" && req.method === "GET") {
+    if (!can("pnl")) return err("No rights", 403);
+    return json(await computeWip(s));
   }
   if (path === "budget" && req.method === "GET") {
     if (!can("budget")) return err("No rights", 403);
