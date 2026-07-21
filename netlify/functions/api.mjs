@@ -12989,9 +12989,8 @@ var DEFAULT_SETTINGS = {
   ],
   projects: [
     { code: "AST", name: "Aster Garden Jabal Ali" },
-    { code: "JVC", name: "JVC Office" },
-    { code: "MAH", name: "MA Head Office" },
-    { code: "SQU", name: "The Square 2.0 Infrastructure" }
+    { code: "SQU", name: "The Square 2.0 Infrastructure" },
+    { code: "HQ", name: "MA HQ – Operations", fixed: true, kind: "overhead" }
   ],
   banks: ["Emirates NBD \u2014 M 3303"],
   modes: ["Cheque", "Cash", "Bank Transfer"],
@@ -13046,6 +13045,7 @@ async function ensureInit() {
     settings.cheque = CHEQUE_LAYOUT;
     patched = true;
   }
+  if (ensureHQProject(settings)) patched = true;
   if (patched) await s.setJSON("settings", settings);
   let users = await s.get("users", { type: "json" });
   if (!users) {
@@ -13299,7 +13299,26 @@ var EXPENSE_CATEGORIES = [
   "Head Office Overhead", "Financing / Bank Charges", "Insurance & Bonds", "General / Other"
 ];
 var EXPENSE_STATUS = ["Pending", "Partially Paid", "Paid", "On Hold", "Disputed"];
-var HQ_PROJECT = "MA - HQ Expenses";
+var HQ_PROJECT = "MA HQ – Operations";
+var HQ_CODE = "HQ";
+// MA HQ is a permanent overhead/operations cost centre — recurring monthly
+// office costs and payments book against it. It is a fixed project (cannot be
+// removed) and its costs are reported as company overhead, not project cost.
+function ensureHQProject(st) {
+  if (!st) return false;
+  if (!Array.isArray(st.projects)) st.projects = [];
+  const hit = st.projects.find((p) => p && (p.code === HQ_CODE || String(p.name || "").trim().toLowerCase() === HQ_PROJECT.toLowerCase() || String(p.name || "").trim().toLowerCase() === "ma - hq expenses"));
+  if (hit) {
+    let ch = false;
+    if (hit.code !== HQ_CODE) { hit.code = HQ_CODE; ch = true; }
+    if (hit.name !== HQ_PROJECT) { hit.name = HQ_PROJECT; ch = true; }
+    if (!hit.fixed) { hit.fixed = true; ch = true; }
+    if (hit.kind !== "overhead") { hit.kind = "overhead"; ch = true; }
+    return ch;
+  }
+  st.projects.push({ code: HQ_CODE, name: HQ_PROJECT, fixed: true, kind: "overhead" });
+  return true;
+}
 var BANK_DETAILS = {
   "Marvellous Art": { bank: "Emirates NBD, Dubai, U.A.E", accountName: "MARVELLOUS ART DECORATION DESIGN & FIT OUT CO. L.L.C", account: "6605844299001", iban: "AE620260006605844299001", currency: "AED" }
 };
@@ -13643,6 +13662,7 @@ var api_default = async (req, context) => {
     if (!can("admin")) return err("CEO only", 403);
     const body = await req.json();
     const merged = { ...settings, ...body, seq: settings.seq, supplierSeq: settings.supplierSeq };
+    ensureHQProject(merged);
     await s.setJSON("settings", merged);
     return json({ ok: true, settings: merged });
   }

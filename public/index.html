@@ -354,7 +354,7 @@ async function vDash(){
   const maxg={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const g=+c.gross||0; if(g>(maxg[c.contractId]||0)) maxg[c.contractId]=g; });
   const projRev={}; Object.keys(maxg).forEach(cid=>{ const p=contractProj[cid]; if(p) projRev[p]=(projRev[p]||0)+maxg[cid]; });
   const projCost=(pnl&&pnl.byProject)||{};
-  const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...contracts.map(c=>c.project)])].filter(Boolean).sort();
+  const projNames=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...contracts.map(c=>c.project),...S.projects.map(p=>p.name)])].filter(Boolean).sort();
   const projRows=projNames.map(p=>({label:p,a:projRev[p]||0,b:projCost[p]||0})).sort((x,y)=>(y.a+y.b)-(x.a+x.b)).slice(0,8);
   const typeRows=pnl?Object.entries(pnl.byType||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value):[];
   const grpRows=pnl?[{label:"Direct",value:num(pnl.byGroup.Direct),color:"#2E75B6"},{label:"Indirect",value:num(pnl.byGroup.Indirect),color:"#BF9000"},{label:"Overhead",value:num(pnl.byGroup.Overhead),color:"#375623"}]:[];
@@ -399,7 +399,7 @@ async function vDash(){
    </div>
    <div class="chartcard" style="margin-bottom:16px"><div class="dash-h">Cumulative cash paid to suppliers</div>${areaChart(cash)}</div>
    <div class="card" style="margin-bottom:16px"><div class="flex"><h2 style="margin:0">Project dashboard</h2>
-     <select id="pd_sel" style="max-width:340px;margin-left:14px"><option value="">— choose a project —</option>${projNames.filter(p=>p!=="MA - HQ Expenses").map(p=>`<option>${esc(p)}</option>`).join("")}</select></div>
+     <select id="pd_sel" style="max-width:340px;margin-left:14px"><option value="">— choose a project —</option>${projNames.map(p=>`<option>${esc(p)}</option>`).join("")}</select></div>
      <div id="pd_body" style="margin-top:12px"><div class="muted">Pick a project to see its own KPIs and charts — contract vs certified, cost by activity, cost split and monthly spend.</div></div></div>
    ${rcPend.length?`<div class="card"><h2>Receipts pending <span class="muted" style="font-size:12px;font-weight:400">— signed receipt + collector Emirates ID required</span></h2>${certTable(rcPend)}</div>`:""}
    <div class="card"><h2>Needs action — supplier certificates</h2>${certTable(live.filter(c=>c.status!=="Paid"))}</div>
@@ -425,7 +425,25 @@ async function projectDash(p,ctx){
   const mm={}; (pnl.byDate||[]).forEach(d=>{ const k=String(d.date).slice(0,7); mm[k]=(mm[k]||0)+num(d.cost); });
   const mk=Object.keys(mm).sort(); const trend=mk.map(k=>{const[y,mo]=k.split("-");return {label:mo+"/"+y.slice(2),value:mm[k]};});
   const gpc=gp>=0?"var(--green)":"var(--red)";
+  const isHQ=p==="MA HQ – Operations";
   const kpi=(v,l,cls="")=>`<div class="kpi ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  if(isHQ){
+    const paid=num(pnl.paidOut);
+    box.innerHTML=`
+     <div class="note" style="margin-bottom:10px"><b>Overhead cost centre.</b> MA HQ carries recurring running costs (rent, salaries, utilities, subscriptions). These are company overhead — not billed to a client — and reduce group profit.</div>
+     <div class="kpis">
+       ${kpi("AED "+fmt(cost),"Total HQ operation cost")}
+       ${kpi("AED "+fmt(paid),"Paid out")}
+       ${kpi("AED "+fmt(cost-paid),"Outstanding")}
+       ${kpi(pnl.count||0,"Expense entries")}
+     </div>
+     <div class="chartgrid" style="margin-top:12px">
+       ${chartCard("HQ cost by category", hbars(catRows))}
+       ${chartCard("HQ cost by type", donut(Object.entries(pnl.byType||{}).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value)))}
+     </div>
+     <div class="chartcard"><div class="dash-h">Monthly HQ operation cost</div>${areaChart(trend)}</div>`;
+    return;
+  }
   box.innerHTML=`
    <div class="kpis">
      ${kpi("AED "+fmt(cval),"Contract value (incl variations)")}
@@ -1364,7 +1382,7 @@ function contractForm(ct,clientId){
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add contract":"Edit contract — "+esc(ct.project)}</h2>
    <h3>Project &amp; contract</h3><div class="grid">
      <div><label>Our entity (claimant)</label><select id="k_entity">${opt(S.entities.map(e=>e.short),ct.entity)}</select></div>
-     <div style="grid-column:1/-1"><label>Project *</label><select id="k_project">${["",...S.projects.map(p=>p.name),...(ct.project&&!S.projects.some(p=>p.name===ct.project)?[ct.project]:[])].map(n=>`<option value="${esc(n)}" ${n===(ct.project||"")?"selected":""}>${n?esc(n):"— select project —"}</option>`).join("")}</select><div class="muted" style="font-size:11px;margin-top:3px">Manage the project list &amp; its 3-letter code in <b>Settings → Projects</b>. Same list is used for Supplier IPCs.</div></div>
+     <div style="grid-column:1/-1"><label>Project *</label><select id="k_project">${["",...S.projects.filter(p=>!p.fixed).map(p=>p.name),...(ct.project&&!S.projects.some(p=>p.name===ct.project)?[ct.project]:[])].map(n=>`<option value="${esc(n)}" ${n===(ct.project||"")?"selected":""}>${n?esc(n):"— select project —"}</option>`).join("")}</select><div class="muted" style="font-size:11px;margin-top:3px">Manage the project list &amp; its 3-letter code in <b>Settings → Projects</b>. Same list is used for Supplier IPCs. (MA HQ is an overhead cost centre and isn't billed to a client, so it's not listed here.)</div></div>
      <div><label>Project short code (from Settings)</label><input id="k_projShort" maxlength="3" style="text-transform:uppercase;background:#f4f5f7" value="${esc(ct.projShort||"")}" readonly></div>
      <div><label>Client name (as on certificate)</label><input id="k_mainContractor" value="${esc(ct.mainContractor||"")}"></div>
      <div><label>Contract / subcontract reference No.</label><input id="k_subcontractRef" value="${esc(ct.subcontractRef||"")}" placeholder="e.g. AFAQ/2026/PS-014"></div>
@@ -1704,7 +1722,7 @@ async function expenseForm(x, presetProject){
   const projOpts=`<option value="">— select project —</option>`+projList.map(p=>`<option ${p===x.project?"selected":""}>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
    ${linked?`<div class="note">This line was auto-posted from Supplier IPC <b>${esc(x.supplierCertNo)}</b>. Amounts follow the certificate; you can refine its activity / category / cost type here.</div>`:""}
-   <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log). For head-office costs not related to a project, choose <b>MA - HQ Expenses</b> — they are reported as company overhead, not project cost.</div>
+   <div class="note" style="margin-top:8px">Step 1 — choose the <b>project</b>, then step 2 — the <b>activity / area</b> inside it. The activity list is the project's BOQ/budget areas (plus anything already used on its cost log). For recurring head-office / running costs not tied to a client project, choose <b>MA HQ – Operations</b> — it is a fixed overhead cost centre and its costs are reported as company overhead, not project cost.</div>
    <div class="grid" style="margin-top:10px">
      <div style="grid-column:1/-1"><label>1 · Project *</label><select id="x_project" ${linked?"disabled":""}>${projOpts}</select></div>
      <div style="grid-column:1/-1"><label>2 · Activity / Area within project *</label><input id="x_area" list="x_areas" value="${esc(x.area||"")}" placeholder="select the project first…" ${linked?"":""}><datalist id="x_areas"></datalist><div class="muted" id="x_areaHint" style="font-size:11px;margin-top:3px"></div></div>
@@ -1733,7 +1751,7 @@ async function expenseForm(x, presetProject){
     dl.innerHTML=areas.map(a=>`<option>${esc(a)}</option>`).join("");
     hint.innerHTML=areas.length?`${areas.length} activit${areas.length===1?"y":"ies"} defined for this project — pick one, or type a new one.`:`No activities yet for this project. Type the activity/area name (define BOQ areas in the Budget tab to build the list).`; };
   $("#x_project").onchange=()=>{ if(isNew){ $("#x_area").value=""; } loadAreas(); };
-  const HQP="MA - HQ Expenses";
+  const HQP="MA HQ – Operations";
   const vatHint=()=>{ const a=+$("#x_amount").value||0, v=+$("#x_vatPct").value||0;
     $("#x_vatHint").textContent=v>0?`VAT AED ${fmt(a*v)} — total incl VAT AED ${fmt(a*(1+v))}`:"No VAT applies (e.g. daily labour paid via petty cash)."; };
   const vatByType=()=>{ const t=$("#x_costType").value; $("#x_vatPct").value=/labour/i.test(t)?"0":"0.05"; vatHint(); };
@@ -2108,7 +2126,7 @@ function vSettings(){
    ${admin?signatureCard():""}
    ${admin?chequeLayoutCard():""}`;
   const renderLists=()=>{
-    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}</td>${admin?`<td><a href="#" data-dp="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
+    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>`;
     $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
       document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
