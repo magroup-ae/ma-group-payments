@@ -13064,27 +13064,23 @@ async function ensureInit() {
   }
   return { settings, users };
 }
-async function listSuppliers() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "supplier/" });
+async function getAllJSON(s, prefix) {
+  const { blobs } = await s.list({ prefix });
   const out = [];
-  for (const b of blobs) {
-    const v = await s.get(b.key, { type: "json" });
-    if (v) out.push(v);
+  for (let i = 0; i < blobs.length; i += 60) {
+    const part = await Promise.all(blobs.slice(i, i + 60).map((b) => s.get(b.key, { type: "json" }).catch(() => null)));
+    for (const v of part) if (v) out.push(v);
   }
+  return out;
+}
+async function listSuppliers() {
+  const out = await getAllJSON(store(), "supplier/");
   out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return out;
 }
 async function certsBySupplier(supplierId, excludeNo) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "cert/" });
-  const out = [];
-  for (const b of blobs) {
-    const c = await s.get(b.key, { type: "json" });
-    if (!c || c.no === excludeNo || c.status === "Cancelled") continue;
-    if (c.supplierId === supplierId) out.push(c);
-  }
-  return out;
+  const out = await getAllJSON(store(), "cert/");
+  return out.filter((c) => c && c.no !== excludeNo && c.status !== "Cancelled" && c.supplierId === supplierId);
 }
 function computeCert(c, supplier, prevNet, recoveredSoFar) {
   const adjusted = num(c.originalValue) + num(c.variations);
@@ -13177,10 +13173,7 @@ var ASSET_CONDITIONS = ["Good", "Fair", "Needs repair", "New"];
 var ASSET_STATUS = ["Active", "Disposed", "Sold", "Written off"];
 function assetCode(cat, seq) { return `MAG-${cat}-${String(seq).padStart(4, "0")}`; }
 async function listAssets() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "asset/MAG-" });
-  const out = [];
-  for (const b of blobs) { try { const v = await s.get(b.key, { type: "json" }); if (v && v.code) out.push(v); } catch { } }
+  const out = (await getAllJSON(store(), "asset/MAG-")).filter((v) => v && v.code);
   out.sort((a, b) => (a.code || "").localeCompare(b.code || "", void 0, { numeric: true }));
   return out;
 }
@@ -13199,31 +13192,18 @@ function assetDepreciation(a) {
 }
 // ===================== CLIENT (RECEIVABLES) MODULE =====================
 async function listClients() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "client/" });
-  const out = [];
-  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
+  const out = await getAllJSON(store(), "client/");
   out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return out;
 }
 async function listContracts() {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "contract/" });
-  const out = [];
-  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); }
+  const out = await getAllJSON(store(), "contract/");
   out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return out;
 }
 async function clientCertsByContract(contractId, excludeNo) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "clientcert/" });
-  const out = [];
-  for (const b of blobs) {
-    const c = await s.get(b.key, { type: "json" });
-    if (!c || c.no === excludeNo || c.status === "Cancelled") continue;
-    if (c.contractId === contractId) out.push(c);
-  }
-  return out;
+  const out = await getAllJSON(store(), "clientcert/");
+  return out.filter((c) => c && c.no !== excludeNo && c.status !== "Cancelled" && c.contractId === contractId);
 }
 function computeClientCert(c, contract, prevNet, recoveredSoFar) {
   const cumValue = num(c.grossCum);
@@ -13326,15 +13306,8 @@ function proformaNo(seq, dateStr) {
 }
 function costGroup(type) { const t = COST_TYPES.find((x) => x.name === type); return t ? t.group : "Direct"; }
 async function listExpenses(project) {
-  const s = store();
-  const { blobs } = await s.list({ prefix: "expense/" });
-  const out = [];
-  for (const b of blobs) {
-    const v = await s.get(b.key, { type: "json" });
-    if (!v) continue;
-    if (project && v.project !== project) continue;
-    out.push(v);
-  }
+  const all = await getAllJSON(store(), "expense/");
+  const out = project ? all.filter((v) => v.project === project) : all;
   out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : (b.seq || 0) - (a.seq || 0));
   return out;
 }
@@ -13342,17 +13315,16 @@ async function projectNames(s) {
   const set = /* @__PURE__ */ new Set();
   const st = await s.get("settings", { type: "json" });
   if (st && Array.isArray(st.projects)) for (const p of st.projects) { if (p && p.name) set.add(String(p.name)); }
-  for (const pfx of ["contract/", "cert/", "expense/"]) {
-    const { blobs } = await s.list({ prefix: pfx });
-    for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v && v.project) set.add(String(v.project)); }
-  }
+  const parts = await Promise.all(["contract/", "cert/", "expense/"].map((pfx) => getAllJSON(s, pfx)));
+  for (const arr of parts) for (const v of arr) { if (v && v.project) set.add(String(v.project)); }
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 async function ensureSupplierStub(s, name) {
   name = String(name || "").trim();
   if (!name) return null;
-  const { blobs } = await s.list({ prefix: "supplier/" });
-  for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v && String(v.name || "").trim().toLowerCase() === name.toLowerCase()) return v.id; }
+  const sups = await getAllJSON(s, "supplier/");
+  const hit = sups.find((v) => String(v.name || "").trim().toLowerCase() === name.toLowerCase());
+  if (hit) return hit.id;
   const st = await s.get("settings", { type: "json" });
   st.supplierSeq = (st.supplierSeq || 0) + 1;
   const id = "S" + String(st.supplierSeq).padStart(3, "0");
@@ -13403,13 +13375,11 @@ async function computePnl(s, project) {
     const d = String(e.date || "").slice(0, 10);
     if (d) { byDate[d] = byDate[d] || { cost: 0, paid: 0 }; byDate[d].cost += a; byDate[d].paid += p; }
   }
-  const contracts = await listContracts();
+  const [contracts, allCC] = await Promise.all([listContracts(), getAllJSON(s, "clientcert/")]);
   const projContracts = contracts.filter((c) => !project || c.project === project);
   const cids = new Set(projContracts.map((c) => c.id));
-  const { blobs } = await s.list({ prefix: "clientcert/" });
-  const maxGross = {}, netCertified = {}; let cashIn = 0;
-  for (const b of blobs) {
-    const c = await s.get(b.key, { type: "json" });
+  const maxGross = {}, netCertified = {};
+  for (const c of allCC) {
     if (!c || !cids.has(c.contractId)) continue;
     if (!["Issued", "Approved"].includes(c.status)) continue;
     const g = num(c.calc?.gross);
@@ -13434,10 +13404,9 @@ async function computePnl(s, project) {
 function budgetSlug(p) { return String(p).replace(/[^A-Za-z0-9]+/g, "_"); }
 async function projectAreas(s, project) {
   const set = /* @__PURE__ */ new Set();
-  const bud = await s.get("budget/" + budgetSlug(project), { type: "json" });
+  const [bud, exps] = await Promise.all([s.get("budget/" + budgetSlug(project), { type: "json" }), getAllJSON(s, "expense/")]);
   if (bud && bud.lines) for (const l of bud.lines) { if (l.area) set.add(String(l.area)); }
-  const { blobs } = await s.list({ prefix: "expense/" });
-  for (const b of blobs) { const e = await s.get(b.key, { type: "json" }); if (e && e.project === project && e.area) set.add(String(e.area)); }
+  for (const e of exps) { if (e && e.project === project && e.area) set.add(String(e.area)); }
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 async function computeBudget(s, project) {
@@ -13623,37 +13592,29 @@ var api_default = async (req, context) => {
     return err("Unknown job");
   }
   if (path === "bootstrap") {
-    const { blobs } = await s.list({ prefix: "cert/" });
-    const certs = [];
-    for (const b of blobs) {
-      const c = await s.get(b.key, { type: "json" });
-      if (c) certs.push({
-        no: c.no,
-        date: c.date,
-        entity: c.entity,
-        project: c.project,
-        supplier: c.supplier,
-        supplierId: c.supplierId,
-        invoiceNo: c.invoiceNo,
-        lpoRef: c.lpoRef,
-        status: c.status,
-        payable: c.calc?.payable,
-        net: c.calc?.net,
-        retention: c.calc?.retention,
-        advanceRecovery: c.calc?.advanceRecovery,
-        mode: c.payment?.mode,
-        hasPayment: !!c.payment,
-        receiptDone: !!c.payment?.receipt?.received
-      });
-    }
+    const [certsRaw, register, suppliers, sign, stamp, assetList, clientList, contractList, clientCertList] = await Promise.all([
+      getAllJSON(s, "cert/"),
+      s.get("register", { type: "json" }).then((r) => r || []),
+      listSuppliers(),
+      s.get("asset/sign").then((v) => v || "").catch(() => ""),
+      s.get("asset/stamp").then((v) => v || "").catch(() => ""),
+      s.list({ prefix: "asset/MAG-" }),
+      s.list({ prefix: "client/" }),
+      s.list({ prefix: "contract/" }),
+      s.list({ prefix: "clientcert/" })
+    ]);
+    const certs = certsRaw.map((c) => ({
+      no: c.no, date: c.date, entity: c.entity, project: c.project, supplier: c.supplier, supplierId: c.supplierId,
+      invoiceNo: c.invoiceNo, lpoRef: c.lpoRef, status: c.status,
+      payable: c.calc?.payable, net: c.calc?.net, retention: c.calc?.retention, advanceRecovery: c.calc?.advanceRecovery,
+      mode: c.payment?.mode, hasPayment: !!c.payment, receiptDone: !!c.payment?.receipt?.received
+    }));
     certs.sort((a, b) => a.no < b.no ? 1 : -1);
-    const register = await s.get("register", { type: "json" }) || [];
-    const suppliers = await listSuppliers();
-    const assets = { sign: await s.get("asset/sign") || "", stamp: await s.get("asset/stamp") || "" };
-    const assetCount = (await s.list({ prefix: "asset/MAG-" })).blobs.length;
-    const clientCount = (await s.list({ prefix: "client/" })).blobs.length;
-    const contractCount = (await s.list({ prefix: "contract/" })).blobs.length;
-    const clientCertCount = (await s.list({ prefix: "clientcert/" })).blobs.length;
+    const assets = { sign, stamp };
+    const assetCount = assetList.blobs.length;
+    const clientCount = clientList.blobs.length;
+    const contractCount = contractList.blobs.length;
+    const clientCertCount = clientCertList.blobs.length;
     return json({
       me: { id: me.id, name: me.name, role: me.role },
       settings,
@@ -14289,16 +14250,9 @@ var api_default = async (req, context) => {
     return json(v);
   }
   if (path === "clientcerts" && req.method === "GET") {
-    const { blobs } = await s.list({ prefix: "clientcert/" });
-    const clist = await listContracts();
+    const [all, clist] = await Promise.all([getAllJSON(s, "clientcert/"), listContracts()]);
     const cmap = {}; for (const c of clist) cmap[c.id] = c;
-    const out = [];
-    for (const b of blobs) {
-      const c = await s.get(b.key, { type: "json" });
-      if (!c) continue;
-      const ct = cmap[c.contractId] || {};
-      out.push({ no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status });
-    }
+    const out = all.map((c) => { const ct = cmap[c.contractId] || {}; return { no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status }; });
     out.sort((a, b) => a.no < b.no ? 1 : -1);
     return json(out);
   }
@@ -14503,7 +14457,8 @@ var api_default = async (req, context) => {
     return json({ projects: results });
   }
   if (path === "costmeta" && req.method === "GET") {
-    return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects: await projectNames(s), suppliers: (await listSuppliers()).map((x) => x.name).filter(Boolean).sort() });
+    const [projects, sups] = await Promise.all([projectNames(s), listSuppliers()]);
+    return json({ costTypes: COST_TYPES, categories: EXPENSE_CATEGORIES, statuses: EXPENSE_STATUS, projects, suppliers: sups.map((x) => x.name).filter(Boolean).sort() });
   }
   if (path === "expenses" && req.method === "GET") {
     return json(await listExpenses(url.searchParams.get("project") || ""));

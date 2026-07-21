@@ -340,10 +340,8 @@ async function vDash(){
   const live=CERTS.filter(c=>c.status!=="Cancelled");
   const sum=f=>live.reduce((a,c)=>a+(f(c)||0),0);
   let ccerts=[],contracts=[],pnl=null,assets=null;
-  try{ ccerts=await api("clientcerts"); }catch(e){}
-  try{ contracts=await api("contracts"); }catch(e){}
-  try{ pnl=await api("pnl"); }catch(e){}
-  try{ assets=await api("assets"); }catch(e){}
+  const [r1,r2,r3,r4]=await Promise.all([api("clientcerts").catch(()=>[]),api("contracts").catch(()=>[]),api("pnl").catch(()=>null),api("assets").catch(()=>null)]);
+  ccerts=r1||[]; contracts=r2||[]; pnl=r3; assets=r4;
   const paidSup=(REG||[]).reduce((a,r)=>a+(+r.amount||0),0);
   const certifiedInclVat=sum(c=>c.payable);
   const dueSup=live.filter(c=>c.status==="Approved").reduce((a,c)=>a+(c.payable||0),0);
@@ -1347,7 +1345,7 @@ async function vClientCerts(){
     <span class="muted">interim payment certificates you issue to clients (before the proforma invoice)</span>
     <div class="right flex">${can?`<button class="btn ghost" id="impProj">Import project (JSON)</button>`:""}${can?`<button class="btn gold" id="newCC2">+ New certificate</button>`:""}</div></div>
     <div style="height:8px"></div><div id="ccList" class="muted">Loading…</div></div>`;
-  let list; try{ list=await api("clientcerts"); CONTRACTS=await api("contracts"); }catch(e){ $("#ccList").textContent=e.message; return; }
+  let list; try{ [list,CONTRACTS]=await Promise.all([api("clientcerts"),api("contracts")]); }catch(e){ $("#ccList").textContent=e.message; return; }
   const cmap={}; CONTRACTS.forEach(c=>cmap[c.id]=c);
   if(can) $("#newCC2").onclick=()=>{ if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; } clientCertForm(null); };
   if(can) $("#impProj").onclick=importProjectJson;
