@@ -12572,7 +12572,7 @@ ${o.closing ? `<p style="margin:0 0 6px;color:#333c48;font-size:14px;line-height
 </td></tr>
 <tr><td style="background:#f4f6f9;border-top:1px solid #e3e7ee;padding:16px 30px;color:#7a8494;font-size:11px;line-height:1.6">
 <a href="mailto:${emEsc(cfg.replyTo)}" style="color:#2e75b6;text-decoration:none">${emEsc(cfg.replyTo)}</a> &nbsp;|&nbsp; www.maagroup.ae &nbsp;|&nbsp; +971 80062244<br>
-This is an automated notification from the MA Group Payment System. You may reply directly to this email to reach our team.
+This is an automated notification from the MA Group Finance. You may reply directly to this email to reach our team.
 </td></tr>
 </table>
 </td></tr></table></body></html>`;
@@ -13652,7 +13652,7 @@ var api_default = async (req, context) => {
     const html = emailShell(cfg, {
       title: "Test Notification",
       band: "#2e75b6",
-      lead: [`This is a test email from the MA Group Payment System, confirming that outbound notifications are configured correctly.`, `Sent at ${emDate(now())}.`],
+      lead: [`This is a test email from the MA Group Finance, confirming that outbound notifications are configured correctly.`, `Sent at ${emDate(now())}.`],
       note: `If you received this, replies to <strong>${emEsc(cfg.replyTo)}</strong> will reach your team.`
     });
     const rec = await sendMail(s, cfg, { type: "", to: to || cfg.replyTo, toName: "Test", subject: "MA Group \u2014 Email Test", html });
