@@ -13569,7 +13569,10 @@ async function computeBudget(s, project) {
     const actual = hasOv ? r2(num(l.actualOverride)) : matched;
     const target = r2(boq * tPct), ev = r2(target * pct);
     const eac = pct > 0 ? r2(actual / pct) : (boq > 0 ? target : actual);
-    const bac = target, vac = r2(bac - eac), cpi = actual > 0 ? r2(ev / actual) : null;
+    const bac = target;
+    // VAC and CPI are only meaningful against a budget — null (shown as "—") when no BOQ.
+    const vac = boq > 0 ? r2(bac - eac) : null;
+    const cpi = boq > 0 && actual > 0 ? r2(ev / actual) : null;
     const status = boq === 0 ? "—" : vac < 0 ? "Overrun" : vac < bac * 0.05 ? "Watch" : "On budget";
     return { area: l.area, boq, targetPct: tPct, pctComplete: pct, actualMatched: matched, actualOverride: hasOv ? r2(num(l.actualOverride)) : null, target, actual, ev, eac, bac, vac, cpi, status };
   });
@@ -13577,12 +13580,17 @@ async function computeBudget(s, project) {
   let unalloc = 0; for (const k in actualByArea) { if (!matchedAreas.has(k)) unalloc += actualByArea[k]; }
   const sum = (f) => r2(computed.reduce((a, l) => a + f(l), 0));
   const totEv = sum((l) => l.ev), totTarget = sum((l) => l.target), totActual = r2(sum((l) => l.actual) + unalloc);
+  const totEac = r2(sum((l) => l.eac) + unalloc);
+  const hasBudget = totTarget > 0;
   const totals = {
-    boq: sum((l) => l.boq), target: totTarget, actual: totActual,
-    eac: r2(sum((l) => l.eac) + unalloc), ev: totEv,
-    overallPct: totTarget ? r2(totEv / totTarget) : 0, cpi: totActual ? r2(totEv / totActual) : null
+    boq: sum((l) => l.boq), target: totTarget, actual: totActual, eac: totEac, ev: totEv, hasBudget,
+    // Overall % complete: earned-value (EV/BAC) when a BOQ exists, otherwise
+    // cost-to-cost (actual ÷ forecast final cost) so it's never a false 0%.
+    overallPct: hasBudget ? (totTarget ? r2(totEv / totTarget) : 0) : (totEac ? r2(totActual / totEac) : 0),
+    // VAC and CPI require a budget to be meaningful.
+    vac: hasBudget ? r2(totTarget - totEac) : null,
+    cpi: hasBudget && totActual ? r2(totEv / totActual) : null
   };
-  totals.vac = r2(totals.target - totals.eac);
   return { project, lines: computed, unalloc: r2(unalloc), saved: !!(bud.lines && bud.lines.length), totals };
 }
 var api_default = async (req, context) => {

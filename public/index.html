@@ -1937,12 +1937,12 @@ function renderPnl(d){
        <div class="muted" style="font-size:11px;margin-top:6px">Revenue is the value of work certified to the client (ex-VAT), recognised as work progresses. Down payments/advances are <b>not</b> revenue — they are shown in the cash position →.</div></div>
      <div class="card" style="margin:0"><h3>Client billing &amp; cash position</h3>
        <table>
-        <tr><td class="lab">Revenue certified (ex-VAT)</td><td class="num">${fmt(d.revenue)}</td></tr>
-        <tr><td class="lab">Add: VAT @ 5%</td><td class="num">${fmt(d.vatDue)}</td></tr>
-        <tr style="font-weight:600"><td>Gross billed to client (incl. VAT)</td><td class="num">${fmt(d.grossBilledInclVat)}</td></tr>
+        <tr><td class="lab">Revenue certified — work value (ex-VAT)</td><td class="num">${fmt(d.revenue)}</td></tr>
         <tr><td class="lab">Less: Retention held by client</td><td class="num">(${fmt(d.retentionHeld)})</td></tr>
         <tr><td class="lab">Less: Advance recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
-        <tr style="background:#eef2f8;font-weight:700"><td>Net due from client (this position)</td><td class="num">${fmt(d.netDue)}</td></tr>
+        <tr style="font-weight:600"><td>Net certified (ex-VAT)</td><td class="num">${fmt(d.netDue)}</td></tr>
+        <tr><td class="lab">Add: VAT @ 5%</td><td class="num">${fmt(d.vatDue)}</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>Net payable by client (incl. VAT)</td><td class="num">${fmt(d.grossBilledInclVat)}</td></tr>
         <tr><td colspan="2" style="height:6px;border:0"></td></tr>
         <tr><td class="lab">Advance / down payment agreed</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>
         <tr><td class="lab">Less: recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
@@ -1996,13 +1996,14 @@ function collectBudget(){ if(!BUD) return; BUD.lines.forEach((l,i)=>{ const a=$(
 function renderBudget(){
   const canEdit=["CEO","PM","QS"].includes(ME.role), t=BUD.totals||{};
   const stCol=s=>s==="Overrun"?"var(--red)":s==="Watch"?"var(--gold)":s==="On budget"?"var(--green)":"#888";
-  const vacColor=t.vac>=0?"var(--green)":"var(--red)";
+  const hasBudget=!!t.hasBudget;
+  const vacColor=t.vac==null?"#888":t.vac>=0?"var(--green)":"var(--red)";
   $("#bKpis").innerHTML=`<div class="kpis">
-    <div class="kpi"><div class="v">AED ${fmt(t.boq)}</div><div class="l">BOQ + VOs budget</div></div>
+    <div class="kpi"><div class="v">AED ${fmt(t.boq)}</div><div class="l">BOQ + VOs budget${hasBudget?"":" — not set"}</div></div>
     <div class="kpi"><div class="v">AED ${fmt(t.actual)}</div><div class="l">Actual cost to date</div></div>
-    <div class="kpi"><div class="v">${fmt((t.overallPct||0)*100)}%</div><div class="l">Overall % complete</div></div>
+    <div class="kpi"><div class="v">${fmt((t.overallPct||0)*100)}%</div><div class="l">Overall % complete${hasBudget?" (earned value)":" (cost-to-cost)"}</div></div>
     <div class="kpi"><div class="v">AED ${fmt(t.eac)}</div><div class="l">Forecast final cost (EAC)</div></div>
-    <div class="kpi" style="border-top-color:${vacColor}"><div class="v" style="color:${vacColor}">AED ${fmt(t.vac)}</div><div class="l">Variance at completion</div></div>
+    <div class="kpi" style="border-top-color:${vacColor}"><div class="v" style="color:${vacColor}">${t.vac==null?"—":"AED "+fmt(t.vac)}</div><div class="l">Variance at completion${hasBudget?"":" — set BOQ"}</div></div>
     <div class="kpi"><div class="v">${t.cpi==null?"—":fmt(t.cpi)}</div><div class="l">CPI (cost performance)</div></div></div>`;
   const rows=(BUD.lines||[]).map((l,i)=>`<tr>
     <td>${canEdit?`<input id="bl_area_${i}" value="${esc(l.area)}" style="min-width:150px">`:esc(l.area)}</td>
@@ -2011,14 +2012,14 @@ function renderBudget(){
     <td class="num">${canEdit?`<input id="bl_act_${i}" type="number" step="0.01" value="${l.actualOverride!=null?l.actualOverride:""}" placeholder="${fmt(l.actualMatched)}" title="Auto from cost log: ${fmt(l.actualMatched)}. Leave blank to use it, or type a value to override." style="width:120px;text-align:right">`:fmt(l.actual)}</td>
     <td class="num">${canEdit?`<input id="bl_pct_${i}" type="number" step="1" value="${Math.round((l.pctComplete||0)*100)}" style="width:64px;text-align:right">`:fmt((l.pctComplete||0)*100)}${canEdit?"":"%"}</td>
     <td class="num">${fmt(l.eac)}</td>
-    <td class="num" style="color:${l.vac<0?"var(--red)":"inherit"}">${fmt(l.vac)}</td>
+    <td class="num" style="color:${l.vac==null?"inherit":l.vac<0?"var(--red)":"inherit"}">${l.vac==null?"—":fmt(l.vac)}</td>
     <td class="num">${l.cpi==null?"—":fmt(l.cpi)}</td>
     <td><span style="color:${stCol(l.status)};font-weight:700">${l.status==="Overrun"?"🔴":l.status==="Watch"?"🟡":l.status==="On budget"?"🟢":"—"} ${esc(l.status)}</span>${canEdit?` <a href="#" data-rm="${i}" style="color:#c00">✕</a>`:""}</td></tr>`).join("");
   $("#bBody").classList.remove("muted");
-  $("#bBody").innerHTML=`<div class="muted" style="font-size:11px;margin:6px 0">Target cost = BOQ × 85%. <b>Actual</b> auto-matches the cost log by Area — or type a value in the Actual box to override it (leave blank to go back to auto). EAC = Actual ÷ %complete. VAC = Target − EAC. CPI = Earned Value ÷ Actual.${BUD.unalloc?` <b style="color:#c60">Unassigned actual not matching any area: AED ${fmt(BUD.unalloc)}</b> — name an area exactly as in the cost log to absorb it, or add it as its own line.`:""}</div>
+  $("#bBody").innerHTML=`<div class="muted" style="font-size:11px;margin:6px 0">Target cost = BOQ × 85%. <b>Actual</b> auto-matches the cost log by Area — or type a value in the Actual box to override it (leave blank to go back to auto). EAC = Actual ÷ %complete. VAC = Target − EAC (shown once a BOQ is set). CPI = Earned Value ÷ Actual. <b>Overall % complete</b> = earned value (EV ÷ target) when a BOQ exists, otherwise cost-to-cost (actual ÷ forecast final cost).${BUD.unalloc?` <b style="color:#c60">Unassigned actual not matching any area: AED ${fmt(BUD.unalloc)}</b> — name an area exactly as in the cost log to absorb it, or add it as its own line.`:""}</div>
     <table><tr><th>Area / Building</th><th class="num">BOQ + VOs</th><th class="num">Target (85%)</th><th class="num">Actual</th><th class="num">% Comp</th><th class="num">EAC</th><th class="num">VAC</th><th class="num">CPI</th><th>Status</th></tr>
     ${rows||`<tr><td colspan="9" class="muted">No areas yet. Click “+ Area”, name it exactly as in the cost log, enter BOQ and % complete, then Save.</td></tr>`}
-    ${BUD.lines&&BUD.lines.length?`<tr class="tot"><td>TOTAL</td><td class="num">${fmt(t.boq)}</td><td class="num">${fmt(t.target)}</td><td class="num">${fmt(t.actual)}</td><td class="num">${fmt((t.overallPct||0)*100)}%</td><td class="num">${fmt(t.eac)}</td><td class="num" style="color:${vacColor}">${fmt(t.vac)}</td><td class="num">${t.cpi==null?"—":fmt(t.cpi)}</td><td></td></tr>`:""}</table>`;
+    ${BUD.lines&&BUD.lines.length?`<tr class="tot"><td>TOTAL</td><td class="num">${fmt(t.boq)}</td><td class="num">${fmt(t.target)}</td><td class="num">${fmt(t.actual)}</td><td class="num">${fmt((t.overallPct||0)*100)}%</td><td class="num">${fmt(t.eac)}</td><td class="num" style="color:${vacColor}">${t.vac==null?"—":fmt(t.vac)}</td><td class="num">${t.cpi==null?"—":fmt(t.cpi)}</td><td></td></tr>`:""}</table>`;
   if(canEdit) $("#bBody").querySelectorAll("[data-rm]").forEach(a=>a.onclick=e=>{e.preventDefault(); collectBudget(); BUD.lines.splice(+a.dataset.rm,1); renderBudget();});
 }
 
