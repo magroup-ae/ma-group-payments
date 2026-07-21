@@ -294,6 +294,11 @@ async function adminDelete(kind,id,name,after){
   const pin=prompt("⚠ PERMANENT DELETE — enter CEO password to confirm.\n\nDelete: "+name); if(pin===null||pin==="") return;
   try{ const r=await api("admin/delete",{method:"POST",body:{kind,id,pin}}); toast("Deleted"+(r&&r.deleted!=null?" ("+r.deleted+" records)":"")); if(after) after(); }catch(e){ toast(e.message); }
 }
+async function ceoUnlock(action){
+  if(ME.role!=="CEO"){ toast("Only the CEO can override a locked record"); return; }
+  const pin=prompt("🔒 CEO override — enter your password to unlock editing of this approved/locked record:"); if(pin===null||pin==="") return;
+  try{ const r=await api("verifypin",{method:"POST",body:{pin}}); if(!r||!r.ok){ toast("Wrong CEO password"); return; } toast("Unlocked for editing"); action(); }catch(e){ toast(e.message); }
+}
 function delBtn(kind,id,name){ return ME.role==="CEO"?`<button class="btn red" data-del-kind="${esc(kind)}" data-del-id="${esc(id)}" data-del-name="${esc(name)}">Delete</button>`:""; }
 function wireDelBtns(after){ $("#main").querySelectorAll("[data-del-kind]").forEach(b=>b.onclick=()=>adminDelete(b.dataset.delKind,b.dataset.delId,b.dataset.delName,after)); }
 
@@ -498,6 +503,7 @@ async function openCert(no){
       <span class="muted">${esc(c.supplier)} · ${esc(c.project)} · Inv: ${esc(c.invoiceNo||"—")}</span>
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
+        ${(!canEdit&&ME.role==="CEO"&&c.status!=="Cancelled")?`<button class="btn ghost" id="ceoEditBtn" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}
         <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${cashBtn}${rvBtn}${proofBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
@@ -526,6 +532,7 @@ async function openCert(no){
         <h3>History</h3><ul class="audit">${(c.audit||[]).slice().reverse().map(a=>`<li>${dmy(a.at)} — <b>${esc(a.by)}</b>: ${esc(a.action)}${a.comment?" — <i>"+esc(a.comment)+"</i>":""}</li>`).join("")}</ul>
       </div></div></div>`;
   if(canEdit) $("#editBtn").onclick=()=>certForm(c);
+  if($("#ceoEditBtn")) $("#ceoEditBtn").onclick=()=>ceoUnlock(()=>certForm(c));
   bindAttach(c);
   bindReceipt(c);
   $("#printBtn").onclick=()=>printCert(c);
@@ -1428,7 +1435,7 @@ async function openClientCert(no){
   const row=(l,v)=>`<tr><td class="lab">${l}</td><td class="num">${v}</td></tr>`;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(c.no)}</h2><span class="pill st-${c.status}">${c.status}</span>
      <span class="muted">${esc(ct.project||"")} · ${esc(c.client?.name||"")}</span>
-     <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}${(!canEdit&&ME.role==="CEO"&&["Issued","Approved"].includes(c.status))?`<button class="btn ghost" id="ccCeoEdit" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
        ${["Issued","Approved"].includes(c.status)?`<button class="btn gold" id="ccProforma">Proforma invoice</button>`:""}
        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("clientcert",c.key||c.no,c.no)}<button class="btn ghost" id="ccBack">Back</button></div></div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
@@ -1451,6 +1458,7 @@ async function openClientCert(no){
   if($("#ccProforma")) $("#ccProforma").onclick=async ()=>{ toast("Preparing proforma…");
     try{ const pf=await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/proforma",{method:"POST"}); printProforma(pf); }catch(e){ toast(e.message); } };
   if(canEdit) $("#ccEdit").onclick=()=>clientCertEdit(c);
+  if($("#ccCeoEdit")) $("#ccCeoEdit").onclick=()=>ceoUnlock(()=>clientCertEdit(c));
   $("#main").querySelectorAll("[data-a]").forEach(b=>b.onclick=async ()=>{ let comment;
     if(b.dataset.a==="cancel"||b.dataset.a==="reopen"){ comment=prompt("Comment (optional):")||""; }
     try{ await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/transition",{method:"POST",body:{action:b.dataset.a,comment}}); toast("Done"); openClientCert(c.key||c.no); }catch(e){ toast(e.message); } });
