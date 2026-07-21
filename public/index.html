@@ -388,7 +388,9 @@ async function vDash(){
    <div class="kpis">
      ${kpi("AED "+fmt(totalCV||contractValue),"Contract value — all projects")}
      ${kpi("AED "+fmt(revenue),"Revenue certified (ex-VAT)")}
-     ${kpi("AED "+fmt(netDue),"Net due from clients")}
+     ${kpi("AED "+fmt(pnl?num(pnl.grossBilledInclVat):0),"Billed incl VAT (payable)")}
+     ${kpi("AED "+fmt(pnl?num(pnl.collected):0),"Collected from clients")}
+     ${kpi(`<span style="color:${pnl&&num(pnl.outstandingReceivable)>0?'var(--gold)':'var(--green)'}">AED ${fmt(pnl?num(pnl.outstandingReceivable):0)}</span>`,"Outstanding receivable")}
      ${kpi("AED "+fmt(totalDown),"Down payments received")}
      ${kpi("AED "+fmt(totalRet),"Retention held by clients")}
      ${kpi(ccerts.length,"Client IPCs")}
@@ -1582,6 +1584,7 @@ async function openClientCert(no){
      <span class="muted">${esc(ct.project||"")} · ${esc(c.client?.name||"")}</span>
      <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}${(!canEdit&&ME.role==="CEO"&&["Issued","Approved"].includes(c.status))?`<button class="btn ghost" id="ccCeoEdit" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
        ${["Issued","Approved"].includes(c.status)?`<button class="btn gold" id="ccProforma">Proforma invoice</button>`:""}
+       ${["Issued","Approved"].includes(c.status)&&["CEO","PM","QS","Accounts"].includes(ME.role)?`<button class="btn green" id="ccReceipt">+ Client payment</button>`:""}
        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("clientcert",c.key||c.no,c.no)}<button class="btn ghost" id="ccBack">Back</button></div></div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
      <div><h3>Certificate</h3><table>
@@ -1596,8 +1599,21 @@ async function openClientCert(no){
          ${row("Retention held to date",fmt(K.retention))}</table>
      </div>
      <div><h3>History</h3><ul class="audit">${(c.audit||[]).slice().reverse().map(a=>`<li>${dmy(a.at)} — <b>${esc(a.by)}</b>: ${esc(a.action)}${a.comment?" — <i>"+esc(a.comment)+"</i>":""}</li>`).join("")}</ul></div>
-   </div></div>`;
+   </div>
+   <div style="margin-top:16px"><div class="flex"><h3 style="margin:0">Client payments received — ${esc(ct.project||"")}</h3><span class="muted right" id="ccCollected"></span></div>
+     <div id="ccReceipts" class="muted" style="margin-top:8px">Loading…</div></div></div>`;
   $("#ccBack").onclick=()=>{VIEW="ccerts";render();};
+  const loadReceipts=async ()=>{ const box=$("#ccReceipts"); if(!box) return;
+    let list=[]; try{ list=await api("clientreceipts?project="+encodeURIComponent(ct.project||"")); }catch(e){ box.textContent=e.message; return; }
+    const total=list.reduce((a,r)=>a+(+r.amount||0),0); const cc=$("#ccCollected"); if(cc) cc.textContent="Total collected: AED "+fmt(total);
+    if(!list.length){ box.classList.add("muted"); box.innerHTML=`No client payments recorded for this project yet. Use <b>+ Client payment</b> to log receipts as they come in.`; return; }
+    box.classList.remove("muted");
+    box.innerHTML=`<table><tr><th>Date</th><th>Ref</th><th>Mode</th><th>Bank</th><th class="num">Amount</th><th>Type / note</th>${ME.role==="CEO"?"<th></th>":""}</tr>
+     ${list.map(r=>`<tr><td>${dmy(r.date)}</td><td>${esc(r.ref||"—")}</td><td>${esc(r.mode||"")}</td><td>${esc(r.bank||"—")}</td><td class="num">${fmt(r.amount)}</td><td>${r.isRetentionRelease?'<span class="pill" style="background:#2E7D32;font-size:10px">retention</span> ':""}${r.isAdvance?'<span class="pill" style="background:#7A5C00;font-size:10px">advance</span> ':""}${esc(r.notes||"")}</td>${ME.role==="CEO"?`<td><a href="#" data-crdel="${esc(r.id)}" style="color:#c00">✕</a></td>`:""}</tr>`).join("")}
+     <tr class="tot"><td colspan="4">TOTAL COLLECTED</td><td class="num">${fmt(total)}</td><td></td>${ME.role==="CEO"?"<td></td>":""}</tr></table>`;
+    box.querySelectorAll("[data-crdel]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm("Delete this client payment record?"))return; try{ await api("clientreceipt/"+encodeURIComponent(a.dataset.crdel),{method:"DELETE"}); toast("Deleted"); loadReceipts(); }catch(x){ toast(x.message); } }); };
+  loadReceipts();
+  if($("#ccReceipt")) $("#ccReceipt").onclick=()=>clientReceiptForm(c,loadReceipts);
   wireDelBtns(()=>{VIEW="ccerts";render();});
   $("#ccPrint").onclick=()=>printClientIPC(c);
   if($("#ccProforma")) $("#ccProforma").onclick=async ()=>{ toast("Preparing proforma…");
@@ -1607,6 +1623,27 @@ async function openClientCert(no){
   $("#main").querySelectorAll("[data-a]").forEach(b=>b.onclick=async ()=>{ let comment;
     if(b.dataset.a==="cancel"||b.dataset.a==="reopen"){ comment=prompt("Comment (optional):")||""; }
     try{ await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/transition",{method:"POST",body:{action:b.dataset.a,comment}}); toast("Done"); openClientCert(c.key||c.no); }catch(e){ toast(e.message); } });
+}
+function clientReceiptForm(c,onDone){
+  const ct=c.contract||{};
+  const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(520px,92vw)";
+  dlg.innerHTML=`<h2 style="margin-top:0">Record client payment — ${esc(ct.project||"")}</h2><div class="grid">
+    <div><label>Date received</label><input id="cr_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div><label>Amount received (AED, incl VAT)</label><input id="cr_amount" type="number" step="0.01"></div>
+    <div><label>Mode</label><select id="cr_mode">${S.modes.map(m=>`<option>${esc(m)}</option>`).join("")}</select></div>
+    <div><label>Reference / cheque no.</label><input id="cr_ref"></div>
+    <div><label>Bank / account</label><select id="cr_bank">${S.banks.map(b=>`<option>${esc(b)}</option>`).join("")}</select></div>
+    <div><label>Against certificate</label><input id="cr_cert" value="${esc(c.no||"")}" readonly style="background:#f4f5f7"></div>
+    <div style="grid-column:1/-1"><label>Type of receipt</label><select id="cr_type"><option value="">Progress payment (against IPC)</option><option value="advance">Advance / down payment</option><option value="retention">Retention release</option></select></div>
+    <div style="grid-column:1/-1"><label>Notes</label><input id="cr_notes" placeholder="e.g. against IPC ${esc(c.no||"")}"></div></div>
+    <div style="height:14px"></div><div class="flex"><button class="btn green" id="cr_ok">Record payment</button><button class="btn ghost" id="cr_no">Cancel</button></div>`;
+  document.body.appendChild(dlg); dlg.showModal();
+  const close=()=>{ dlg.close(); dlg.remove(); };
+  $("#cr_no",dlg).onclick=close;
+  $("#cr_ok",dlg).onclick=async ()=>{ const g=id=>$("#cr_"+id,dlg).value; const type=g("type");
+    const body={ contractId:ct.id||c.contractId, project:ct.project, certNo:g("cert"), date:g("date"), amount:+g("amount")||0, mode:g("mode"), ref:g("ref"), bank:g("bank"), notes:g("notes"), isAdvance:type==="advance", isRetentionRelease:type==="retention" };
+    if(!(body.amount>0)){ toast("Enter the amount received"); return; }
+    try{ await api("clientreceipt",{method:"POST",body}); toast("Client payment recorded"); close(); if(onDone) onDone(); }catch(e){ toast(e.message); } };
 }
 function clientCertEdit(c){
   const ct=c.contract||{};
@@ -1942,7 +1979,9 @@ function renderPnl(d){
         <tr><td class="lab">Less: Advance recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
         <tr style="font-weight:600"><td>Net certified (ex-VAT)</td><td class="num">${fmt(d.netDue)}</td></tr>
         <tr><td class="lab">Add: VAT @ 5%</td><td class="num">${fmt(d.vatDue)}</td></tr>
-        <tr style="background:#eef2f8;font-weight:700"><td>Net payable by client (incl. VAT)</td><td class="num">${fmt(d.grossBilledInclVat)}</td></tr>
+        <tr style="font-weight:600"><td>Net payable by client (incl. VAT)</td><td class="num">${fmt(d.grossBilledInclVat)}</td></tr>
+        <tr><td class="lab">Less: Collected from client</td><td class="num">(${fmt(d.collected)})</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>Outstanding receivable</td><td class="num" style="color:${num(d.outstandingReceivable)>0?'var(--gold)':'var(--green)'}">${fmt(d.outstandingReceivable)}</td></tr>
         <tr><td colspan="2" style="height:6px;border:0"></td></tr>
         <tr><td class="lab">Advance / down payment agreed</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>
         <tr><td class="lab">Less: recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
@@ -2207,7 +2246,7 @@ function vSettings(){
   const admin=ME.role==="CEO";
   $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
    <h3>Projects</h3><div id="projList"></div>
-   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.1" placeholder="Retention % (10)" style="max-width:130px"><button class="btn" id="npAdd">Add project</button></div>
+   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.1" placeholder="Retention % (10)" style="max-width:120px"><input id="npTM" type="number" step="0.1" placeholder="Target margin % (15)" style="max-width:150px"><button class="btn" id="npAdd">Add project</button></div>
    <div class="card" style="margin-top:14px;background:#f7f9fc"><h3 style="margin-top:0">Merge duplicate projects</h3>
      <div class="note">If the same project was created under two or more names, tick them below, type the single name and code to keep, then Merge. Every contract, client &amp; supplier IPC, expense and budget under the ticked names moves to the kept name, and the duplicates are removed from the list. CEO password required.</div>
      <div id="mgList" style="margin:10px 0"></div>
@@ -2225,13 +2264,13 @@ function vSettings(){
    ${admin?chequeLayoutCard():""}`;
   const renderLists=()=>{
     const pjCell=(p,i,field)=>(admin&&!p.fixed)?`<input type="number" step="0.01" class="pjEdit" data-i="${i}" data-field="${field}" value="${p[field]??""}" placeholder="—" style="width:130px;text-align:right">`:(p[field]?fmt(p[field]):"—");
-    const pjPct=(p,i)=>(admin&&!p.fixed)?`<input type="number" step="0.1" class="pjPctEdit" data-i="${i}" value="${p.retentionPct!=null?Math.round(p.retentionPct*1000)/10:10}" style="width:70px;text-align:right">%`:(p.retentionPct!=null?pct(p.retentionPct):"10%");
-    $("#projList").innerHTML=`<table><tr><th>Code</th><th>Name</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention %</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjPct(p,i)}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table>
-    <div class="muted" style="font-size:11px;margin-top:4px">Down payment received = advance paid to you by the client. Retention % (default 10%) is withheld by the client from your certified payments — the dashboard computes the retention held from your certified revenue. Standard release: 5% on completion + 5% after the 12-month DLP.</div>`;
+    const pjPct=(p,i,field,def)=>(admin&&!p.fixed)?`<input type="number" step="0.1" class="pjPctEdit" data-i="${i}" data-field="${field}" value="${p[field]!=null?Math.round(p[field]*1000)/10:def}" style="width:62px;text-align:right">%`:(p[field]!=null?pct(p[field]):def+"%");
+    $("#projList").innerHTML=`<div style="overflow-x:auto"><table><tr><th>Code</th><th>Name</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention %</th><th class="num">Target margin %</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjPct(p,i,"retentionPct",10)}</td><td class="num">${p.fixed?"—":pjPct(p,i,"targetMargin",15)}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table></div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Down payment received = advance paid to you by the client. Retention % (default 10%) is withheld by the client — release 5% on completion + 5% after the 12-month DLP. Target margin % (default 15%) is your planned profit — it drives the WIP forecast cost when no BOQ is set.</div>`;
     $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
       document.querySelectorAll(".pjEdit").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i][inp.dataset.field]=+inp.value||0; await saveS(); } });
-      document.querySelectorAll(".pjPctEdit").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i].retentionPct=(+inp.value||0)/100; await saveS(); } });
+      document.querySelectorAll(".pjPctEdit").forEach(inp=>inp.onchange=async ()=>{ const i=+inp.dataset.i; if(S.projects[i]){ S.projects[i][inp.dataset.field]=(+inp.value||0)/100; await saveS(); } });
       document.querySelectorAll("[data-db]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.banks.splice(+a.dataset.db,1);await saveS();}); }
   };
   const renderMerge=()=>{ const ml=$("#mgList"); if(!ml) return;
@@ -2249,7 +2288,7 @@ function vSettings(){
   if(admin) bindSignature();
   if(admin) bindEmail();
   if(admin){
-    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(), cv=+$("#npValue").value||0, dp=+$("#npDown").value||0, rt=$("#npRet").value===""?10:(+$("#npRet").value||0); if(!code||!name) return toast("Code and name required"); if(S.projects.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast("That project name already exists"); if(S.projects.some(p=>(p.code||"").toUpperCase()===code)) return toast("That code is already used — pick a unique 3-letter code"); S.projects.push({code,name,contractValue:cv,downPayment:dp,retentionPct:rt/100}); await saveS(); };
+    $("#npAdd").onclick=async ()=>{ const code=$("#npCode").value.trim().toUpperCase().slice(0,3), name=$("#npName").value.trim(), cv=+$("#npValue").value||0, dp=+$("#npDown").value||0, rt=$("#npRet").value===""?10:(+$("#npRet").value||0), tm=$("#npTM").value===""?15:(+$("#npTM").value||0); if(!code||!name) return toast("Code and name required"); if(S.projects.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast("That project name already exists"); if(S.projects.some(p=>(p.code||"").toUpperCase()===code)) return toast("That code is already used — pick a unique 3-letter code"); S.projects.push({code,name,contractValue:cv,downPayment:dp,retentionPct:rt/100,targetMargin:tm/100}); await saveS(); };
     renderMerge();
     $("#mgBtn").onclick=()=>{ const from=[...document.querySelectorAll(".mgChk:checked")].map(c=>c.value); const to=$("#mgName").value.trim(); const toCode=$("#mgCode").value.trim().toUpperCase().slice(0,3);
       if(from.length<1){ toast("Tick the projects to merge"); return; }

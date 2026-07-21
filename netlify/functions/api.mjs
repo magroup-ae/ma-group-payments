@@ -13449,9 +13449,11 @@ async function computePnl(s, project) {
     const d = String(e.date || "").slice(0, 10);
     if (d) { byDate[d] = byDate[d] || { cost: 0, paid: 0 }; byDate[d].cost += a; byDate[d].paid += p; }
   }
-  const [contracts, allCC] = await Promise.all([listContracts(), getAllJSON(s, "clientcert/")]);
+  const [contracts, allCC, receipts] = await Promise.all([listContracts(), getAllJSON(s, "clientcert/"), getAllJSON(s, "clientreceipt/")]);
   const projContracts = contracts.filter((c) => !project || c.project === project);
   const cids = new Set(projContracts.map((c) => c.id));
+  let collected = 0;
+  for (const rc of receipts) { if (!rc) continue; if (project && rc.project !== project) continue; collected += num(rc.amount); }
   // Per-contract LATEST cumulative position (taken at the highest-gross IPC),
   // plus cumulative billing (net + VAT) summed across that contract's IPCs.
   const maxGross = {}, latestRetention = {}, latestAdvRec = {};
@@ -13500,6 +13502,7 @@ async function computePnl(s, project) {
     retentionHeld: r2(retentionHeld), advanceRecovered: r2(advanceRecovered),
     advanceAgreed: r2(advanceAgreed), advanceOutstanding: r2(Math.max(0, advanceAgreed - advanceRecovered)),
     vatDue: r2(vatDue), grossBilledInclVat: r2(netDue + vatDue),
+    collected: r2(collected), outstandingReceivable: r2(netDue + vatDue - collected),
     byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
@@ -13523,7 +13526,7 @@ async function computeWip(s) {
   const billedByProj = {};
   for (const cid in maxGross) { const p = contractProj[cid]; if (p) billedByProj[p] = (billedByProj[p] || 0) + maxGross[cid]; }
   const projSet = {};
-  for (const p of (st.projects || [])) { if (p && !p.fixed) projSet[p.name] = { cv: num(p.contractValue), estCost: num(p.estCost) }; }
+  for (const p of (st.projects || [])) { if (p && !p.fixed) projSet[p.name] = { cv: num(p.contractValue), estCost: num(p.estCost), targetMargin: p.targetMargin != null ? num(p.targetMargin) : null }; }
   const names = [...new Set([...Object.keys(costByProj), ...Object.keys(cvByProj), ...Object.keys(projSet)])].filter((n) => n && n !== HQ_PROJECT);
   const rows = [];
   for (const p of names) {
@@ -13533,7 +13536,8 @@ async function computeWip(s) {
     let estCost = 0, basis = "target margin";
     if (bud && Array.isArray(bud.lines) && bud.lines.length) { estCost = bud.lines.reduce((a, l) => a + num(l.boq), 0); if (estCost > 0) basis = "budget/BOQ"; }
     if (!estCost && projSet[p]?.estCost) { estCost = projSet[p].estCost; basis = "set"; }
-    if (!estCost && cv) estCost = r2(cv * (1 - targetMargin));
+    const projTM = projSet[p]?.targetMargin != null ? projSet[p].targetMargin : targetMargin;
+    if (!estCost && cv) { estCost = r2(cv * (1 - projTM)); basis = "target margin " + Math.round(projTM * 100) + "%"; }
     const pct = estCost > 0 ? Math.min(1, cost / estCost) : 0;
     const earned = r2(pct * cv);
     const billed = r2(billedByProj[p] || 0);
@@ -14480,6 +14484,44 @@ var api_default = async (req, context) => {
     const out = all.map((c) => { const ct = cmap[c.contractId] || {}; return { no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status }; });
     out.sort((a, b) => a.no < b.no ? 1 : -1);
     return json(out);
+  }
+  if (path === "clientreceipts" && req.method === "GET") {
+    const proj = url.searchParams.get("project") || "";
+    const all = await getAllJSON(s, "clientreceipt/");
+    const out = all.filter((r) => r && (!proj || r.project === proj));
+    out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : (b.seq || 0) - (a.seq || 0));
+    return json(out);
+  }
+  if (path === "clientreceipt" && req.method === "POST") {
+    if (!can("clientcert")) return err("No rights to record client receipts", 403);
+    const b = await req.json();
+    const contract = b.contractId ? await s.get("contract/" + b.contractId, { type: "json" }) : null;
+    const project = (contract && contract.project) || String(b.project || "").trim();
+    if (!project) return err("Choose the project / contract");
+    if (!(num(b.amount) > 0)) return err("Enter the amount received");
+    const stg = await s.get("settings", { type: "json" });
+    let id = b.id;
+    const ex = id ? await s.get("clientreceipt/" + id, { type: "json" }) : null;
+    if (!id) { stg.clientReceiptSeq = (stg.clientReceiptSeq || 0) + 1; id = "CR" + String(stg.clientReceiptSeq).padStart(4, "0"); await s.setJSON("settings", stg); }
+    const rec = {
+      id, seq: ex?.seq || (Number(String(id).replace(/\D/g, "")) || 0),
+      contractId: b.contractId || ex?.contractId || "", clientId: (contract && contract.clientId) || ex?.clientId || "",
+      project, certNo: String(b.certNo || ex?.certNo || ""),
+      date: String(b.date || ex?.date || now().slice(0, 10)).slice(0, 10),
+      amount: num(b.amount), mode: String(b.mode || ex?.mode || "Bank Transfer"),
+      ref: String(b.ref || ex?.ref || ""), bank: String(b.bank || ex?.bank || ""),
+      isRetentionRelease: !!b.isRetentionRelease, isAdvance: !!b.isAdvance,
+      notes: String(b.notes || ex?.notes || ""),
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
+    };
+    await s.setJSON("clientreceipt/" + id, rec);
+    return json(rec);
+  }
+  const crDel = path.match(/^clientreceipt\/([^/]+)$/);
+  if (crDel && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    await s.delete("clientreceipt/" + decodeURIComponent(crDel[1]));
+    return json({ ok: true });
   }
   if (path === "clientcert" && req.method === "POST") {
     if (!can("clientcert")) return err("No rights to create client certificates", 403);
