@@ -13048,6 +13048,7 @@ async function ensureInit() {
   if (ensureHQProject(settings)) patched = true;
   if (patched) await s.setJSON("settings", settings);
   try { await runProjectMergeMigration(s, settings); } catch (e) { }
+  try { await runProjectFixV2(s, settings); } catch (e) { }
   let users = await s.get("users", { type: "json" });
   if (!users) {
     users = DEFAULT_USERS.map((u) => ({ ...u, salt: randomBytes(8).toString("hex") }));
@@ -13326,7 +13327,7 @@ function ensureHQProject(st) {
 // and dropping the duplicates from the registry. No password needed — it runs
 // inside the trusted backend at bootstrap.
 var PROJECT_MERGES_V1 = [
-  { from: ["The Square 2.0 - Nad Al Sheba", "The Square 2.0 Infrastructure"], to: "The Square 2.0 construction", code: "SQU" },
+  { from: ["The Square 2.0 - Nad Al Sheba"], to: "The Square 2.0 construction", code: "SQU" },
   { from: ["Aster Garden Hospital @ Jabal Ali", "Aster Garden Jabal Ali"], to: "Aster Garden Hospital", code: "AGH" }
 ];
 async function runProjectMergeMigration(s, settings) {
@@ -13348,6 +13349,19 @@ async function runProjectMergeMigration(s, settings) {
   }
   ensureHQProject(settings);
   settings.projMergeV1 = true;
+  await s.setJSON("settings", settings);
+  return true;
+}
+// Corrective fix: "The Square 2.0 Infrastructure" is a SEPARATE project and was
+// wrongly folded into "construction" by the first migration. Restore it as its
+// own registry entry (it held no records — it was only a name), so it is again
+// selectable and distinct.
+async function runProjectFixV2(s, settings) {
+  if (settings.projFixV2) return false;
+  if (!Array.isArray(settings.projects)) settings.projects = [];
+  const has = settings.projects.some((p) => p && String(p.name || "").trim().toLowerCase() === "the square 2.0 infrastructure");
+  if (!has) settings.projects.push({ code: "SQI", name: "The Square 2.0 Infrastructure" });
+  settings.projFixV2 = true;
   await s.setJSON("settings", settings);
   return true;
 }
