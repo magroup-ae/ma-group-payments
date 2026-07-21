@@ -13616,7 +13616,8 @@ var api_default = async (req, context) => {
       no: c.no, date: c.date, entity: c.entity, project: c.project, supplier: c.supplier, supplierId: c.supplierId,
       invoiceNo: c.invoiceNo, lpoRef: c.lpoRef, status: c.status,
       payable: c.calc?.payable, net: c.calc?.net, retention: c.calc?.retention, advanceRecovery: c.calc?.advanceRecovery,
-      mode: c.payment?.mode, hasPayment: !!c.payment, receiptDone: !!c.payment?.receipt?.received
+      mode: c.payment?.mode, hasPayment: !!c.payment, receiptDone: !!c.payment?.receipt?.received,
+      chequePrinted: !!c.payment?.printed
     }));
     certs.sort((a, b) => a.no < b.no ? 1 : -1);
     const assets = { sign, stamp };
@@ -13680,6 +13681,24 @@ var api_default = async (req, context) => {
     if (!b.name) return err("Legal name is required");
     const emailIn = (b.email || "").trim();
     if (!emailIn || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailIn)) return err("A valid email address is required (mandatory for notifications)");
+    // Anti-duplication: on a NEW registration, match an existing supplier by
+    // legal name, TRN or trade-licence no. A name-only stub (auto-created from
+    // the cost log) is completed in place; a real duplicate is rejected.
+    if (!b.id) {
+      const dsups = await getAllJSON(s, "supplier/");
+      const dn = (x) => String(x || "").trim().toLowerCase();
+      const nameHit = dsups.find((v) => dn(v.name) === dn(b.name));
+      const trnHit = b.trn ? dsups.find((v) => v.trn && dn(v.trn) === dn(b.trn)) : null;
+      const licHit = b.licenseNo ? dsups.find((v) => v.licenseNo && dn(v.licenseNo) === dn(b.licenseNo)) : null;
+      const hit = nameHit || trnHit || licHit;
+      if (hit) {
+        if (hit.incomplete || hit.source === "cost-log") { b.id = hit.id; }
+        else {
+          const why = nameHit ? `name "${b.name}"` : trnHit ? `TRN ${b.trn}` : `trade licence ${b.licenseNo}`;
+          return err(`A supplier with the same ${why} already exists (${hit.id} — ${hit.name}). Open that record to edit it instead of creating a duplicate.`, 409);
+        }
+      }
+    }
     const st = await s.get("settings", { type: "json" });
     let id = b.id;
     if (!id) {
@@ -13793,6 +13812,13 @@ var api_default = async (req, context) => {
     if (!b.supplierId) return err("Choose a supplier");
     const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
     if (!sup) return err("Supplier not found");
+    // Anti-duplication: the same supplier invoice must not be certified twice.
+    const invNo = String(b.invoiceNo || "").trim();
+    if (invNo) {
+      const priorC = await certsBySupplier(sup.id);
+      const dupC = priorC.find((x) => x.status !== "Cancelled" && String(x.invoiceNo || "").trim().toLowerCase() === invNo.toLowerCase());
+      if (dupC) return err(`Supplier invoice ${invNo} is already certified on ${dupC.no} (${dupC.status}). Duplicate certification of the same invoice is not allowed.`, 409);
+    }
     const st = await s.get("settings", { type: "json" });
     const project = b.project || sup.project || "";
     const entity = b.entity || sup.entity || settings.entities[0].short;
@@ -13898,6 +13924,16 @@ var api_default = async (req, context) => {
       if (!can("pay")) return err("Only Accounts or CEO can record payment", 403);
       if (c.status !== "Approved") return err("Certificate must be Approved first");
       if (!payment?.mode) return err("Payment mode required");
+      // Anti-duplication: a cheque number must never be reused. Check the whole
+      // payment register (and any live cert already paid by that cheque).
+      if (payment.mode === "Cheque") {
+        const chqNo = String(payment.ref || "").trim();
+        if (chqNo) {
+          const reg = await s.get("register", { type: "json" }) || [];
+          const dupR = reg.find((r) => r && r.mode === "Cheque" && r.no !== c.no && String(r.ref || "").trim().toLowerCase() === chqNo.toLowerCase());
+          if (dupR) return err(`Cheque no. ${chqNo} was already issued on payment ${dupR.no} (${dupR.date}, ${dupR.payee}). Enter a different cheque number.`, 409);
+        }
+      }
       const amount = num(payment.amount) || c.calc.payable;
       c.payment = {
         mode: payment.mode,
@@ -13965,9 +14001,15 @@ var api_default = async (req, context) => {
     const key = "cert/" + decodeURIComponent(prMatch[1]);
     const c = await s.get(key, { type: "json" });
     if (!c || !c.payment) return err("Not found", 404);
+    const wasPrinted = !!c.payment.printed;
+    // Once a cheque is printed it is locked; only the CEO may reprint (guards
+    // against a second cheque being produced for the same payment).
+    if (wasPrinted && c.payment.mode === "Cheque" && !can("admin")) return err("This cheque has already been printed. Only the CEO can reprint it.", 403);
     c.payment.printed = true;
     c.payment.printedAt = now();
     c.payment.printedBy = me.name;
+    c.payment.printCount = (c.payment.printCount || 0) + 1;
+    if (c.audit) c.audit.push({ at: now(), by: me.name, action: (wasPrinted ? "Cheque reprinted (CEO)" : "Cheque printed") + (c.payment.ref ? " — no. " + c.payment.ref : "") });
     await s.setJSON(key, c);
     if (c.payment.mode === "Cheque") {
       const psup = await s.get("supplier/" + c.supplierId, { type: "json" });
@@ -14081,6 +14123,11 @@ var api_default = async (req, context) => {
     const existing = code ? await s.get("asset/" + code, { type: "json" }) : null;
     if (!code) {
       const all = await listAssets();
+      // Anti-duplication: a serial number must be unique; without a serial,
+      // block an identical description + model in the same category.
+      const dn = (x) => String(x || "").trim().toLowerCase();
+      if (b.serial) { const dupA = all.find((a) => a.serial && dn(a.serial) === dn(b.serial)); if (dupA) return err(`An asset with serial no. ${b.serial} already exists (${dupA.code} — ${dupA.description}). Duplicate assets are not allowed.`, 409); }
+      else { const dupA = all.find((a) => a.cat === b.cat && dn(a.description) === dn(b.description) && dn(a.model) === dn(b.model)); if (dupA) return err(`An asset "${b.description}"${b.model ? " (" + b.model + ")" : ""} already exists (${dupA.code}). Add a serial number to distinguish them, or edit the existing record.`, 409); }
       let maxSeq = 0;
       for (const a of all) { const m = String(a.code || "").match(new RegExp("^MAG-" + b.cat + "-(\\d+)$")); if (m && +m[1] > maxSeq) maxSeq = +m[1]; }
       let seq = maxSeq + 1, guard = 0;
@@ -14175,6 +14222,12 @@ var api_default = async (req, context) => {
     if (!can("clients")) return err("No rights to manage clients", 403);
     const b = await req.json();
     if (!b.name) return err("Client legal name is required");
+    if (!b.id) {
+      const dcls = await getAllJSON(s, "client/");
+      const dn = (x) => String(x || "").trim().toLowerCase();
+      const hit = dcls.find((v) => dn(v.name) === dn(b.name) || (b.trn && v.trn && dn(v.trn) === dn(b.trn)));
+      if (hit) return err(`A client with the same ${dn(hit.name) === dn(b.name) ? `name "${b.name}"` : `TRN ${b.trn}`} already exists (${hit.id} — ${hit.name}). Open that record instead of creating a duplicate.`, 409);
+    }
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
     if (!id) { stg.clientSeq = (stg.clientSeq || 0) + 1; id = "C" + String(stg.clientSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
@@ -14212,6 +14265,12 @@ var api_default = async (req, context) => {
     if (!b.project) return err("Project name is required");
     const client = await s.get("client/" + b.clientId, { type: "json" });
     if (!client) return err("Client not found");
+    if (!b.id) {
+      const dks = await getAllJSON(s, "contract/");
+      const dn = (x) => String(x || "").trim().toLowerCase();
+      const hit = dks.find((v) => dn(v.project) === dn(b.project));
+      if (hit) return err(`A contract for project "${b.project}" already exists (${hit.id}). Open that contract to add certificates or variations instead of creating a duplicate.`, 409);
+    }
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
     if (!id) { stg.contractSeq = (stg.contractSeq || 0) + 1; id = "K" + String(stg.contractSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
@@ -14276,8 +14335,15 @@ var api_default = async (req, context) => {
     const contract = await s.get("contract/" + b.contractId, { type: "json" });
     if (!contract) return err("Contract not found");
     const client = await s.get("client/" + contract.clientId, { type: "json" });
+    const allCCdup = await getAllJSON(s, "clientcert/");
+    // Anti-duplication: block an identical client IPC (same contract, same
+    // period-to and same cumulative gross) that isn't cancelled — guards
+    // against accidental double issuance / double-clicks.
+    { const pt = String(b.periodTo || "").slice(0, 10), gc = num(b.grossCum);
+      const dupCC = allCCdup.find((v) => v && v.contractId === b.contractId && v.status !== "Cancelled" && String(v.periodTo || "").slice(0, 10) === pt && num(v.grossCum) === gc && (pt || gc));
+      if (dupCC) return err(`A client IPC for this contract with the same period and cumulative value already exists (${dupCC.no}, ${dupCC.status}). Duplicate issuance is not allowed.`, 409); }
     let maxSeq = 0;
-    { const { blobs } = await s.list({ prefix: "clientcert/" }); for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && ec.contractId === b.contractId && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; } }
+    for (const ec of allCCdup) { if (ec && ec.contractId === b.contractId && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; }
     const date = b.date || now().slice(0, 10);
     let seq = maxSeq + 1, key = clientCertKey(contract.id, seq), guard = 0;
     while (await s.get("clientcert/" + key) && guard++ < 200) { seq++; key = clientCertKey(contract.id, seq); }

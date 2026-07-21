@@ -538,7 +538,14 @@ async function openCert(no){
   if(c.status==="Approved" && ["Accounts","CEO"].includes(ME.role)) acts.push(["pay","Record payment","btn gold"]);
   if(c.status!=="Paid" && c.status!=="Cancelled" && ME.role==="CEO") acts.push(["cancel","Cancel","btn ghost"]);
   const pm = c.payment ? c.payment.mode : "";
-  const chequeBtn = pm==="Cheque" ? `<button class="btn gold" id="chqBtn">Print cheque</button>` : "";
+  const chqPrinted = !!(c.payment && c.payment.printed);
+  const chequeBtn = pm==="Cheque"
+    ? (chqPrinted
+        ? (ME.role==="CEO"
+            ? `<button class="btn gold" id="chqBtn">Reprint cheque 🔒 (CEO)</button>`
+            : `<button class="btn" id="chqBtn" disabled title="Cheque already printed${c.payment.printedAt?" on "+dmy(c.payment.printedAt):""} — only the CEO can reprint" style="opacity:.5;cursor:not-allowed">Cheque printed ✓</button>`)
+        : `<button class="btn gold" id="chqBtn">Print cheque</button>`)
+    : "";
   const cashBtn = pm==="Cash" ? `<button class="btn gold" id="pcvBtn">Petty cash voucher</button>` : "";
   const rvBtn = c.payment ? `<button class="btn ghost" id="rvBtn">Receipt voucher</button>` : "";
   const canPay=["Accounts","CEO"].includes(ME.role);
@@ -591,7 +598,14 @@ async function openCert(no){
   bindAttach(c);
   bindReceipt(c);
   $("#printBtn").onclick=()=>printCert(c);
-  if(chequeBtn) $("#chqBtn").onclick=()=>printCheque(c);
+  if($("#chqBtn") && !$("#chqBtn").disabled) $("#chqBtn").onclick=()=>{
+    if(chqPrinted && ME.role==="CEO"){
+      ceoUnlock(async ()=>{ printCheque(c); try{ await api("cert/"+encodeURIComponent(c.no)+"/printed",{method:"POST"}); }catch(e){} toast("Cheque reprinted — logged"); });
+      return;
+    }
+    printCheque(c);
+    setTimeout(async ()=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/printed",{method:"POST"}); await load(); openCert(c.no); }catch(e){} }, 800);
+  };
   if(cashBtn) $("#pcvBtn").onclick=()=>printPettyCash(c);
   if(rvBtn) $("#rvBtn").onclick=()=>printReceiptVoucher(c);
   if(pm==="Bank Transfer"){
@@ -1206,7 +1220,7 @@ function vCheques(){
   const rows=cheques.map(c=>{ const r=regByNo[c.no]||{};
     return `<tr><td><b>${esc(c.no)}</b></td><td>${esc(r.ref||"—")}</td><td>${dmy(r.date)}</td><td>${esc(c.supplier)}</td>
       <td>${esc(r.bank||"—")}</td><td class="num">${fmt(c.payable)}</td>
-      <td>${canPrint?`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Print</button>`:"—"}</td></tr>`; }).join("");
+      <td>${!canPrint?"—":(c.chequePrinted?(ME.role==="CEO"?`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Reprint 🔒</button>`:`<span class="muted" title="Only the CEO can reprint">printed ✓</span>`):`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Print</button>`)}</td></tr>`; }).join("");
   const approvedNoPay=CERTS.filter(c=>c.status==="Approved").length;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Cheque Register</h2>
      <span class="muted">All cheque payments. Print or reprint any cheque here.</span>
@@ -1226,8 +1240,10 @@ function vCheques(){
 async function reprintCheque(no){
   let c; try{ c=await api("cert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
   if(!c.payment){ toast("No payment recorded"); return; }
-  printCheque(c);
-  try{ await api("cert/"+encodeURIComponent(no)+"/printed",{method:"POST"}); }catch(e){}
+  const already=!!c.payment.printed;
+  if(already && ME.role!=="CEO"){ toast("Cheque already printed — only the CEO can reprint"); return; }
+  const go=async ()=>{ printCheque(c); try{ await api("cert/"+encodeURIComponent(no)+"/printed",{method:"POST"}); }catch(e){ toast(e.message); } if(VIEW==="cheques"){ await load(); render(); } };
+  if(already && ME.role==="CEO"){ ceoUnlock(go); } else { go(); }
 }
 
 /* ---------- payment register ---------- */
