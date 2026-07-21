@@ -340,8 +340,8 @@ async function vDash(){
   const live=CERTS.filter(c=>c.status!=="Cancelled");
   const sum=f=>live.reduce((a,c)=>a+(f(c)||0),0);
   let ccerts=[],contracts=[],pnl=null,assets=null;
-  const [r1,r2,r3,r4]=await Promise.all([api("clientcerts").catch(()=>[]),api("contracts").catch(()=>[]),api("pnl").catch(()=>null),api("assets").catch(()=>null)]);
-  ccerts=r1||[]; contracts=r2||[]; pnl=r3; assets=r4;
+  const [d1,d2,d3,d4]=await Promise.all([api("clientcerts").catch(()=>[]),api("contracts").catch(()=>[]),api("pnl").catch(()=>null),api("assets").catch(()=>null)]);
+  ccerts=d1||[]; contracts=d2||[]; pnl=d3; assets=d4;
   const paidSup=(REG||[]).reduce((a,r)=>a+(+r.amount||0),0);
   const certifiedInclVat=sum(c=>c.payable);
   const dueSup=live.filter(c=>c.status==="Approved").reduce((a,c)=>a+(c.payable||0),0);
