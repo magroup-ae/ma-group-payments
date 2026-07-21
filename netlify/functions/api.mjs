@@ -14582,6 +14582,15 @@ var api_default = async (req, context) => {
         await s.setJSON("contract/" + id, contract);
         await s.setJSON("settings", stg);
       }
+      // Register the project into the Settings registry (single source of truth)
+      // so an imported project also appears in every page's dropdown.
+      { const st2 = await s.get("settings", { type: "json" });
+        if (!Array.isArray(st2.projects)) st2.projects = [];
+        if (!st2.projects.some((p) => p && String(p.name || "").trim().toLowerCase() === String(fields.project).trim().toLowerCase())) {
+          st2.projects.push({ code: fields.projShort || String(fields.project).replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3), name: fields.project });
+          await s.setJSON("settings", st2);
+        }
+      }
       // certs: create only if provided AND the contract has none (avoid duplicates on re-run)
       let created = 0;
       const provided = P.certs || [];

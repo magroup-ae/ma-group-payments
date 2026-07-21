@@ -1733,7 +1733,9 @@ async function expenseForm(x, presetProject){
   const isNew=!x; x=x||{status:"Pending",date:new Date().toISOString().slice(0,10)};
   if(isNew&&presetProject) x.project=presetProject;
   const linked=x.source==="supplier-ipc";
-  const projList=[...new Set([...(COSTMETA.projects||[]), x.project].filter(Boolean))].sort();
+  // Single source of truth: the Settings → Projects registry (S.projects).
+  // Keep the current line's project even if it is a legacy/removed name.
+  const projList=[...new Set([...S.projects.map(p=>p.name), x.project].filter(Boolean))].sort();
   const opt=(arr,sel)=>arr.map(v=>`<option ${v===sel?"selected":""}>${esc(v)}</option>`).join("");
   const projOpts=`<option value="">— select project —</option>`+projList.map(p=>`<option ${p===x.project?"selected":""}>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><h2>${isNew?"Add expense":"Edit expense"}</h2>
@@ -2155,7 +2157,7 @@ function vSettings(){
   const renderMerge=()=>{ const ml=$("#mgList"); if(!ml) return;
     ml.innerHTML=S.projects.map((p,i)=>`<label style="display:inline-flex;align-items:center;gap:6px;margin:3px 14px 3px 0"><input type="checkbox" class="mgChk" value="${esc(p.name)}" data-code="${esc(p.code||"")}"> <b>${esc(p.code||"")}</b> ${esc(p.name)}${p.fixed?' <span class="muted" style="font-size:10px">(fixed)</span>':""}</label>`).join("");
     ml.querySelectorAll(".mgChk").forEach(c=>c.onchange=()=>{ const checked=[...ml.querySelectorAll(".mgChk:checked")]; if(checked.length && !$("#mgName").value){ $("#mgName").value=checked[0].value; $("#mgCode").value=checked[0].dataset.code||""; } }); };
-  const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; renderLists(); renderMerge(); toast("Saved"); }catch(e){ toast(e.message); } };
+  const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; COSTMETA=null; renderLists(); renderMerge(); toast("Saved — available on all pages"); }catch(e){ toast(e.message); } };
   renderLists();
   if(admin){ api("usage").then(u=>{ const b=$("#usageBox"); if(!b) return;
     b.innerHTML=`<div class="kpis"><div class="kpi"><div class="v">${u.certs}</div><div class="l">Certificates</div></div>
