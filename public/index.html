@@ -348,7 +348,9 @@ async function vDash(){
   const retentionHeld=sum(c=>c.retention);
   const rcPend=live.filter(c=>c.status==="Paid"&&!c.receiptDone);
   const pendCheck=live.filter(c=>["Certified","Checked"].includes(c.status)).length;
-  const revenue=pnl?num(pnl.revenue):0, netDue=pnl?num(pnl.netDue):0, cost=pnl?num(pnl.cost):0, gp=pnl?num(pnl.grossProfit):0, margin=pnl?num(pnl.margin):0;
+  const revenue=pnl?num(pnl.revenue):0, netDue=pnl?num(pnl.netDue):0, cost=pnl?num(pnl.cost):0;
+  const gp=pnl?num(pnl.netProfit!=null?pnl.netProfit:pnl.grossProfit):0, margin=pnl?num(pnl.netMargin!=null?pnl.netMargin:pnl.margin):0;
+  const grossP=pnl?num(pnl.grossProfit):0;
   const contractValue=contracts.reduce((a,c)=>a+(+c.contractSum||0)+(+c.variations||0),0);
   const contractProj={}; contracts.forEach(c=>contractProj[c.id]=c.project);
   const maxg={}; ccerts.forEach(c=>{ if(!["Issued","Approved"].includes(c.status))return; const g=+c.gross||0; if(g>(maxg[c.contractId]||0)) maxg[c.contractId]=g; });
@@ -401,8 +403,8 @@ async function vDash(){
    <div class="kpigrp">Profitability · Assets</div>
    <div class="kpis">
      ${kpi("AED "+fmt(cost),(pnl&&num(pnl.hqCost)>0)?`Total cost — projects ${fmt(num(pnl.projectCost))} + HQ ${fmt(num(pnl.hqCost))}`:"Total cost incurred")}
-     ${kpi(`<span style="color:${gpc}">AED ${fmt(gp)}</span>`,"Gross profit",gp>=0?"good":"alert")}
-     ${kpi(`<span style="color:${gpc}">${fmt(margin*100)}%</span>`,"Gross margin",gp>=0?"good":"alert")}
+     ${kpi(`<span style="color:${gpc}">AED ${fmt(gp)}</span>`,`Net profit — after all costs (${fmt(margin*100)}%)`,gp>=0?"good":"alert")}
+     ${kpi("AED "+fmt(grossP),"Gross profit — after direct cost")}
      ${kpi("AED "+fmt(assetVal),assetCnt+" assets · net value","","kpiAssets")}
    </div>
    ${(rcPend.length||pendCheck)?`<div class="kpis" style="margin-top:12px">${rcPend.length?kpi(`<span style="color:var(--red)">${rcPend.length}</span>`,"Receipts pending","alert"):""}${pendCheck?kpi(pendCheck,"Awaiting check / approval"):""}</div>`:""}
@@ -1883,9 +1885,10 @@ async function vPnl(){
 let PNL=null;
 function renderPnl(d){
   PNL=d;
-  const g=d.byGroup||{}, direct=num(g.Direct), indirect=num(g.Indirect), overhead=num(g.Overhead);
-  const marginPct=(d.margin*100);
-  const mColor=d.grossProfit>=0?"var(--green)":"var(--red)";
+  const direct=num(d.directCost), indirect=num(d.indirectCost), overhead=num(d.overheadCost);
+  const nColor=num(d.netProfit)>=0?"var(--green)":"var(--red)";
+  const gColor=num(d.grossProfit)>=0?"var(--green)":"var(--red)";
+  const pctv=v=>d.revenue?fmt(v/d.revenue*100)+"%":"—";
   const typeRows=Object.entries(d.byType||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td><td class="num">${d.cost?fmt(v/d.cost*100)+"%":"—"}</td></tr>`).join("")||`<tr><td colspan="3" class="muted">No costs logged yet.</td></tr>`;
   const catRows=Object.entries(d.byCat||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td></tr>`).join("");
   const projRows=Object.entries(d.byProject||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td></tr>`).join("");
@@ -1894,22 +1897,48 @@ function renderPnl(d){
    <div class="kpis">
      <div class="kpi"><div class="v">AED ${fmt(d.revenue)}</div><div class="l">Revenue certified (ex-VAT)</div></div>
      <div class="kpi"><div class="v">AED ${fmt(d.cost)}</div><div class="l">Total cost incurred</div></div>
-     <div class="kpi" style="border-top-color:${mColor}"><div class="v" style="color:${mColor}">AED ${fmt(d.grossProfit)}</div><div class="l">Gross profit</div></div>
-     <div class="kpi" style="border-top-color:${mColor}"><div class="v" style="color:${mColor}">${fmt(marginPct)}%</div><div class="l">Gross margin</div></div>
+     <div class="kpi" style="border-top-color:${gColor}"><div class="v" style="color:${gColor}">AED ${fmt(d.grossProfit)}</div><div class="l">Gross profit (${pctv(d.grossProfit)})</div></div>
+     <div class="kpi" style="border-top-color:${nColor}"><div class="v" style="color:${nColor}">AED ${fmt(d.netProfit)}</div><div class="l">Net profit (${pctv(d.netProfit)})</div></div>
      <div class="kpi"><div class="v">AED ${fmt(d.paidOut)}</div><div class="l">Cash paid out</div></div>
    </div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
-     <div class="card" style="margin:0"><h3>P&amp;L summary</h3>
-       <table><tr><td class="lab">Revenue certified (ex-VAT)</td><td class="num"><b>${fmt(d.revenue)}</b></td></tr>
-        <tr><td class="lab">Less: Direct costs</td><td class="num">(${fmt(direct)})</td></tr>
-        <tr><td class="lab">Less: Indirect costs</td><td class="num">(${fmt(indirect)})</td></tr>
-        <tr><td class="lab">Less: Overheads</td><td class="num">(${fmt(overhead)})</td></tr>
-        <tr style="background:#eef2f8;font-weight:700"><td>Gross Profit</td><td class="num" style="color:${mColor}">${fmt(d.grossProfit)}</td></tr>
-        <tr><td class="lab">Gross Margin %</td><td class="num">${fmt(marginPct)}%</td></tr>
-        <tr><td class="lab">Net amount still due from client</td><td class="num">${fmt(d.netDue)}</td></tr>
-        <tr><td class="lab">Cash paid to suppliers</td><td class="num">${fmt(d.paidOut)}</td></tr></table></div>
+     <div class="card" style="margin:0"><h3>Income statement</h3>
+       <table>
+        <tr><td class="lab">Revenue — work certified (ex-VAT)</td><td class="num"><b>${fmt(d.revenue)}</b></td></tr>
+        <tr><td class="lab">Less: Direct costs (materials, labour, subcontract, plant)</td><td class="num">(${fmt(direct)})</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>GROSS PROFIT</td><td class="num" style="color:${gColor}">${fmt(d.grossProfit)} · ${pctv(d.grossProfit)}</td></tr>
+        <tr><td class="lab">Less: Indirect costs (site staff, prof. fees)</td><td class="num">(${fmt(indirect)})</td></tr>
+        <tr style="background:#f3f6fb;font-weight:600"><td>OPERATING PROFIT</td><td class="num">${fmt(d.operatingProfit)} · ${pctv(d.operatingProfit)}</td></tr>
+        <tr><td class="lab">Less: Overheads${d.hqCost?" (incl. MA HQ "+fmt(d.hqCost)+")":""}</td><td class="num">(${fmt(overhead)})</td></tr>
+        <tr style="background:#e7efe9;font-weight:800"><td>NET PROFIT</td><td class="num" style="color:${nColor}">${fmt(d.netProfit)} · ${pctv(d.netProfit)}</td></tr>
+       </table>
+       <div class="muted" style="font-size:11px;margin-top:6px">Revenue is the value of work certified to the client (ex-VAT), recognised as work progresses. Down payments/advances are <b>not</b> revenue — they are shown in the cash position →.</div></div>
+     <div class="card" style="margin:0"><h3>Client billing &amp; cash position</h3>
+       <table>
+        <tr><td class="lab">Revenue certified (ex-VAT)</td><td class="num">${fmt(d.revenue)}</td></tr>
+        <tr><td class="lab">Add: VAT @ 5%</td><td class="num">${fmt(d.vatDue)}</td></tr>
+        <tr style="font-weight:600"><td>Gross billed to client (incl. VAT)</td><td class="num">${fmt(d.grossBilledInclVat)}</td></tr>
+        <tr><td class="lab">Less: Retention held by client</td><td class="num">(${fmt(d.retentionHeld)})</td></tr>
+        <tr><td class="lab">Less: Advance recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>Net due from client (this position)</td><td class="num">${fmt(d.netDue)}</td></tr>
+        <tr><td colspan="2" style="height:6px;border:0"></td></tr>
+        <tr><td class="lab">Advance / down payment agreed</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>
+        <tr><td class="lab">Less: recovered to date</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
+        <tr style="font-weight:600"><td>Advance outstanding (liability)</td><td class="num">${fmt(d.advanceOutstanding)}</td></tr>
+        <tr><td colspan="2" style="height:6px;border:0"></td></tr>
+        <tr><td class="lab">Cash paid to suppliers</td><td class="num">${fmt(d.paidOut)}</td></tr>
+       </table>
+       <div class="muted" style="font-size:11px;margin-top:6px">Retention is released 5% on completion, 5% after the 12-month DLP. Advance is a liability recovered against certificates — not income.</div></div>
+   </div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
      <div class="card" style="margin:0"><h3>Cost by type</h3>
        <table><tr><th>Cost Type</th><th class="num">AED</th><th class="num">%</th></tr>${typeRows}</table></div>
+     <div class="card" style="margin:0"><h3>Cost by group</h3>
+       <table><tr><th>Group</th><th class="num">AED</th><th class="num">% of revenue</th></tr>
+        <tr><td>Direct</td><td class="num">${fmt(direct)}</td><td class="num">${pctv(direct)}</td></tr>
+        <tr><td>Indirect</td><td class="num">${fmt(indirect)}</td><td class="num">${pctv(indirect)}</td></tr>
+        <tr><td>Overhead</td><td class="num">${fmt(overhead)}</td><td class="num">${pctv(overhead)}</td></tr>
+        <tr style="font-weight:700"><td>Total cost</td><td class="num">${fmt(d.cost)}</td><td class="num">${pctv(d.cost)}</td></tr></table></div>
    </div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
      <div class="card" style="margin:0"><h3>Cost by category / trade</h3><table><tr><th>Category</th><th class="num">AED</th></tr>${catRows||`<tr><td class="muted">—</td><td></td></tr>`}</table></div>
@@ -1917,7 +1946,7 @@ function renderPnl(d){
        <table><tr><th>${d.project?"Date":"Project"}</th><th class="num">${d.project?"Cost":"Cost"}</th>${d.project?'<th class="num">Paid</th>':""}</tr>
        ${d.project?(d.byDate||[]).slice(-30).reverse().map(x=>`<tr><td>${dmy(x.date)}</td><td class="num">${fmt(x.cost)}</td><td class="num">${fmt(x.paid)}</td></tr>`).join(""):projRows}</table></div>
    </div>`;
-  $("#pCsv").onclick=()=>{ const rows=[["Metric","AED"],["Project",d.scope],["Revenue certified",d.revenue],["Direct",direct],["Indirect",indirect],["Overhead",overhead],["Total cost",d.cost],["Gross profit",d.grossProfit],["Gross margin %",fmt(marginPct)],["Cash paid out",d.paidOut],["Net due from client",d.netDue],[],["Cost Type","AED"]].concat(Object.entries(d.byType||{}).map(([k,v])=>[k,v]));
+  $("#pCsv").onclick=()=>{ const rows=[["Metric","AED"],["Project",d.scope],["Revenue certified (ex-VAT)",d.revenue],["Direct costs",direct],["GROSS PROFIT",d.grossProfit],["Gross margin %",fmt(d.grossMargin*100)],["Indirect costs",indirect],["OPERATING PROFIT",d.operatingProfit],["Overheads",overhead],["NET PROFIT",d.netProfit],["Net margin %",fmt(d.netMargin*100)],["Total cost",d.cost],[],["VAT @5%",d.vatDue],["Gross billed incl VAT",d.grossBilledInclVat],["Retention held",d.retentionHeld],["Advance agreed",d.advanceAgreed],["Advance recovered",d.advanceRecovered],["Advance outstanding",d.advanceOutstanding],["Net due from client",d.netDue],["Cash paid to suppliers",d.paidOut],[],["Cost Type","AED"]].concat(Object.entries(d.byType||{}).map(([k,v])=>[k,v]));
     const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
     const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_PnL_"+(d.project||"all")+".csv"; a.click(); };
 }

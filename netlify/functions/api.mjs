@@ -13452,24 +13452,55 @@ async function computePnl(s, project) {
   const [contracts, allCC] = await Promise.all([listContracts(), getAllJSON(s, "clientcert/")]);
   const projContracts = contracts.filter((c) => !project || c.project === project);
   const cids = new Set(projContracts.map((c) => c.id));
-  const maxGross = {}, netCertified = {};
+  // Per-contract LATEST cumulative position (taken at the highest-gross IPC),
+  // plus cumulative billing (net + VAT) summed across that contract's IPCs.
+  const maxGross = {}, latestRetention = {}, latestAdvRec = {};
+  const netCertified = {}, vatBilled = {};
   for (const c of allCC) {
     if (!c || !cids.has(c.contractId)) continue;
     if (!["Issued", "Approved"].includes(c.status)) continue;
     const g = num(c.calc?.gross);
-    if (g > (maxGross[c.contractId] || 0)) maxGross[c.contractId] = g;
+    if (g >= (maxGross[c.contractId] || 0)) {
+      maxGross[c.contractId] = g;
+      latestRetention[c.contractId] = num(c.calc?.retention);
+      latestAdvRec[c.contractId] = num(c.calc?.advanceRecoveredToDate || c.calc?.advanceRecovery);
+    }
     netCertified[c.contractId] = (netCertified[c.contractId] || 0) + num(c.calc?.net);
+    vatBilled[c.contractId] = (vatBilled[c.contractId] || 0) + num(c.calc?.vat);
   }
-  let revenue = 0, netDue = 0;
+  let revenue = 0, netDue = 0, retentionHeld = 0, advanceRecovered = 0, vatDue = 0;
   for (const cid in maxGross) revenue += maxGross[cid];
   for (const cid in netCertified) netDue += netCertified[cid];
+  for (const cid in latestRetention) retentionHeld += latestRetention[cid];
+  for (const cid in latestAdvRec) advanceRecovered += latestAdvRec[cid];
+  for (const cid in vatBilled) vatDue += vatBilled[cid];
+  // Advance (down payment) agreed on the contracts in scope.
+  let advanceAgreed = 0;
+  for (const c of projContracts) advanceAgreed += num(c.advanceAmount);
   revenue = r2(revenue);
-  const grossProfit = r2(revenue - cost);
-  const margin = revenue ? grossProfit / revenue : 0;
+  // ---- CFO income-statement waterfall ----
+  const directCost = r2(byGroup.Direct || 0);
+  const indirectCost = r2(byGroup.Indirect || 0);
+  const overheadCost = r2(byGroup.Overhead || 0);
+  const grossProfit = r2(revenue - directCost);                 // after direct cost only
+  const operatingProfit = r2(grossProfit - indirectCost);       // after indirect
+  const netProfit = r2(operatingProfit - overheadCost);         // after overhead (incl. HQ)
+  const grossMargin = revenue ? grossProfit / revenue : 0;
+  const operatingMargin = revenue ? operatingProfit / revenue : 0;
+  const netMargin = revenue ? netProfit / revenue : 0;
   return {
     project: project || "", scope: project || "All projects",
     revenue, netDue: r2(netDue), cost: r2(cost), paidOut: r2(paidOut), hqCost: r2(hqCost), projectCost: r2(cost - hqCost),
-    grossProfit, margin, byType, byCat, byGroup, byProject,
+    directCost, indirectCost, overheadCost,
+    grossProfit, operatingProfit, netProfit,
+    grossMargin, operatingMargin, netMargin,
+    // profit / margin retained for existing callers = the bottom line (net)
+    profit: netProfit, margin: netMargin,
+    // client billing & cash position (advance is a liability, NOT revenue)
+    retentionHeld: r2(retentionHeld), advanceRecovered: r2(advanceRecovered),
+    advanceAgreed: r2(advanceAgreed), advanceOutstanding: r2(Math.max(0, advanceAgreed - advanceRecovered)),
+    vatDue: r2(vatDue), grossBilledInclVat: r2(netDue + vatDue),
+    byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
     expenses: expenses.slice(0, 800)
