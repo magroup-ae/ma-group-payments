@@ -13075,6 +13075,15 @@ async function getAllJSON(s, prefix) {
   }
   return out;
 }
+// Collision-safe sequential ID: bump the counter, then verify the record slot
+// is actually free (strong-consistency read) and keep bumping until it is.
+// Protects against two staff creating the same record type simultaneously.
+async function nextId(s, stg, seqKey, idPrefix, storePrefix, pad) {
+  let n = num(stg[seqKey]) || 0, id, guard = 0;
+  do { n++; id = idPrefix + String(n).padStart(pad, "0"); } while ((await s.get(storePrefix + id)) && guard++ < 1000);
+  stg[seqKey] = n;
+  return id;
+}
 async function listSuppliers() {
   const out = await getAllJSON(store(), "supplier/");
   out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -13397,8 +13406,7 @@ async function ensureSupplierStub(s, name) {
   const hit = sups.find((v) => String(v.name || "").trim().toLowerCase() === name.toLowerCase());
   if (hit) return hit.id;
   const st = await s.get("settings", { type: "json" });
-  st.supplierSeq = (st.supplierSeq || 0) + 1;
-  const id = "S" + String(st.supplierSeq).padStart(3, "0");
+  const id = await nextId(s, st, "supplierSeq", "S", "supplier/", 3);
   const ent = st.entities && st.entities[0] && st.entities[0].short || "Marvellous Art";
   await s.setJSON("settings", st);
   await s.setJSON("supplier/" + id, {
@@ -13852,8 +13860,7 @@ var api_default = async (req, context) => {
     const st = await s.get("settings", { type: "json" });
     let id = b.id;
     if (!id) {
-      st.supplierSeq = (st.supplierSeq || 0) + 1;
-      id = "S" + String(st.supplierSeq).padStart(3, "0");
+      id = await nextId(s, st, "supplierSeq", "S", "supplier/", 3);
       await s.setJSON("settings", st);
     }
     const existing = b.id ? await s.get("supplier/" + b.id, { type: "json" }) : null;
@@ -14387,7 +14394,7 @@ var api_default = async (req, context) => {
     }
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
-    if (!id) { stg.clientSeq = (stg.clientSeq || 0) + 1; id = "C" + String(stg.clientSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
+    if (!id) { id = await nextId(s, stg, "clientSeq", "C", "client/", 3); await s.setJSON("settings", stg); }
     const ex = b.id ? await s.get("client/" + b.id, { type: "json" }) : null;
     const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
     const cl = {
@@ -14430,7 +14437,7 @@ var api_default = async (req, context) => {
     }
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
-    if (!id) { stg.contractSeq = (stg.contractSeq || 0) + 1; id = "K" + String(stg.contractSeq).padStart(3, "0"); await s.setJSON("settings", stg); }
+    if (!id) { id = await nextId(s, stg, "contractSeq", "K", "contract/", 3); await s.setJSON("settings", stg); }
     const ex = b.id ? await s.get("contract/" + b.id, { type: "json" }) : null;
     const str = (k) => b[k] === void 0 ? ex?.[k] || "" : b[k] || "";
     const contractSum = b.contractSum === void 0 ? num(ex?.contractSum) : num(b.contractSum);
@@ -14502,7 +14509,7 @@ var api_default = async (req, context) => {
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
     const ex = id ? await s.get("clientreceipt/" + id, { type: "json" }) : null;
-    if (!id) { stg.clientReceiptSeq = (stg.clientReceiptSeq || 0) + 1; id = "CR" + String(stg.clientReceiptSeq).padStart(4, "0"); await s.setJSON("settings", stg); }
+    if (!id) { id = await nextId(s, stg, "clientReceiptSeq", "CR", "clientreceipt/", 4); await s.setJSON("settings", stg); }
     const rec = {
       id, seq: ex?.seq || (Number(String(id).replace(/\D/g, "")) || 0),
       contractId: b.contractId || ex?.contractId || "", clientId: (contract && contract.clientId) || ex?.clientId || "",
@@ -14665,8 +14672,7 @@ var api_default = async (req, context) => {
         await s.setJSON("client/" + client.id, cur); client = cur;
       } else {
         const stg = await s.get("settings", { type: "json" });
-        stg.clientSeq = (stg.clientSeq || 0) + 1;
-        const id = "C" + String(stg.clientSeq).padStart(3, "0");
+        const id = await nextId(s, stg, "clientSeq", "C", "client/", 3);
         client = {
           id, type: "Client", name: cb.name || "Client", tradeName: cb.tradeName || "", trn: cb.trn || "",
           address: cb.address || "", poBox: cb.poBox || "", emirate: cb.emirate || "",
@@ -14698,8 +14704,7 @@ var api_default = async (req, context) => {
         await s.setJSON("contract/" + contract.id, cur); contract = cur;
       } else {
         const stg = await s.get("settings", { type: "json" });
-        stg.contractSeq = (stg.contractSeq || 0) + 1;
-        const id = "K" + String(stg.contractSeq).padStart(3, "0");
+        const id = await nextId(s, stg, "contractSeq", "K", "contract/", 3);
         contract = { id, ...fields, notes: kb.notes || "", createdAt: now(), createdBy: me.name, updatedAt: now() };
         await s.setJSON("contract/" + id, contract);
         await s.setJSON("settings", stg);
@@ -14816,7 +14821,7 @@ var api_default = async (req, context) => {
     const stg = await s.get("settings", { type: "json" });
     let id = b.id;
     const ex = id ? await s.get("expense/" + id, { type: "json" }) : null;
-    if (!id) { stg.expenseSeq = (stg.expenseSeq || 0) + 1; id = "X" + String(stg.expenseSeq).padStart(5, "0"); await s.setJSON("settings", stg); }
+    if (!id) { id = await nextId(s, stg, "expenseSeq", "X", "expense/", 5); await s.setJSON("settings", stg); }
     if (ex && ex.source === "supplier-ipc" && b.__fromForm) {
       // allow editing the classification of an auto-posted line, keep the link/amounts
     }
@@ -14932,6 +14937,18 @@ var api_default = async (req, context) => {
   if (path === "wip" && req.method === "GET") {
     if (!can("pnl")) return err("No rights", 403);
     return json(await computeWip(s));
+  }
+  if (path === "backup" && req.method === "GET") {
+    if (!can("admin")) return err("CEO only", 403);
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/"];
+    const data = {};
+    for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
+    data.settings = await s.get("settings", { type: "json" });
+    data.register = await s.get("register", { type: "json" }) || [];
+    const us = await s.get("users", { type: "json" }) || [];
+    data.users = us.map((u) => ({ id: u.id, name: u.name, role: u.role })); // never export PIN hashes
+    const counts = {}; for (const k in data) counts[k] = Array.isArray(data[k]) ? data[k].length : 1;
+    return json({ generatedAt: now(), version: 1, counts, data });
   }
   if (path === "budget" && req.method === "GET") {
     if (!can("budget")) return err("No rights", 403);

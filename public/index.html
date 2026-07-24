@@ -2258,6 +2258,9 @@ function vSettings(){
      ${USERS.map(u=>`<tr><td>${esc(u.name)}</td><td>${u.role}</td><td><a href="#" data-reset="${u.id}">reset PIN</a></td></tr>`).join("")}</table>
      <div class="muted" style="margin-top:6px">Default PINs — CEO 1234, QS 1111, PM 2222, Accounts 3333, Secretary 4444. Change after first login. The Secretary can register & manage suppliers only.</div>`:""}
    </div>
+   ${admin?`<div class="card"><h2>Backup &amp; data</h2>
+     <div class="muted" style="margin-bottom:8px">Your data lives in Netlify's cloud (replicated &amp; durable). Download a full backup regularly — keep a copy off-system. This exports every record as one JSON file (no PINs).</div>
+     <button class="btn gold" id="dlBackup">⬇ Download full backup (JSON)</button></div>`:""}
    ${admin?`<div class="card"><h2>Storage &amp; usage</h2><div id="usageBox" class="muted">Loading…</div></div>`:""}
    ${admin?emailCard():""}
    ${admin?signatureCard():""}
@@ -2298,6 +2301,7 @@ function vSettings(){
       if(!confirm(`Merge ${from.length} project name(s) into "${to}"?\n\nAll contracts, IPCs, expenses and budgets under:\n• ${from.join("\n• ")}\n\n…will move to "${to}". This cannot be undone automatically.`)) return;
       ceoUnlock(async ()=>{ try{ const r=await api("project/merge",{method:"POST",body:{from,to,toCode}}); toast(`Merged → ${to}: ${r.counts.contracts} contracts, ${r.counts.supplierCerts} supplier IPCs, ${r.counts.expenses} expenses`); COSTMETA=null; await load(); vSettings(); }catch(e){ toast(e.message); } }); };
     $("#nbAdd").onclick=async ()=>{ const b=$("#nbName").value.trim(); if(!b) return; S.banks.push(b); await saveS(); };
+    if($("#dlBackup")) $("#dlBackup").onclick=async ()=>{ toast("Preparing backup…"); try{ const bk=await api("backup"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(bk,null,2)],{type:"application/json"})); a.download="MA_Group_Finance_backup_"+new Date().toISOString().slice(0,10)+".json"; a.click(); toast("Backup downloaded"); }catch(e){ toast(e.message); } };
     document.querySelectorAll("[data-reset]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const pin=prompt("New PIN (4-8 digits):"); if(!pin) return; const u=USERS.find(x=>x.id===a.dataset.reset);
       try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,pin}}); toast("PIN reset"); }catch(x){ toast(x.message); } });
     bindChequeLayout(saveS);
