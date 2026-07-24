@@ -13018,7 +13018,7 @@ var DEFAULT_SETTINGS = {
   seq: 0,
   supplierSeq: 0
 };
-var ROLES = ["CEO", "QS", "PM", "Accounts", "Secretary"];
+var ROLES = ["CEO", "QS", "PM", "Accounts", "Secretary", "Clerk"];
 var DEFAULT_USERS = [
   { id: "ceo", name: "Mohammed Abuassba", role: "CEO", salt: "", pinHash: "" },
   { id: "qs", name: "QS / Site Engineer", role: "QS", salt: "", pinHash: "" },
@@ -13063,6 +13063,24 @@ async function ensureInit() {
     sec.mustChangePin = true;
     users.push(sec);
     await s.setJSON("users", users);
+  }
+  // One-time: provision the MA Group staff accounts per the CEO's list.
+  if (!settings.staffV1) {
+    const staff = [
+      { id: "ceo", name: "Eng. Mohammed Abuassba", role: "CEO", pin: null },
+      { id: "osama", name: "Mr. Osama", role: "Accounts", pin: "3333" },
+      { id: "sinan", name: "Sinan", role: "Clerk", pin: "5555" },
+      { id: "jesse", name: "Jesse", role: "Secretary", pin: "4444" }
+    ];
+    for (const st of staff) {
+      let u = users.find((x) => x.id === st.id);
+      if (!u) { u = { id: st.id, salt: randomBytes(8).toString("hex"), pinHash: "" }; users.push(u); }
+      u.name = st.name; u.role = st.role;
+      if (st.pin && !u.pinHash) { u.pinHash = hashPin(st.pin, u.salt); u.mustChangePin = true; }
+    }
+    await s.setJSON("users", users);
+    settings.staffV1 = true;
+    await s.setJSON("settings", settings);
   }
   return { settings, users };
 }
@@ -13169,19 +13187,22 @@ var CAN = {
   pay: ["Accounts", "CEO"],
   cancel: ["CEO"],
   admin: ["CEO"],
-  suppliers: ["QS", "PM", "CEO", "Secretary"],
-  assets: ["CEO", "PM", "Secretary", "QS"],
+  suppliers: ["QS", "PM", "CEO", "Secretary", "Clerk"],
+  assets: ["CEO", "PM", "Secretary", "QS", "Clerk"],
   assetsDelete: ["CEO"],
-  clients: ["CEO", "PM", "QS", "Secretary"],
+  clients: ["CEO", "PM", "QS", "Secretary", "Clerk"],
   contracts: ["CEO", "PM", "QS"],
   clientcert: ["CEO", "PM", "QS"],
   clientcertIssue: ["CEO", "PM"],
-  expense: ["CEO", "PM", "QS", "Accounts", "Secretary"],
+  expense: ["CEO", "PM", "QS", "Accounts", "Secretary", "Clerk"],
   expenseDelete: ["CEO", "PM"],
-  pnl: ["CEO", "PM", "QS", "Accounts"],
-  budget: ["CEO", "PM", "QS", "Accounts"],
+  pnl: ["CEO", "PM", "QS", "Accounts", "Clerk"],
+  budget: ["CEO", "PM", "QS", "Accounts", "Clerk"],
   budgetEdit: ["CEO", "PM", "QS"]
 };
+// Clerk = data-entry + view only: can add expenses, suppliers, clients, assets
+// and view P&L/budget, but CANNOT approve, record payments/print cheques,
+// create/edit certificates, edit budgets, or delete anything.
 var DOC_KINDS = ["license", "trn", "bank", "establishment", "other"];
 var ASSET_CATS = [
   { code: "IT", name: "IT & Electronics", life: 3 },

@@ -288,6 +288,17 @@ function render(){
   ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, settings:vSettings})[VIEW]();
 }
 
+// Live sync: when a user returns to the tab, pull the latest shared data so the
+// dashboard reflects what colleagues have entered. Skipped while a dialog/form
+// is open so it never interrupts data entry. All other pages already fetch fresh
+// data every time they are opened (strong-consistency shared database).
+let _lastSync=0;
+document.addEventListener("visibilitychange",async ()=>{
+  if(document.visibilityState!=="visible"||!TOKEN) return;
+  if(document.querySelector("dialog[open]")) return;
+  const t=Date.now(); if(t-_lastSync<8000) return; _lastSync=t;
+  try{ await load(); if(VIEW==="dash") render(); }catch(e){}
+});
 function supById(id){ return SUPS.find(s=>s.id===id); }
 async function adminDelete(kind,id,name,after){
   if(ME.role!=="CEO"){ toast("Only the CEO can delete records"); return; }
@@ -967,7 +978,7 @@ function supAgg(id){
   };
 }
 function vSups(){
-  const canEdit=["QS","PM","CEO"].includes(ME.role);
+  const canEdit=["QS","PM","CEO","Secretary","Clerk"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Suppliers / Subcontractors</h2>
     <input id="sq" placeholder="Filter by name…" style="max-width:220px;margin-left:14px">
     <button class="btn ghost right" id="blankReg">Print blank form</button>${canEdit?`<button class="btn ghost" id="syncSup" title="Register any supplier names used in the cost log so you can complete their details">Sync from cost log</button>`:""}${canEdit?`<button class="btn gold" id="newSup">+ Register Supplier</button>`:""}</div><div style="height:10px"></div>
@@ -1357,7 +1368,7 @@ function sectionB(calc,ct){
   </table>`;
 }
 async function vClients(){
-  const can=["CEO","PM","QS","Secretary"].includes(ME.role);
+  const can=["CEO","PM","QS","Secretary","Clerk"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Clients</h2>
     <span class="muted">the parties who pay you (main contractors / clients)</span>
     ${can?`<button class="btn gold right" id="newClient">+ Add client</button>`:""}</div>
@@ -1749,7 +1760,7 @@ function printProforma(c){
 let COSTMETA=null, EXP=[];
 async function loadCostMeta(){ if(!COSTMETA){ try{ COSTMETA=await api("costmeta"); }catch(e){ COSTMETA={costTypes:[],categories:[],statuses:[],projects:[]}; } } return COSTMETA; }
 async function vExpenses(){
-  const can=["CEO","PM","QS","Accounts","Secretary"].includes(ME.role);
+  const can=["CEO","PM","QS","Accounts","Secretary","Clerk"].includes(ME.role);
   await loadCostMeta();
   const projOpts=`<option value="">All projects</option>`+COSTMETA.projects.map(p=>`<option>${esc(p)}</option>`).join("");
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Daily Cost Log</h2>
@@ -2066,7 +2077,7 @@ function renderBudget(){
 let ASSET_STATE=null, ASSET_FILTERED=[];
 function loadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector(`script[src="${src}"]`)) return res(); const s=document.createElement("script"); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error("Could not load "+src)); document.head.appendChild(s); }); }
 async function vAssets(){
-  const canAsset=["CEO","PM","Secretary","QS"].includes(ME.role);
+  const canAsset=["CEO","PM","Secretary","QS","Clerk"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Asset Registry</h2><span class="muted" id="asCount"></span>
     <div class="right flex">
       ${canAsset?`<button class="btn gold" id="asNew">+ Add asset</button>`:""}
@@ -2113,7 +2124,7 @@ function renderAssetSummary(){
 }
 function renderAssetList(){
   const d=ASSET_STATE; if(!d) return;
-  const canAsset=["CEO","PM","Secretary","QS"].includes(ME.role);
+  const canAsset=["CEO","PM","Secretary","QS","Clerk"].includes(ME.role);
   const q=($("#asQ").value||"").toLowerCase(), cat=$("#asCat").value, st=$("#asStatus").value;
   const list=d.assets.filter(a=> (!cat||a.cat===cat) && (!st||(a.status||"Active")===st) &&
     (!q || (a.code+" "+a.description+" "+(a.model||"")+" "+(a.serial||"")+" "+(a.location||"")+" "+(a.custodian||"")).toLowerCase().includes(q)) );
