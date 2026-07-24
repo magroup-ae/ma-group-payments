@@ -13082,6 +13082,16 @@ async function ensureInit() {
     settings.staffV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Remove the demo/seed accounts with public default PINs — the real staff are
+  // the four provisioned above. (Historical records keep the actor's name, so
+  // audit trails are unaffected.)
+  if (!settings.staffPruneV1) {
+    const keep = new Set(["ceo", "osama", "sinan", "jesse"]);
+    const pruned = users.filter((u) => keep.has(u.id));
+    if (pruned.length !== users.length) { users = pruned; await s.setJSON("users", users); }
+    settings.staffPruneV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
