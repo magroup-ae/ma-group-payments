@@ -13093,7 +13093,8 @@ async function certsBySupplier(supplierId, excludeNo) {
   const out = await getAllJSON(store(), "cert/");
   return out.filter((c) => c && c.no !== excludeNo && c.status !== "Cancelled" && c.supplierId === supplierId);
 }
-function computeCert(c, supplier, prevNet, recoveredSoFar) {
+function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
+  prevContra = num(prevContra);
   const isRate = c.basis === "rate";
   const adjusted = isRate ? 0 : num(c.originalValue) + num(c.variations);
   // Rate-based (services) contracts: each certificate stands alone, certified
@@ -13112,7 +13113,14 @@ function computeCert(c, supplier, prevNet, recoveredSoFar) {
       advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
     }
   } else advanceRecovery = num(c.advanceRecovery);
-  const net = r2(afterRet - advanceRecovery - (isRate ? 0 : prevNet) - num(c.contra));
+  // Net this certificate = cumulative value net of retention, cumulative advance
+  // recovered and cumulative contra, minus what was previously certified. Using
+  // cumulative advance/contra (not just this period's) prevents prior-period
+  // deductions being silently refunded on later certificates.
+  const advRecToDate = r2(recoveredSoFar + advanceRecovery);
+  const net = isRate
+    ? r2(afterRet - advanceRecovery - num(c.contra))
+    : r2(afterRet - advRecToDate - r2(prevContra + num(c.contra)) - prevNet);
   const vat = r2(net * num(c.vatPct));
   return {
     adjusted,
@@ -13136,7 +13144,8 @@ async function recompute(c, supplier) {
   const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
   const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
   const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
-  c.calc = computeCert(c, supplier, prevNet, recoveredSoFar);
+  const prevContra = r2(before.reduce((a, p) => a + num(p.contra), 0));
+  c.calc = computeCert(c, supplier, prevNet, recoveredSoFar, prevContra);
   return c;
 }
 function certNo(projectName, supplierName, seq, projects) {
@@ -13220,7 +13229,8 @@ async function clientCertsByContract(contractId, excludeNo) {
   const out = await getAllJSON(store(), "clientcert/");
   return out.filter((c) => c && c.no !== excludeNo && c.status !== "Cancelled" && c.contractId === contractId);
 }
-function computeClientCert(c, contract, prevNet, recoveredSoFar) {
+function computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra) {
+  prevContra = num(prevContra);
   const cumValue = num(c.grossCum);
   const mos = num(c.mos);
   const gross = r2(cumValue + mos);
@@ -13234,7 +13244,10 @@ function computeClientCert(c, contract, prevNet, recoveredSoFar) {
     advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
   }
   const contra = num(c.contra);
-  const net = r2(afterRet - advanceRecovery - prevNet - contra);
+  // Cumulative advance recovered & cumulative contra, minus previously certified —
+  // prevents prior-period advance/contra being refunded on later certificates.
+  const advRecToDate = r2(recoveredSoFar + advanceRecovery);
+  const net = r2(afterRet - advRecToDate - r2(prevContra + contra) - prevNet);
   const vatPct = num(contract?.vatPct);
   const vat = r2(net * vatPct);
   return {
@@ -13251,7 +13264,8 @@ async function recomputeClientCert(c, contract) {
   const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
   const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
   const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
-  c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar);
+  const prevContra = r2(before.reduce((a, p) => a + num(p.contra), 0));
+  c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra);
   return c;
 }
 function clientCertNo(contract, client, seq, dateStr) {
@@ -14087,6 +14101,7 @@ var api_default = async (req, context) => {
     } else if (action === "pay") {
       if (!can("pay")) return err("Only Accounts or CEO can record payment", 403);
       if (c.status !== "Approved") return err("Certificate must be Approved first");
+      if (c.payment) return err("This certificate is already paid — refresh to see the recorded payment.", 409);
       if (!payment?.mode) return err("Payment mode required");
       // Anti-duplication: a cheque number must never be reused. Check the whole
       // payment register (and any live cert already paid by that cheque).
@@ -14474,12 +14489,13 @@ var api_default = async (req, context) => {
     const certifiedNet = r2(certs.reduce((a, c) => a + (c.calc?.net || 0), 0));
     const recovered = r2(certs.reduce((a, c) => a + (c.calc?.advanceRecovery || 0), 0));
     const retentionHeld = r2(certs.reduce((a, c) => Math.max(a, c.calc?.retention || 0), 0));
+    const contraToDate = r2(certs.reduce((a, c) => a + num(c.contra), 0));
     v.summary = {
       certCount: certs.length,
       certifiedNet,
       advanceRecovered: recovered,
       advanceOutstanding: Math.max(0, r2(num(v.advanceAmount) - recovered)),
-      retentionHeld
+      retentionHeld, contraToDate
     };
     const client = await s.get("client/" + v.clientId, { type: "json" });
     v.clientName = client?.name || "";
@@ -14500,7 +14516,7 @@ var api_default = async (req, context) => {
     return json(out);
   }
   if (path === "clientreceipt" && req.method === "POST") {
-    if (!can("clientcert")) return err("No rights to record client receipts", 403);
+    if (!can("clientcert") && !can("pay")) return err("No rights to record client receipts", 403);
     const b = await req.json();
     const contract = b.contractId ? await s.get("contract/" + b.contractId, { type: "json" }) : null;
     const project = (contract && contract.project) || String(b.project || "").trim();

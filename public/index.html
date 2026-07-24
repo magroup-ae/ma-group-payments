@@ -1318,13 +1318,13 @@ function vReg(){
 
 /* ---------- clients & client certificates (receivables) ---------- */
 let CLIENTS=[], CONTRACTS=[];
-function ccCalc(grossCum,mos,contra,ct,prevNet,recoveredSoFar){
+function ccCalc(grossCum,mos,contra,ct,prevNet,recoveredSoFar,prevContra){
   const gross=r2(num(grossCum)+num(mos));
   const retention=r2(gross*num(ct.retentionPct));
   const afterRet=r2(gross-retention);
   let advRec=0; const advAmt=num(ct.advanceAmount), advRate=num(ct.recoveryRate);
   if(advAmt>0&&advRate>0){ const rem=Math.max(0,r2(advAmt-num(recoveredSoFar))); advRec=Math.min(r2(advRate*gross),rem); }
-  const net=r2(afterRet-advRec-num(prevNet)-num(contra));
+  const net=r2(afterRet-r2(num(recoveredSoFar)+advRec)-r2(num(prevContra)+num(contra))-num(prevNet));
   const vat=r2(net*num(ct.vatPct));
   return {gross,retention,afterRet,advRec,net,vat,payable:r2(net+vat),
     advRecoveredToDate:r2(num(recoveredSoFar)+advRec), advOutstanding:Math.max(0,r2(advAmt-num(recoveredSoFar)-advRec)),
@@ -1535,10 +1535,10 @@ async function clientCertForm(contractId){
    <div id="q_preview" style="margin-top:12px"></div>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="q_save">Create certificate</button><button class="btn ghost" id="q_back">Back</button></div></div>`;
   $("#q_back").onclick=()=>{VIEW="ccerts";render();};
-  let PREV={prevNet:0,recovered:0,ct:null};
-  const loadPrev=async ()=>{ const id=$("#q_contract").value; try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),ct:c}; }catch(e){ PREV={prevNet:0,recovered:0,ct:CONTRACTS.find(x=>x.id===id)}; } preview(); };
+  let PREV={prevNet:0,recovered:0,contra:0,ct:null};
+  const loadPrev=async ()=>{ const id=$("#q_contract").value; try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),contra:num(c.summary?.contraToDate),ct:c}; }catch(e){ PREV={prevNet:0,recovered:0,contra:0,ct:CONTRACTS.find(x=>x.id===id)}; } preview(); };
   const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
-    const calc=ccCalc($("#q_gross").value,$("#q_mos").value,$("#q_contra").value,ct,PREV.prevNet,PREV.recovered);
+    const calc=ccCalc($("#q_gross").value,$("#q_mos").value,$("#q_contra").value,ct,PREV.prevNet,PREV.recovered,PREV.contra);
     const revised=r2(num(ct.contractSum)+num(ct.variations));
     const nextSeq=(ct.summary?.certCount||0)+1;
     const yy=String(new Date($("#q_date").value||Date.now()).getFullYear()).slice(-2);
