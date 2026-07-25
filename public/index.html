@@ -264,15 +264,38 @@ function renderLogin(){
 
 async function load(){ const d=await api("bootstrap"); ME=d.me; POLICY_TEXT=d.policyText||""; POLICY_VER=d.policyVersion||1; S=d.settings; CERTS=d.certs; REG=d.register; USERS=d.users; SUPS=d.suppliers||[]; ASSETS=d.assets||{sign:"",stamp:""}; ASSETC=d.assetCount||0; }
 function renderPolicyGate(){
+  const ent=(S&&S.entities&&S.entities[0])||{name:"MA GROUP",line2:"",line3:""};
+  const today=new Date().toISOString().slice(0,10);
+  const signImg=ASSETS&&ASSETS.sign?`<img src="${ASSETS.sign}" alt="signature" style="height:54px;max-width:180px;object-fit:contain;display:block">`:`<div style="height:54px"></div>`;
+  const stampImg=ASSETS&&ASSETS.stamp?`<img src="${ASSETS.stamp}" alt="company stamp" style="height:100px;opacity:.85;object-fit:contain">`:"";
   root.innerHTML=`<header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Finance</div><div class="sp"></div><div class="u">${esc(ME.name)} · ${esc(ME.role)}</div></header>
-   <div style="max-width:840px;margin:22px auto;padding:0 16px">
-    <div class="card"><h2 style="margin:0 0 6px">Confidentiality Undertaking — required before first access</h2>
-     <div class="muted" style="margin-bottom:10px">You must read and digitally sign this undertaking before you can use the system. Your acceptance is recorded.</div>
-     <div style="max-height:50vh;overflow:auto;border:1px solid #e3e7ee;border-radius:8px;padding:16px;background:#fff">${POLICY_TEXT}</div>
-     <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;margin-top:14px"><input type="checkbox" id="pgChk" style="margin-top:3px"> <span>I have read, understood and agree to the MA Group Confidentiality &amp; Data Protection Undertaking. I confirm this is confidential information and that I will not use it at all outside my authorised duties, during or after my engagement.</span></label>
-     <div style="margin-top:12px;max-width:440px"><label style="font-size:13px;color:#556">Type your full name to sign (electronic signature)</label><input id="pgSig" placeholder="Your full legal name" style="width:100%"></div>
-     <div style="height:14px"></div><div class="flex"><button class="btn green" id="pgOk">I Agree &amp; Sign</button><button class="btn ghost" id="pgOut">Sign out</button></div>
-     <div id="pgErr" style="color:#c0392b;margin-top:8px;font-size:13px"></div></div></div>`;
+   <div style="max-width:860px;margin:22px auto;padding:0 16px">
+    <div class="card">
+     <div class="muted" style="margin-bottom:10px">This is an official MA Group undertaking. Please read it in full, then confirm and sign at the bottom. You cannot access the system until you sign.</div>
+     <div style="border:1px solid #d9dfe8;border-radius:10px;padding:26px 30px;background:#fff">
+       ${certLetterhead(ent)}
+       <div style="text-align:right;font-size:11px;color:#667;margin:6px 0 2px">Ref: MAG/CONF/${today.slice(0,4)} · Date: ${dmy(today)} · Policy v${POLICY_VER}</div>
+       <div style="border-top:2px solid #1f3864;margin:6px 0 16px"></div>
+       ${POLICY_TEXT}
+       <div style="position:relative;margin-top:26px;padding-top:8px">
+         <div style="font-size:12px;color:#556;margin-bottom:6px">Issued and authorised on behalf of MA Group:</div>
+         <div style="display:flex;align-items:flex-end;gap:30px;position:relative">
+           <div style="min-width:230px">
+             ${signImg}
+             <div style="border-top:1px solid #333;padding-top:4px;font-size:12px"><b>Eng. Mohammed Abuassba</b><br>Chief Executive Officer — MA Group</div>
+           </div>
+           ${stampImg}
+         </div>
+       </div>
+     </div>
+     <div style="border:1px solid #e3e7ee;border-radius:10px;padding:16px 18px;margin-top:16px;background:#f8fafc">
+       <div style="font-weight:700;color:#1f3864;margin-bottom:8px">Acknowledgement by employee / user</div>
+       <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" id="pgChk" style="margin-top:3px"> <span>I have read, understood and agree to the MA Group Confidentiality &amp; Data Protection Undertaking above. I confirm this is confidential information and that I will not use it at all outside my authorised duties, during or after my engagement.</span></label>
+       <div style="margin-top:12px;max-width:440px"><label style="font-size:13px;color:#556">Type your full name to sign (electronic signature)</label><input id="pgSig" placeholder="Your full legal name" style="width:100%"></div>
+       <div style="font-size:11px;color:#7a8494;margin-top:6px">Signing as: <b>${esc(ME.name)}</b> · ${esc(ME.role)} · ${dmy(today)}</div>
+       <div style="height:14px"></div><div class="flex"><button class="btn green" id="pgOk">I Agree &amp; Sign</button><button class="btn ghost" id="pgOut">Sign out</button></div>
+       <div id="pgErr" style="color:#c0392b;margin-top:8px;font-size:13px"></div>
+     </div></div></div>`;
   $("#pgOut").onclick=()=>{ TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin(); };
   $("#pgOk").onclick=async ()=>{ $("#pgErr").textContent="";
     if(!$("#pgChk").checked){ $("#pgErr").textContent="Please tick the box to confirm your agreement."; return; }
