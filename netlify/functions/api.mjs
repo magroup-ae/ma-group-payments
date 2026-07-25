@@ -13674,6 +13674,22 @@ async function computeBudget(s, project) {
   };
   return { project, lines: computed, unalloc: r2(unalloc), saved: !!(bud.lines && bud.lines.length), totals };
 }
+var POLICY_VERSION = 1;
+var CONFIDENTIALITY_POLICY = `<h2 style="margin:0 0 4px;color:#1f3864">MA Group — Confidentiality &amp; Data Protection Undertaking</h2>
+<div style="color:#667;font-size:12px;margin-bottom:12px">Applicable to Marvellous Art Decoration &amp; Fit Out Design L.L.C · MA Building Contracting L.L.C · MA Building Maintenance L.L.C ("MA Group"). Version ${POLICY_VERSION}.</div>
+<p>This system ("MA Group Finance") and the data within it are <b>strictly confidential and the exclusive property of MA Group</b>. By accessing it you agree to the following legally binding undertaking.</p>
+<p><b>1. Confidential Information.</b> "Confidential Information" means all information accessible through this system, including without limitation: financial records, payment &amp; interim payment certificates (IPCs), bills of quantities (BOQs), unit rates, pricing, margins, profit &amp; loss and budget data, client and supplier/subcontractor details, contracts, variations, bank details, TRN and tax data, salaries and payroll, and any related commercial, technical or personal data — in any form, whether marked confidential or not.</p>
+<p><b>2. Ownership.</b> All Confidential Information is and remains the sole property of MA Group. No right or licence is granted to you other than to use it strictly for the performance of your authorised duties for MA Group.</p>
+<p><b>3. Your undertakings.</b> You expressly undertake that you shall: (a) access and use the Confidential Information <b>only</b> for your authorised job duties; (b) <b>not disclose</b> it to any third party or to any colleague not authorised to receive it; (c) <b>not copy, export, download, screenshot, photograph, print, transmit or remove</b> any Confidential Information except as required for your authorised duties; (d) <b>not use it for any personal benefit</b> or for the benefit of any competitor or third party; (e) keep your login credentials confidential, never share your account, and log out after each use; and (f) immediately report any actual or suspected breach, loss or unauthorised access to the CEO.</p>
+<p><b>4. Non-use &amp; non-disclosure.</b> You confirm that this is confidential information and that you <b>will not use the same at all</b> outside your authorised duties for MA Group, whether directly or indirectly, during and after your employment or engagement.</p>
+<p><b>5. Duration.</b> These obligations take effect from your first access and <b>survive indefinitely</b> after the end of your employment or engagement with MA Group.</p>
+<p><b>6. Data protection.</b> You shall handle all personal data in accordance with UAE Federal Decree-Law No. 45 of 2021 on the Protection of Personal Data and all other applicable laws.</p>
+<p><b>7. Consequences of breach.</b> Any breach of this undertaking may result in <b>disciplinary action up to and including termination</b>, and may expose you to <b>civil and criminal liability under the laws of the United Arab Emirates</b> (including provisions of the UAE Penal Code on breach of trust and the Cybercrime Law), together with liability for all resulting damages and losses to MA Group.</p>
+<p><b>8. Acknowledgement &amp; electronic signature.</b> By entering your full name and confirming below, you acknowledge that you have read, understood and agree to be bound by this Undertaking. Your typed name, together with the date, time and your user account, constitutes your <b>electronic signature</b> and is admissible as evidence of your acceptance under UAE Federal Decree-Law No. 46 of 2021 on Electronic Transactions and Trust Services.</p>`;
+async function hasAcceptedPolicy(s, userId) {
+  const a = await s.get("policyack/" + userId, { type: "json" });
+  return !!(a && a.version >= POLICY_VERSION);
+}
 var api_default = async (req, context) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/(?:api|\.netlify\/functions\/api)\/?/, "");
@@ -13705,6 +13721,28 @@ var api_default = async (req, context) => {
   if (path === "verifypin" && req.method === "POST") {
     const { pin } = await req.json();
     return json({ ok: hashPin(String(pin || ""), me.salt) === me.pinHash });
+  }
+  if (path === "policy" && req.method === "GET") {
+    return json({ version: POLICY_VERSION, text: CONFIDENTIALITY_POLICY, accepted: await hasAcceptedPolicy(s, me.id) });
+  }
+  if (path === "policy/accept" && req.method === "POST") {
+    const b = await req.json();
+    const signature = String(b.signature || "").trim();
+    if (signature.length < 3) return err("Please type your full name to sign");
+    const rec = {
+      userId: me.id, name: me.name, role: me.role, signature,
+      version: POLICY_VERSION, acceptedAt: now(),
+      ip: req.headers.get("x-nf-client-connection-ip") || req.headers.get("x-forwarded-for") || "",
+      ua: (req.headers.get("user-agent") || "").slice(0, 200)
+    };
+    await s.setJSON("policyack/" + me.id, rec);
+    return json({ ok: true });
+  }
+  if (path === "policy/register" && req.method === "GET") {
+    if (!can("admin")) return err("CEO only", 403);
+    const acks = await getAllJSON(s, "policyack/");
+    acks.sort((a, b) => a.acceptedAt < b.acceptedAt ? 1 : -1);
+    return json({ version: POLICY_VERSION, acks });
   }
   if (path === "admin/delete" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
@@ -13851,8 +13889,11 @@ var api_default = async (req, context) => {
     const clientCount = clientList.blobs.length;
     const contractCount = contractList.blobs.length;
     const clientCertCount = clientCertList.blobs.length;
+    const policyAccepted = await hasAcceptedPolicy(s, me.id);
     return json({
-      me: { id: me.id, name: me.name, role: me.role },
+      me: { id: me.id, name: me.name, role: me.role, policyAccepted },
+      policyVersion: POLICY_VERSION,
+      policyText: policyAccepted ? "" : CONFIDENTIALITY_POLICY,
       settings,
       certs,
       register,

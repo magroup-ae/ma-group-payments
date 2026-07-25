@@ -201,6 +201,7 @@ const root = $("#root");
 let TOKEN = sessionStorage.getItem("tok") || "";
 let ME=null, S=null, CERTS=[], REG=[], USERS=[], SUPS=[], ASSETS={sign:"",stamp:""}, ASSETC=0;
 let VIEW="dash", CUR=null, settingsUnlocked=false;
+let POLICY_TEXT="", POLICY_VER=1;
 
 const fmt = n => (n===undefined||n===null||isNaN(n)) ? "—" : Number(n).toLocaleString("en-AE",{minimumFractionDigits:2,maximumFractionDigits:2});
 const pct = v => (Math.round((v||0)*1000)/10)+"%";
@@ -261,7 +262,23 @@ function renderLogin(){
   $("#lb").onclick=go; $("#lp").onkeydown=e=>{ if(e.key==="Enter") go(); };
 }
 
-async function load(){ const d=await api("bootstrap"); ME=d.me; S=d.settings; CERTS=d.certs; REG=d.register; USERS=d.users; SUPS=d.suppliers||[]; ASSETS=d.assets||{sign:"",stamp:""}; ASSETC=d.assetCount||0; }
+async function load(){ const d=await api("bootstrap"); ME=d.me; POLICY_TEXT=d.policyText||""; POLICY_VER=d.policyVersion||1; S=d.settings; CERTS=d.certs; REG=d.register; USERS=d.users; SUPS=d.suppliers||[]; ASSETS=d.assets||{sign:"",stamp:""}; ASSETC=d.assetCount||0; }
+function renderPolicyGate(){
+  root.innerHTML=`<header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Finance</div><div class="sp"></div><div class="u">${esc(ME.name)} · ${esc(ME.role)}</div></header>
+   <div style="max-width:840px;margin:22px auto;padding:0 16px">
+    <div class="card"><h2 style="margin:0 0 6px">Confidentiality Undertaking — required before first access</h2>
+     <div class="muted" style="margin-bottom:10px">You must read and digitally sign this undertaking before you can use the system. Your acceptance is recorded.</div>
+     <div style="max-height:50vh;overflow:auto;border:1px solid #e3e7ee;border-radius:8px;padding:16px;background:#fff">${POLICY_TEXT}</div>
+     <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;margin-top:14px"><input type="checkbox" id="pgChk" style="margin-top:3px"> <span>I have read, understood and agree to the MA Group Confidentiality &amp; Data Protection Undertaking. I confirm this is confidential information and that I will not use it at all outside my authorised duties, during or after my engagement.</span></label>
+     <div style="margin-top:12px;max-width:440px"><label style="font-size:13px;color:#556">Type your full name to sign (electronic signature)</label><input id="pgSig" placeholder="Your full legal name" style="width:100%"></div>
+     <div style="height:14px"></div><div class="flex"><button class="btn green" id="pgOk">I Agree &amp; Sign</button><button class="btn ghost" id="pgOut">Sign out</button></div>
+     <div id="pgErr" style="color:#c0392b;margin-top:8px;font-size:13px"></div></div></div>`;
+  $("#pgOut").onclick=()=>{ TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin(); };
+  $("#pgOk").onclick=async ()=>{ $("#pgErr").textContent="";
+    if(!$("#pgChk").checked){ $("#pgErr").textContent="Please tick the box to confirm your agreement."; return; }
+    const sig=$("#pgSig").value.trim(); if(sig.length<3){ $("#pgErr").textContent="Please type your full name to sign."; return; }
+    try{ await api("policy/accept",{method:"POST",body:{signature:sig}}); toast("Acceptance recorded — thank you"); await load(); render(); }catch(e){ $("#pgErr").textContent=e.message; } };
+}
 
 async function unlockSettings(){
   if(ME.role!=="CEO"){ toast("Settings is for the CEO only"); return false; }
@@ -272,6 +289,7 @@ async function unlockSettings(){
   catch(e){ toast(e.message); return false; }
 }
 function render(){
+  if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
   const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
@@ -2272,6 +2290,9 @@ function vSettings(){
    ${admin?`<div class="card"><h2>Backup &amp; data</h2>
      <div class="muted" style="margin-bottom:8px">Your data lives in Netlify's cloud (replicated &amp; durable). Download a full backup regularly — keep a copy off-system. This exports every record as one JSON file (no PINs).</div>
      <button class="btn gold" id="dlBackup">⬇ Download full backup (JSON)</button></div>`:""}
+   ${admin?`<div class="card"><h2>Confidentiality acceptances</h2>
+     <div class="muted" style="margin-bottom:8px">Signed acceptances of the Confidentiality Undertaking (electronic signature register).</div>
+     <div id="polReg" class="muted">Loading…</div></div>`:""}
    ${admin?`<div class="card"><h2>Storage &amp; usage</h2><div id="usageBox" class="muted">Loading…</div></div>`:""}
    ${admin?emailCard():""}
    ${admin?signatureCard():""}
@@ -2312,6 +2333,11 @@ function vSettings(){
       if(!confirm(`Merge ${from.length} project name(s) into "${to}"?\n\nAll contracts, IPCs, expenses and budgets under:\n• ${from.join("\n• ")}\n\n…will move to "${to}". This cannot be undone automatically.`)) return;
       ceoUnlock(async ()=>{ try{ const r=await api("project/merge",{method:"POST",body:{from,to,toCode}}); toast(`Merged → ${to}: ${r.counts.contracts} contracts, ${r.counts.supplierCerts} supplier IPCs, ${r.counts.expenses} expenses`); COSTMETA=null; await load(); vSettings(); }catch(e){ toast(e.message); } }); };
     $("#nbAdd").onclick=async ()=>{ const b=$("#nbName").value.trim(); if(!b) return; S.banks.push(b); await saveS(); };
+    if($("#polReg")) api("policy/register").then(r=>{ const b=$("#polReg"); if(!b) return;
+      if(!r.acks||!r.acks.length){ b.innerHTML=`<div class="muted">No acceptances recorded yet.</div>`; return; }
+      b.classList.remove("muted");
+      b.innerHTML=`<table><tr><th>Name (signature)</th><th>Role</th><th>Accepted on</th><th>Version</th></tr>${r.acks.map(a=>`<tr><td><b>${esc(a.signature||a.name)}</b></td><td>${esc(a.role||"")}</td><td>${dmy(a.acceptedAt)} ${esc(String(a.acceptedAt||"").slice(11,16))}</td><td>v${esc(a.version)}${a.version<r.version?' <span class="pill" style="background:#c0392b;font-size:10px">outdated</span>':""}</td></tr>`).join("")}</table>`;
+    }).catch(()=>{ const b=$("#polReg"); if(b) b.textContent="Register unavailable."; });
     if($("#dlBackup")) $("#dlBackup").onclick=async ()=>{ toast("Preparing backup…"); try{ const bk=await api("backup"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(bk,null,2)],{type:"application/json"})); a.download="MA_Group_Finance_backup_"+new Date().toISOString().slice(0,10)+".json"; a.click(); toast("Backup downloaded"); }catch(e){ toast(e.message); } };
     document.querySelectorAll("[data-reset]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const pin=prompt("New PIN (4-8 digits):"); if(!pin) return; const u=USERS.find(x=>x.id===a.dataset.reset);
       try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,pin}}); toast("PIN reset"); }catch(x){ toast(x.message); } });
