@@ -421,6 +421,12 @@ async function vDash(){
   const projRet={}; Object.keys(projRetPct).forEach(p=>{ projRet[p]=r2((projRev[p]||0)*projRetPct[p]); });
   const totalDown=Object.values(projDown).reduce((a,v)=>a+v,0);
   const totalRet=Object.values(projRet).reduce((a,v)=>a+v,0);
+  // ---- vendor registry completeness ----
+  const vendors=(SUPS||[]);
+  const vSupCount=vendors.filter(s=>s.type==="Supplier").length;
+  const vSubCount=vendors.filter(s=>s.type!=="Supplier").length;
+  const missOf=s=>{ const m=[]; if(!String(s.licenseNo||"").trim())m.push("Trade Licence"); if(!String(s.trn||"").trim())m.push("TRN / TAX"); if(!String(s.email||"").trim())m.push("Email"); return m; };
+  const incompleteVendors=vendors.map(s=>({s,miss:missOf(s)})).filter(x=>x.miss.length);
   const auditRows=[...new Set([...Object.keys(projRev),...Object.keys(projCost),...Object.keys(projContractVal),...Object.keys(projCV),...Object.keys(projDown)])].filter(p=>p&&p!=="MA HQ – Operations").sort();
   const totalCV=auditRows.reduce((a,p)=>a+(projContractVal[p]||projCV[p]||0),0);
   const issuedTot=ccerts.filter(c=>["Issued","Approved"].includes(c.status)).length;
@@ -454,6 +460,13 @@ async function vDash(){
      ${kpi("AED "+fmt(dueSup),"Approved — to pay")}
      ${kpi("AED "+fmt(retentionHeld),"Retention held")}
    </div>
+   <div class="kpigrp">Vendors · Registry</div>
+   <div class="kpis">
+     ${kpi(vendors.length,"Registered — suppliers + subcontractors")}
+     ${kpi(vSupCount,"Suppliers")}
+     ${kpi(vSubCount,"Subcontractors")}
+     ${kpi(`<span style="color:${incompleteVendors.length?'var(--red)':'var(--green)'}">${incompleteVendors.length}</span>`,"Incomplete registry",incompleteVendors.length?"alert":"good","kpiIncVend")}
+   </div>
    <div class="kpigrp">Profitability · Assets</div>
    <div class="kpis">
      ${kpi("AED "+fmt(cost),(pnl&&num(pnl.hqCost)>0)?`Total cost — projects ${fmt(num(pnl.projectCost))} + HQ ${fmt(num(pnl.hqCost))}`:"Total cost incurred")}
@@ -470,6 +483,11 @@ async function vDash(){
      ${orphanRev>0?`<tr style="color:var(--red)"><td>⚠ IPCs with no matching contract <span class="muted" style="font-size:10px">(not in totals)</span></td><td class="num">—</td><td class="num">${fmt(orphanRev)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${orphanCnt}</td></tr>`:""}
      <tr class="tot"><td>TOTAL (all projects)</td><td class="num">${fmt(totalCV)}</td><td class="num">${fmt(revenue)}</td><td class="num">${fmt(netDue)}</td><td class="num">${fmt(totalDown)}</td><td class="num">${fmt(totalRet)}</td><td class="num">${fmt(cost)}</td><td class="num">${issuedTot}</td></tr></table></div>
      <div class="muted" style="margin-top:8px">Down payment received and retention % are set per project in <b>Settings → Projects</b> (retention default 10%). Retention held is computed = rate × certified revenue; standard release 5% on completion + 5% after the 12-month DLP. Revenue certified = the highest cumulative gross (ex-VAT) across each contract's Issued/Approved IPCs. Company-wide view; use the <b>project selector</b> below for one project.</div></div>
+   ${incompleteVendors.length?`<div class="card" id="incVendCard"><h2 style="margin:0 0 4px">Incomplete supplier / subcontractor registry <span class="muted" style="font-size:12px;font-weight:400">— ${incompleteVendors.length} of ${vendors.length} missing required data</span></h2>
+     <div class="muted" style="margin-bottom:8px">Trade Licence, TRN / TAX and Email are required before a tax invoice can be accepted. Click a row to complete the record.</div>
+     <div style="overflow-x:auto"><table><tr><th>Supplier / Subcontractor</th><th>Type</th><th>Missing</th></tr>
+     ${incompleteVendors.map(({s,miss})=>`<tr class="incVendRow" data-id="${s.id}" style="cursor:pointer"><td>${esc(s.name||s.id)}</td><td>${esc(s.type||"Subcontractor")}</td><td><span style="color:var(--red)">${miss.map(esc).join(" · ")}</span></td></tr>`).join("")}
+     </table></div></div>`:""}
    <div class="chartgrid">
      ${chartCard("Revenue vs Cost by project", hbars2(projRows), "certified income vs cost incurred")}
      ${chartCard("Cost by type", donut(typeRows,"AED "+fmt(cost)))}
@@ -487,6 +505,8 @@ async function vDash(){
    <div class="card"><h2>Advance recovery by supplier</h2>${advTable()}</div>`;
   bindRows();
   const ka=$("#kpiAssets"); if(ka) ka.onclick=()=>{VIEW="assets";render();};
+  const kv=$("#kpiIncVend"); if(kv) kv.onclick=()=>{const c=$("#incVendCard"); if(c)c.scrollIntoView({behavior:"smooth",block:"start"}); else {VIEW="suppliers";render();}};
+  document.querySelectorAll(".incVendRow").forEach(r=>r.onclick=()=>{const s=supById(r.dataset.id); if(s)supForm(s); else {VIEW="suppliers";render();}});
   $("#pd_sel").onchange=()=>projectDash($("#pd_sel").value,{contracts,ccerts});
 }
 async function projectDash(p,ctx){
