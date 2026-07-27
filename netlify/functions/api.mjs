@@ -13793,6 +13793,20 @@ var api_default = async (req, context) => {
     acks.sort((a, b) => a.acceptedAt < b.acceptedAt ? 1 : -1);
     return json({ version: POLICY_VERSION, acks });
   }
+  if (path === "policy/resend" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const b = await req.json().catch(() => ({}));
+    const cfg = await getEmailCfg(s);
+    let acks = await getAllJSON(s, "policyack/");
+    if (b.userId) acks = acks.filter((a) => a.userId === b.userId);
+    if (!acks.length) return err("No signed acknowledgement found", 404);
+    const sent = [];
+    for (const ack of acks) {
+      const rec = await notify(s, "policyack", { to: cfg.adminEmail, forCeo: true, ack });
+      sent.push({ userId: ack.userId, name: ack.name, status: rec?.status || "sent" });
+    }
+    return json({ ok: true, to: cfg.adminEmail, count: sent.length, sent });
+  }
   if (path === "admin/delete" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
     const { kind, id, pin } = await req.json();
