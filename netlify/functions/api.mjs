@@ -12537,6 +12537,7 @@ async function getEmailCfg(s) {
     from: getEnv("MAIL_FROM") || saved.from || "info@maagroup.ae",
     fromName: saved.fromName || "MA Group Accounts",
     replyTo: getEnv("MAIL_REPLYTO") || saved.replyTo || "info@maagroup.ae",
+    adminEmail: getEnv("ADMIN_EMAIL") || saved.adminEmail || "ceo@maagroup.ae",
     cc: saved.cc || "",
     bcc: saved.bcc || "",
     triggers: saved.triggers || {}
@@ -12632,6 +12633,48 @@ function buildEmail(type, ctx, cfg) {
         note: `<strong>Important:</strong> No Tax Invoice will be accepted unless accompanied by the <strong>signed attendance verified by the MA Group site engineer</strong> and the <strong>works report</strong>. Invoices without these attachments — or submitted outside the 20th–25th window — will be held to the next payment cycle.`,
         noteColor: "#fff8e6", noteBar: "#bf9000",
         closing: `Please reply to this email attaching your works report, the signed attendance sheet and your tax invoice.`
+      })
+    };
+  }
+  if (type === "policyack") {
+    const a = ctx.ack || {};
+    const forCeo = !!ctx.forCeo;
+    return {
+      to: ctx.to,
+      toName: forCeo ? "Eng. Mohammed Abuassba" : (a.name || "Colleague"),
+      greeting: forCeo ? "Eng. Mohammed Abuassba" : (a.name || "Colleague"),
+      subject: forCeo
+        ? `Confidentiality Undertaking Signed — ${a.name || a.userId} (${a.role || ""})`
+        : `Your signed Confidentiality Undertaking — MA Group`,
+      html: emailShell(cfg, {
+        title: forCeo ? "Confidentiality Undertaking — Signed" : "Confidentiality Undertaking — Confirmation",
+        band: "#375623",
+        preheader: forCeo
+          ? `${a.name || a.userId} has digitally signed the Confidentiality Undertaking.`
+          : `This confirms you have digitally signed MA Group's Confidentiality Undertaking.`,
+        lead: forCeo
+          ? [
+              `This is to confirm that the following team member has <strong>digitally accepted and signed</strong> the MA Group Confidentiality &amp; Non-Disclosure Undertaking before accessing the MA Group Finance system.`,
+              `This acknowledgement is recorded in the system's confidentiality register and is legally binding.`
+            ]
+          : [
+              `This confirms that you have <strong>digitally accepted and signed</strong> the MA Group Confidentiality &amp; Non-Disclosure Undertaking.`,
+              `By signing, you have agreed to keep all information accessed through the MA Group Finance system strictly confidential and to use it solely for your authorised duties. Please retain this email for your records.`
+            ],
+        table: [
+          ["Signatory", a.name || a.userId || "—"],
+          ["Login ID", a.userId || "—"],
+          ["Role", a.role || "—"],
+          ["Typed signature", a.signature || "—"],
+          ["Date &amp; time signed", emDate(a.acceptedAt) + (a.acceptedAt ? " (GST)" : "")],
+          ["Policy version", "v" + (a.version || 1)],
+          ["Source IP", a.ip || "—"]
+        ],
+        note: `This is an electronic acknowledgement captured at first access to the system. It carries the same weight as a signed undertaking under the UAE Federal Decree-Law on the protection of confidential information and MA Group's internal policy.`,
+        noteColor: "#eef5ec", noteBar: "#375623",
+        closing: forCeo
+          ? `The full confidentiality register is available under Settings → Confidentiality in the MA Group Finance system.`
+          : `Thank you for your commitment to protecting MA Group's confidential information.`
       })
     };
   }
@@ -13736,6 +13779,12 @@ var api_default = async (req, context) => {
       ua: (req.headers.get("user-agent") || "").slice(0, 200)
     };
     await s.setJSON("policyack/" + me.id, rec);
+    // Notify the CEO with the signed acknowledgement, and send the signer their own copy.
+    try {
+      const cfg = await getEmailCfg(s);
+      await notify(s, "policyack", { to: cfg.adminEmail, forCeo: true, ack: rec });
+      if (me.email) await notify(s, "policyack", { to: me.email, forCeo: false, ack: rec });
+    } catch (e) { }
     return json({ ok: true });
   }
   if (path === "policy/register" && req.method === "GET") {
