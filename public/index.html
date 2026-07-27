@@ -2378,6 +2378,7 @@ function vSettings(){
     $("#nbAdd").onclick=async ()=>{ const b=$("#nbName").value.trim(); if(!b) return; S.banks.push(b); await saveS(); };
     if($("#polReg")) api("policy/register").then(r=>{ const b=$("#polReg"); if(!b) return;
       if(!r.acks||!r.acks.length){ b.innerHTML=`<div class="muted">No acceptances recorded yet.</div>`; return; }
+      if(r.pushed>0) toast(r.pushed+" signed acknowledgement"+(r.pushed===1?"":"s")+" emailed to CEO");
       b.classList.remove("muted");
       const resend=async(uid,label)=>{ try{ toast("Sending…"); const x=await api("policy/resend",{method:"POST",body:uid?{userId:uid}:{}}); toast("Sent "+x.count+" acknowledgement"+(x.count===1?"":"s")+" to "+x.to); }catch(e){ toast(e.message); } };
       b.innerHTML=`<div class="flex" style="margin-bottom:8px"><div class="muted" style="font-size:12px">Click <b>Email me</b> to receive a signed copy of any acknowledgement, or <b>Email me all</b> for the full register.</div><button class="btn ghost" id="polResendAll" style="margin-left:auto;padding:5px 12px">Email me all</button></div>

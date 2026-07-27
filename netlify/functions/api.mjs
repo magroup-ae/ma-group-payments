@@ -13778,20 +13778,36 @@ var api_default = async (req, context) => {
       ip: req.headers.get("x-nf-client-connection-ip") || req.headers.get("x-forwarded-for") || "",
       ua: (req.headers.get("user-agent") || "").slice(0, 200)
     };
-    await s.setJSON("policyack/" + me.id, rec);
     // Notify the CEO with the signed acknowledgement, and send the signer their own copy.
     try {
       const cfg = await getEmailCfg(s);
-      await notify(s, "policyack", { to: cfg.adminEmail, forCeo: true, ack: rec });
+      const r = await notify(s, "policyack", { to: cfg.adminEmail, forCeo: true, ack: rec });
+      if (r && r.status !== "error") rec.ceoNotified = now();
       if (me.email) await notify(s, "policyack", { to: me.email, forCeo: false, ack: rec });
     } catch (e) { }
+    await s.setJSON("policyack/" + me.id, rec);
     return json({ ok: true });
   }
   if (path === "policy/register" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
     const acks = await getAllJSON(s, "policyack/");
     acks.sort((a, b) => a.acceptedAt < b.acceptedAt ? 1 : -1);
-    return json({ version: POLICY_VERSION, acks });
+    // Auto-push to the CEO any signed acknowledgement not yet emailed (e.g. signed
+    // before on-accept email existed). Sent once, then flagged to avoid duplicates.
+    let pushed = 0;
+    try {
+      const cfg = await getEmailCfg(s);
+      for (const ack of acks) {
+        if (ack.ceoNotified) continue;
+        const r = await notify(s, "policyack", { to: cfg.adminEmail, forCeo: true, ack });
+        if (r && r.status !== "error") {
+          ack.ceoNotified = now();
+          await s.setJSON("policyack/" + ack.userId, ack);
+          pushed++;
+        }
+      }
+    } catch (e) { }
+    return json({ version: POLICY_VERSION, acks, pushed });
   }
   if (path === "policy/resend" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
