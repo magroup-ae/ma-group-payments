@@ -13159,6 +13159,18 @@ async function ensureInit() {
     settings.staffPruneV1 = true;
     await s.setJSON("settings", settings);
   }
+  // One-time: grant the CFO (Mr. Osama) full CEO-equivalent access. Access role is
+  // set to CEO so every permission gate (backend + frontend) treats him identically;
+  // a display title keeps his designation shown as CFO in the header.
+  if (!settings.cfoFullAccessV1) {
+    const ceoU = users.find((x) => x.id === "ceo");
+    if (ceoU && !ceoU.title) ceoU.title = "Chief Executive Officer (CEO)";
+    const u = users.find((x) => x.id === "osama");
+    if (u) { u.role = "CEO"; u.title = "Chief Financial Officer (CFO)"; }
+    await s.setJSON("users", users);
+    settings.cfoFullAccessV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
@@ -13742,7 +13754,7 @@ var api_default = async (req, context) => {
     const { userId: userId2, pin } = await req.json();
     const u = users.find((x) => x.id === userId2);
     if (!u || hashPin(String(pin || ""), u.salt) !== u.pinHash) return err("Wrong PIN", 401);
-    return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, mustChangePin: !!u.mustChangePin } });
+    return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, title: u.title || "", mustChangePin: !!u.mustChangePin } });
   }
   if (path === "userlist") return json(users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
   const auth = req.headers.get("authorization") || "";
@@ -13970,7 +13982,7 @@ var api_default = async (req, context) => {
     const clientCertCount = clientCertList.blobs.length;
     const policyAccepted = await hasAcceptedPolicy(s, me.id);
     return json({
-      me: { id: me.id, name: me.name, role: me.role, policyAccepted },
+      me: { id: me.id, name: me.name, role: me.role, title: me.title || "", policyAccepted },
       policyVersion: POLICY_VERSION,
       policyText: policyAccepted ? "" : CONFIDENTIALITY_POLICY,
       settings,
@@ -13982,7 +13994,7 @@ var api_default = async (req, context) => {
       clientCount,
       contractCount,
       clientCertCount,
-      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role }))
+      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title || "" }))
     });
   }
   if (path === "settings" && req.method === "POST") {
