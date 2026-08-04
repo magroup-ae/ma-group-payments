@@ -2427,6 +2427,7 @@ async function vAwards(){
        <div><label>Quotation date</label><input id="aw_qdate" type="date"></div>
        <div><label>Scope title (short)</label><input id="aw_stitle" placeholder="e.g. Gypsum & partition works"></div>
      </div>
+     <div id="aw_supinfo" class="note" style="margin-top:8px;display:none"></div>
      <div style="margin-top:10px"><label>Scope of works</label><textarea id="aw_scope" rows="4" style="width:100%;font-family:inherit" placeholder="Describe the works / supply. One line per item."></textarea></div>
      <h3 style="margin:14px 0 6px">Commercial terms</h3>
      <div class="grid">
@@ -2440,7 +2441,10 @@ async function vAwards(){
        <div><label>DLP (days)</label><input id="aw_dlp" type="number" value="365"></div>
        <div><label>Payment within (days)</label><input id="aw_pay" type="number" value="30"></div>
        <div><label>Sign-back window (hours)</label><input id="aw_hrs" type="number" value="24"></div>
+       <div><label>Advance / down payment (AED)</label><input id="aw_adv" type="number" step="0.01" value="0" placeholder="0 = none"></div>
+       <div><label>Advance recovery % (of each cert)</label><input id="aw_advrec" type="number" step="0.1" value="0" placeholder="e.g. 15"></div>
      </div>
+     <div class="muted" style="font-size:11px;margin-top:4px">Name, Trade Licence, TRN and email fill automatically from the supplier record. If an advance is entered, the document adds a down-payment clause recovered pro-rata from each certificate.</div>
      <div class="flex" style="margin-top:14px;gap:10px"><span class="right"></span>
        <button class="btn green" id="aw_gen">Generate document</button></div>
    </div>
@@ -2471,7 +2475,19 @@ async function vAwards(){
     else { el.innerHTML='SUBCONTRACT AGREEMENT <span class="muted" style="font-weight:400">(≥ threshold)</span>'; el.style.color="#375623"; } };
   $("#aw_amt").oninput=typeBadge;
   // Prefill some fields from the selected supplier's linked project, if any.
-  $("#aw_sup").onchange=()=>{ const s=supById($("#aw_sup").value); if(s&&s.project&&!$("#aw_proj").value) $("#aw_proj").value=s.project; };
+  const awSupInfo=()=>{ const s=supById($("#aw_sup").value); const box=$("#aw_supinfo"); if(!box) return;
+    if(!s){ box.style.display="none"; return; }
+    if(s.project&&!$("#aw_proj").value) $("#aw_proj").value=s.project;
+    // Prefill advance + retention from the supplier record.
+    if($("#aw_adv")) $("#aw_adv").value=(+s.advanceAmount||0);
+    if($("#aw_advrec")) $("#aw_advrec").value=s.advanceRecoveryRate?Math.round(s.advanceRecoveryRate*1000)/10:0;
+    if($("#aw_ret")) $("#aw_ret").value=(s.retentionPct!=null?Math.round(s.retentionPct*1000)/10:10);
+    if($("#aw_dlp")) $("#aw_dlp").value=(s.dlpMonths?Math.round(s.dlpMonths*30.44):365);
+    const miss=[]; if(!String(s.licenseNo||"").trim())miss.push("Trade Licence"); if(!String(s.trn||"").trim())miss.push("TRN"); if(!String(s.email||"").trim())miss.push("Email");
+    box.style.display="";
+    box.innerHTML=`<b>Auto-filled from supplier record:</b> ${esc(s.name)} · TL ${esc(s.licenseNo||"—")} · TRN ${esc(s.trn||"—")} · ${esc(s.email||"—")}${(+s.advanceAmount>0)?` · advance AED ${fmt(s.advanceAmount)} @ ${pct(s.advanceRecoveryRate||0)} recovery`:""}${miss.length?`<br><span style="color:var(--red)">⚠ missing on the supplier record: ${miss.join(", ")} — complete it in Suppliers so the document is not blank.</span>`:""}`;
+  };
+  $("#aw_sup").onchange=awSupInfo; awSupInfo();
   $("#aw_gen").onclick=async ()=>{
     const supplierId=$("#aw_sup").value, amount=+$("#aw_amt").value||0;
     if(!supplierId){ toast("Select a supplier / subcontractor"); return; }
@@ -2479,7 +2495,8 @@ async function vAwards(){
     const body={ supplierId, amount, entity:$("#aw_ent").value, project:$("#aw_proj").value.trim(), location:$("#aw_loc").value.trim(), client:$("#aw_client").value.trim(),
       quotationRef:$("#aw_qref").value.trim(), quotationDate:$("#aw_qdate").value, scopeTitle:$("#aw_stitle").value.trim(), scope:$("#aw_scope").value.trim(),
       commenceDays:+$("#aw_cdays").value||7, completion:$("#aw_comp").value, retentionPct:+$("#aw_ret").value||10, delayPctPerDay:+$("#aw_dd").value||0.5, delayCapPct:+$("#aw_dc").value||10,
-      securityDepPct:+$("#aw_sec").value||5, performancePct:+$("#aw_perf").value||5, dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24 };
+      securityDepPct:+$("#aw_sec").value||5, performancePct:+$("#aw_perf").value||5, dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24,
+      advanceAmount:+$("#aw_adv").value||0, advanceRecoveryPct:+$("#aw_advrec").value||0 };
     try{ toast("Generating…"); const rec=await api("award/generate",{method:"POST",body}); toast(rec.docNo+" created ("+(rec.type==="LOA"?"Letter of Award":"Subcontract Agreement")+")");
       const d=await api("award/list"); renderList(d.items); openAwardDoc(rec.id,false);
     }catch(e){ toast(e.message); }
