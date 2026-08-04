@@ -405,9 +405,11 @@ async function vDash(){
   $("#main").innerHTML=`<div class="muted" style="padding:24px">Loading executive dashboard…</div>`;
   const live=CERTS.filter(c=>c.status!=="Cancelled");
   const sum=f=>live.reduce((a,c)=>a+(f(c)||0),0);
-  let ccerts=[],contracts=[],pnl=null,assets=null;
-  const [d1,d2,d3,d4]=await Promise.all([api("clientcerts").catch(()=>[]),api("contracts").catch(()=>[]),api("pnl").catch(()=>null),api("assets").catch(()=>null)]);
-  ccerts=d1||[]; contracts=d2||[]; pnl=d3; assets=d4;
+  let ccerts=[],contracts=[],pnl=null,assets=null,awards=[];
+  const [d1,d2,d3,d4,d5]=await Promise.all([api("clientcerts").catch(()=>[]),api("contracts").catch(()=>[]),api("pnl").catch(()=>null),api("assets").catch(()=>null),api("award/list").catch(()=>({items:[]}))]);
+  ccerts=d1||[]; contracts=d2||[]; pnl=d3; assets=d4; awards=(d5&&d5.items)||[];
+  const projCommitted={}; awards.forEach(a=>{ if(!a||a.status==="Cancelled")return; if(a.project) projCommitted[a.project]=(projCommitted[a.project]||0)+(+a.amount||0); });
+  const totalCommitted=Object.values(projCommitted).reduce((x,y)=>x+y,0);
   const paidSup=(REG||[]).reduce((a,r)=>a+(+r.amount||0),0);
   const certifiedInclVat=sum(c=>c.payable);
   const dueSup=live.filter(c=>c.status==="Approved").reduce((a,c)=>a+(c.payable||0),0);
@@ -491,11 +493,11 @@ async function vDash(){
    ${(rcPend.length||pendCheck)?`<div class="kpis" style="margin-top:12px">${rcPend.length?kpi(`<span style="color:var(--red)">${rcPend.length}</span>`,"Receipts pending","alert"):""}${pendCheck?kpi(pendCheck,"Awaiting check / approval"):""}</div>`:""}
    <div style="height:6px"></div>
    <div class="card"><h2 style="margin:0 0 8px">Project financial summary <span class="muted" style="font-size:12px;font-weight:400">— what makes up the totals above</span></h2>
-     <div style="overflow-x:auto"><table><tr><th>Project</th><th class="num">Contract value</th><th class="num">Revenue certified</th><th class="num">Net due</th><th class="num">Down pmt received</th><th class="num">Retention held (client)</th><th class="num">Cost incurred</th><th class="num">IPCs</th></tr>
-     ${auditRows.map(p=>{const cvv=projContractVal[p]||projCV[p]||0; return `<tr><td>${esc(p)}</td><td class="num">${fmt(cvv)}</td><td class="num">${fmt(projRev[p]||0)}</td><td class="num">${fmt(projNet[p]||0)}</td><td class="num">${projDown[p]?fmt(projDown[p]):"—"}</td><td class="num">${projRet[p]?fmt(projRet[p]):"—"}</td><td class="num">${fmt(projCost[p]||0)}</td><td class="num">${projIpc[p]||0}</td></tr>`;}).join("")}
-     ${projCost["MA HQ – Operations"]?`<tr><td>MA HQ – Operations <span class="muted" style="font-size:10px">(overhead)</span></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${fmt(projCost["MA HQ – Operations"]||0)}</td><td class="num">—</td></tr>`:""}
-     ${orphanRev>0?`<tr style="color:var(--red)"><td>⚠ IPCs with no matching contract <span class="muted" style="font-size:10px">(not in totals)</span></td><td class="num">—</td><td class="num">${fmt(orphanRev)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${orphanCnt}</td></tr>`:""}
-     <tr class="tot"><td>TOTAL (all projects)</td><td class="num">${fmt(totalCV)}</td><td class="num">${fmt(revenue)}</td><td class="num">${fmt(netDue)}</td><td class="num">${fmt(totalDown)}</td><td class="num">${fmt(totalRet)}</td><td class="num">${fmt(cost)}</td><td class="num">${issuedTot}</td></tr></table></div>
+     <div style="overflow-x:auto"><table><tr><th>Project</th><th class="num">Contract value</th><th class="num">Revenue certified</th><th class="num">Net due</th><th class="num">Down pmt received</th><th class="num">Retention held (client)</th><th class="num">Committed (LOA)</th><th class="num">Cost incurred</th><th class="num">IPCs</th></tr>
+     ${auditRows.map(p=>{const cvv=projContractVal[p]||projCV[p]||0; return `<tr><td>${esc(p)}</td><td class="num">${fmt(cvv)}</td><td class="num">${fmt(projRev[p]||0)}</td><td class="num">${fmt(projNet[p]||0)}</td><td class="num">${projDown[p]?fmt(projDown[p]):"—"}</td><td class="num">${projRet[p]?fmt(projRet[p]):"—"}</td><td class="num">${projCommitted[p]?fmt(projCommitted[p]):"—"}</td><td class="num">${fmt(projCost[p]||0)}</td><td class="num">${projIpc[p]||0}</td></tr>`;}).join("")}
+     ${projCost["MA HQ – Operations"]?`<tr><td>MA HQ – Operations <span class="muted" style="font-size:10px">(overhead)</span></td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${fmt(projCost["MA HQ – Operations"]||0)}</td><td class="num">—</td></tr>`:""}
+     ${orphanRev>0?`<tr style="color:var(--red)"><td>⚠ IPCs with no matching contract <span class="muted" style="font-size:10px">(not in totals)</span></td><td class="num">—</td><td class="num">${fmt(orphanRev)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">${orphanCnt}</td></tr>`:""}
+     <tr class="tot"><td>TOTAL (all projects)</td><td class="num">${fmt(totalCV)}</td><td class="num">${fmt(revenue)}</td><td class="num">${fmt(netDue)}</td><td class="num">${fmt(totalDown)}</td><td class="num">${fmt(totalRet)}</td><td class="num">${fmt(totalCommitted)}</td><td class="num">${fmt(cost)}</td><td class="num">${issuedTot}</td></tr></table></div>
      <div class="muted" style="margin-top:8px">Down payment received and retention % are set per project in <b>Settings → Projects</b> (retention default 10%). Retention held is computed = rate × certified revenue; standard release 5% on completion + 5% after the 12-month DLP. Revenue certified = the highest cumulative gross (ex-VAT) across each contract's Issued/Approved IPCs. Company-wide view; use the <b>project selector</b> below for one project.</div></div>
    ${incompleteVendors.length?`<div class="card" id="incVendCard"><h2 style="margin:0 0 4px">Incomplete supplier / subcontractor registry <span class="muted" style="font-size:12px;font-weight:400">— ${incompleteVendors.length} of ${vendors.length} missing required data</span></h2>
      <div class="muted" style="margin-bottom:8px">Trade Licence, TRN / TAX and Email are required before a tax invoice can be accepted. Click a row to complete the record.</div>
@@ -2147,6 +2149,13 @@ function renderPnl(d){
        </table>
        <div class="muted" style="font-size:11px;margin-top:6px">The advance is a liability you owe back, recovered pro-rata from each certificate until repaid — never income. Retention is money the client owes you, released later.</div></div>
    </div>
+   ${num(d.committed)>0?`<div class="card" style="margin:14px 0 0"><h3>E · Subcontract commitments <span class="muted" style="font-weight:400;font-size:11px">— LOA / contracts issued</span></h3>
+     <table>
+      <tr><td class="lab">Committed — LOA / contracts awarded</td><td class="num"><b>${fmt(d.committed)}</b></td></tr>
+      <tr><td class="lab">Less: certified &amp; invoiced via IPCs (drawn down)</td><td class="num">(${fmt(d.committedCertified)})</td></tr>
+      <tr style="background:#eef2f8;font-weight:700"><td>Remaining commitment (still to certify)</td><td class="num" style="color:var(--gold)">${fmt(d.committedRemaining)}</td></tr>
+     </table>
+     <div class="muted" style="font-size:11px;margin-top:6px">The award value you've committed to subcontractors on this project. Each supplier IPC (PC) draws it down — <b>certified IPCs are the actual cost in the P&amp;L above</b>; the commitment is the forward view so nothing is double-counted.</div></div>`:""}
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
      <div class="card" style="margin:0"><h3>Cost by type</h3>
        <table><tr><th>Cost Type</th><th class="num">AED</th><th class="num">%</th></tr>${typeRows}</table></div>

@@ -13668,12 +13668,13 @@ async function upsertCertExpense(s, c) {
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
-  let cost = 0, paidOut = 0;
+  let cost = 0, paidOut = 0, ipcCost = 0;
   const byType = {}, byCat = {}, byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byDate = {}, byProject = {};
   let hqCost = 0;
   for (const e of expenses) {
     const a = num(e.amount), p = num(e.paid);
     const isHQ = e.project === HQ_PROJECT;
+    if (e.source === "supplier-ipc") ipcCost += a; // subcontract cost certified via IPCs
     cost += a; paidOut += p;
     if (isHQ) hqCost += a;
     byType[e.costType] = (byType[e.costType] || 0) + a;
@@ -13718,6 +13719,18 @@ async function computePnl(s, project) {
   let advanceAgreed = 0;
   for (const c of projContracts) advanceAgreed += num(c.advanceAmount);
   revenue = r2(revenue);
+  // ---- subcontract commitments (LOA / contracts issued) ----
+  // The award is the committed cost; supplier IPCs (PCs) draw it down. Remaining
+  // commitment = committed − certified via IPCs. No double-count: IPC cost is the
+  // actual expense; the commitment is a forward view of the awarded total.
+  let committed = 0;
+  try {
+    const awards = await getAllJSON(s, "award/");
+    for (const aw of awards) { if (!aw || aw.status === "Cancelled") continue; if (project && aw.project !== project) continue; committed += num(aw.amount); }
+  } catch (e) {}
+  committed = r2(committed);
+  const committedCertified = r2(ipcCost);
+  const committedRemaining = r2(Math.max(0, committed - committedCertified));
   // ---- cash position ----
   // Advance received = logged advance receipts if any, else the agreed down payment
   // (received upfront against the advance guarantee before works commence).
@@ -13739,6 +13752,7 @@ async function computePnl(s, project) {
   return {
     project: project || "", scope: project || "All projects",
     revenue, netDue: r2(netDue), cost: r2(cost), paidOut: r2(paidOut), hqCost: r2(hqCost), projectCost: r2(cost - hqCost),
+    committed, committedCertified, committedRemaining, ipcCost: r2(ipcCost),
     directCost, indirectCost, overheadCost,
     grossProfit, operatingProfit, netProfit,
     grossMargin, operatingMargin, netMargin,
