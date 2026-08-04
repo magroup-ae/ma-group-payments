@@ -12678,6 +12678,28 @@ function buildEmail(type, ctx, cfg) {
       })
     };
   }
+  if (type === "announcement") {
+    const cat = ctx.category || "Notice";
+    const bands = { "Payment & Certification": "#1f3864", "General Information": "#2e75b6", "Instruction / Notice": "#bf9000", "Policy Update": "#375623" };
+    const bodyParas = String(ctx.body || "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+      .map((p) => emEsc(p).replace(/\n/g, "<br>"));
+    return {
+      to: ctx.to,
+      toName: ctx.toName || "Valued Partner",
+      greeting: ctx.greeting || "Valued Partner",
+      bcc: ctx.bcc || [],
+      subject: ctx.subject || `${cat} \u2014 MA Group`,
+      html: emailShell(cfg, {
+        title: cat,
+        band: bands[cat] || "#1f3864",
+        preheader: ctx.subject || cat,
+        lead: bodyParas.length ? bodyParas : ["\u2014"],
+        note: ctx.note || `This is an official communication from MA Group. Please retain it for your records and ensure compliance. For any clarification, reply to <strong>${emEsc(cfg.replyTo)}</strong>.`,
+        noteColor: "#eef2f8", noteBar: "#1f3864",
+        closing: ctx.closing || `Thank you for your continued cooperation.`
+      })
+    };
+  }
   if (type === "initiated") {
     return {
       to,
@@ -12887,6 +12909,9 @@ async function sendMail(s, cfg, msg) {
   const id = "E" + Date.now().toString(36) + "-" + randomBytes(3).toString("hex");
   const rec = { id, at: now(), type: msg.type || "", to: msg.to || "", toName: msg.toName || "", subject: msg.subject || "", certNo: msg.certNo || "", supplierId: msg.supplierId || "", status: "", detail: "" };
   const split = (v) => String(v || "").split(/[;,]/).map((a) => a.trim()).filter(Boolean);
+  const msgBcc = Array.isArray(msg.bcc) ? msg.bcc.filter(Boolean) : split(msg.bcc);
+  const allBcc = [...split(cfg.bcc), ...msgBcc];
+  rec.bccCount = msgBcc.length;
   const useSmtp = cfg.provider === "smtp" && cfg.smtpUser && cfg.smtpPass;
   const useZepto = cfg.provider === "zeptomail" && cfg.token;
   try {
@@ -12914,7 +12939,7 @@ async function sendMail(s, cfg, msg) {
         to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to,
         replyTo: cfg.replyTo,
         cc: split(cfg.cc).join(", ") || void 0,
-        bcc: split(cfg.bcc).join(", ") || void 0,
+        bcc: allBcc.join(", ") || void 0,
         subject: msg.subject,
         html: msg.html
       });
@@ -12930,8 +12955,7 @@ async function sendMail(s, cfg, msg) {
       };
       const cc = split(cfg.cc);
       if (cc.length) body.cc = cc.map((a) => ({ email_address: { address: a } }));
-      const bcc = split(cfg.bcc);
-      if (bcc.length) body.bcc = bcc.map((a) => ({ email_address: { address: a } }));
+      if (allBcc.length) body.bcc = allBcc.map((a) => ({ email_address: { address: a } }));
       const resp = await fetch(`https://${cfg.host}/v1.1/email`, {
         method: "POST",
         headers: { "Authorization": `Zoho-enczapikey ${cfg.token}`, "Content-Type": "application/json", "Accept": "application/json" },
@@ -13835,6 +13859,53 @@ var api_default = async (req, context) => {
     }
     return json({ ok: true, to: cfg.adminEmail, count: sent.length, sent });
   }
+  const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || "").trim());
+  if (path === "announcement/recipients" && req.method === "GET") {
+    if (!can("admin")) return err("CEO only", 403);
+    const sups = await listSuppliers();
+    const active = sups.filter((x) => !x.status || x.status === "Active");
+    const withEmail = active.filter((x) => validEmail(x.email));
+    return json({ total: sups.length, active: active.length, withEmail: withEmail.length, missingEmail: active.length - withEmail.length });
+  }
+  if (path === "announcement/list" && req.method === "GET") {
+    if (!can("admin")) return err("CEO only", 403);
+    const items = await getAllJSON(s, "announcement/");
+    items.sort((a, b) => a.sentAt < b.sentAt ? 1 : -1);
+    return json({ items });
+  }
+  if (path === "announcement/send" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const b = await req.json();
+    const category = String(b.category || "General Information").trim();
+    const subject = String(b.subject || "").trim();
+    const body = String(b.body || "").trim();
+    if (subject.length < 3) return err("Please enter a subject line");
+    if (body.length < 5) return err("Please enter the announcement message");
+    const cfg = await getEmailCfg(s);
+    // Test send: goes only to the CEO/admin inbox for preview.
+    if (b.test) {
+      const t = buildEmail("announcement", { to: cfg.adminEmail, category, subject, body }, cfg);
+      const r = await sendMail(s, cfg, { type: "announcement", to: t.to, toName: t.toName, subject: "[TEST] " + t.subject, html: t.html });
+      return json({ ok: true, test: true, to: cfg.adminEmail, status: r.status });
+    }
+    const sups = await listSuppliers();
+    const emails = [...new Set(sups.filter((x) => (!x.status || x.status === "Active") && validEmail(x.email)).map((x) => x.email.trim()))];
+    if (!emails.length) return err("No suppliers/subcontractors with a valid email were found", 400);
+    // Batch the BCC so recipients never see one another and SMTP limits are respected.
+    const CHUNK = 50;
+    let delivered = 0, groups = 0, lastStatus = "";
+    for (let i = 0; i < emails.length; i += CHUNK) {
+      const grp = emails.slice(i, i + CHUNK);
+      const t = buildEmail("announcement", { to: cfg.from, toName: "MA Group Partners", greeting: "Valued Partner", category, subject, body, bcc: grp }, cfg);
+      const r = await sendMail(s, cfg, { type: "announcement", to: t.to, toName: t.toName, subject: t.subject, html: t.html, bcc: grp });
+      if (r.status === "sent" || r.status === "logged") delivered += grp.length;
+      lastStatus = r.status; groups++;
+    }
+    const id = "ANN" + Date.now().toString(36) + randomBytes(2).toString("hex");
+    const recA = { id, category, subject, body, sentAt: now(), sentBy: me.name, recipientCount: delivered, totalTargets: emails.length, autoNew: b.autoNew !== false, lastStatus };
+    await s.setJSON("announcement/" + id, recA);
+    return json({ ok: true, id, recipientCount: delivered, totalTargets: emails.length, groups, lastStatus });
+  }
   if (path === "admin/delete" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
     const { kind, id, pin } = await req.json();
@@ -14123,7 +14194,22 @@ var api_default = async (req, context) => {
       updatedBy: me.name
     };
     await s.setJSON("supplier/" + id, sup);
-    if (!b.id) { await notify(s, "welcome", { sup }); await notify(s, "paymentcycle", { sup }); }
+    if (!b.id) {
+      await notify(s, "welcome", { sup });
+      await notify(s, "paymentcycle", { sup });
+      // Auto-send the most recent announcement to the newly registered vendor.
+      try {
+        if (sup.email) {
+          const anns = await getAllJSON(s, "announcement/");
+          const latest = anns.filter((a) => a.autoNew !== false).sort((a, b2) => a.sentAt < b2.sentAt ? 1 : -1)[0];
+          if (latest) {
+            const cfg = await getEmailCfg(s);
+            const t = buildEmail("announcement", { to: sup.email, toName: sup.contactName || sup.name, greeting: sup.contactName || sup.name, category: latest.category, subject: latest.subject, body: latest.body }, cfg);
+            await sendMail(s, cfg, { type: "announcement", to: t.to, toName: t.toName, subject: t.subject, html: t.html, supplierId: sup.id });
+          }
+        }
+      } catch (e) { }
+    }
     return json(sup);
   }
   const supGet = path.match(/^supplier\/([^/]+)$/);

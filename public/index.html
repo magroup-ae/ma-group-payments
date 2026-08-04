@@ -314,6 +314,7 @@ async function unlockSettings(){
 function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
   const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
+  if(ME.role==="CEO") tabs.push(["announce","Announcements"]);
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
   <header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Finance</div><div class="sp"></div>
@@ -326,7 +327,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -2311,6 +2312,63 @@ async function importAssetsExcel(){
     try{ const res=await api("assets/import",{method:"POST",body:{assets}}); toast(`Imported ${res.created} new · ${res.updated} updated · ${res.skipped} skipped`); vAssets(); }catch(e){ toast(e.message); }
   };
   inp.click();
+}
+
+/* ---------- announcements ---------- */
+const ANN_CATS=["Payment & Certification","General Information","Instruction / Notice","Policy Update"];
+const ANN_TEMPLATES={
+  "Payment & Certification":`Dear Valued Partner,\n\nThis is to remind all suppliers and subcontractors that payment submittals for certification must be submitted on or before the 25th of each month, to allow our team to review and verify them.\n\nAll verified payments will be released after the 10th of the following month.\n\nEach submittal must be accompanied by the works report and the attendance sheet signed and verified by the MA Group site engineer. No tax invoice will be accepted without these attachments.`
+};
+async function vAnnounce(){
+  if(ME.role!=="CEO"){ $("#main").innerHTML=`<div class="card muted">Announcements are available to the CEO / CFO only.</div>`; return; }
+  $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
+  let rc={withEmail:0,missingEmail:0,total:0}, hist={items:[]};
+  try{ [rc,hist]=await Promise.all([api("announcement/recipients"),api("announcement/list")]); }catch(e){}
+  const catOpts=ANN_CATS.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#main").innerHTML=`
+   <div class="card">
+     <div class="flex"><h2 style="margin:0">Broadcast announcement</h2>
+       <span class="right muted" style="font-size:12px">Recipients hidden in BCC · privacy protected</span></div>
+     <div class="note" style="margin:8px 0">This sends one email to <b>all active suppliers &amp; subcontractors</b>. Every recipient is placed in <b>BCC</b>, so no vendor can see another vendor's email address. The most recent announcement is also sent automatically to any newly registered vendor.</div>
+     <div class="kpis" style="margin:6px 0 14px">
+       <div class="kpi"><div class="v">${rc.withEmail||0}</div><div class="l">Will receive (valid email)</div></div>
+       <div class="kpi ${rc.missingEmail?'alert':''}"><div class="v">${rc.missingEmail||0}</div><div class="l">Skipped — no email on file</div></div>
+       <div class="kpi"><div class="v">${rc.total||0}</div><div class="l">Total registered vendors</div></div>
+     </div>
+     <div class="grid">
+       <div><label>Category</label><select id="anCat">${catOpts}</select></div>
+       <div><label>Subject line</label><input id="anSubj" placeholder="e.g. Monthly Payment Submittal Cut-off — Action Required"></div>
+     </div>
+     <div style="margin-top:10px"><label>Message</label>
+       <textarea id="anBody" rows="11" style="width:100%;font-family:inherit" placeholder="Write your announcement here. Leave a blank line between paragraphs."></textarea></div>
+     <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="anAuto" checked> Automatically send this to newly registered suppliers/subcontractors (keeps it as the standing notice for new vendors)</label>
+     <div class="flex" style="margin-top:14px;gap:10px">
+       <button class="btn ghost" id="anTpl">Insert payment-cycle template</button>
+       <button class="btn ghost" id="anTest">Send test to me</button>
+       <span class="right"></span>
+       <button class="btn green" id="anSend">Send to all suppliers &amp; subcontractors</button>
+     </div>
+   </div>
+   <div class="card"><h2 style="margin:0 0 8px">Announcement history</h2>
+     <div id="anHist"></div></div>`;
+  const renderHist=(items)=>{ const h=$("#anHist"); if(!h) return;
+    if(!items||!items.length){ h.innerHTML=`<div class="muted">No announcements sent yet.</div>`; return; }
+    h.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Date</th><th>Category</th><th>Subject</th><th class="num">Recipients</th><th>Auto to new</th><th>By</th></tr>
+      ${items.map(a=>`<tr class="click anRow" data-id="${esc(a.id)}"><td>${dmy(a.sentAt)} ${esc(String(a.sentAt||"").slice(11,16))}</td><td>${esc(a.category||"")}</td><td>${esc(a.subject||"")}</td><td class="num">${a.recipientCount||0}${a.totalTargets&&a.totalTargets!==a.recipientCount?" / "+a.totalTargets:""}</td><td>${a.autoNew!==false?'<span style="color:var(--green)">Yes</span>':'No'}</td><td>${esc(a.sentBy||"")}</td></tr>`).join("")}</table></div>`;
+    h.querySelectorAll(".anRow").forEach(r=>r.onclick=()=>{ const a=items.find(x=>x.id===r.dataset.id); if(!a) return; $("#anCat").value=a.category; $("#anSubj").value=a.subject; $("#anBody").value=a.body; toast("Loaded into the composer — edit and resend if needed"); window.scrollTo({top:0,behavior:"smooth"}); });
+  };
+  renderHist(hist.items);
+  $("#anTpl").onclick=()=>{ const c=$("#anCat").value; const t=ANN_TEMPLATES[c]||ANN_TEMPLATES["Payment & Certification"]; $("#anBody").value=t; if(!$("#anSubj").value) $("#anSubj").value="Monthly Payment Submittal Cut-off — Action Required"; };
+  $("#anTest").onclick=async ()=>{ const category=$("#anCat").value, subject=$("#anSubj").value.trim(), body=$("#anBody").value.trim();
+    if(subject.length<3||body.length<5){ toast("Enter a subject and message first"); return; }
+    try{ toast("Sending test…"); const r=await api("announcement/send",{method:"POST",body:{category,subject,body,test:true}}); toast("Test sent to "+r.to); }catch(e){ toast(e.message); } };
+  $("#anSend").onclick=async ()=>{ const category=$("#anCat").value, subject=$("#anSubj").value.trim(), body=$("#anBody").value.trim(), autoNew=$("#anAuto").checked;
+    if(subject.length<3){ toast("Enter a subject line"); return; }
+    if(body.length<5){ toast("Enter the announcement message"); return; }
+    if(!confirm(`Send this announcement to ${rc.withEmail||0} supplier(s)/subcontractor(s)?\n\nAll recipients will be in BCC (hidden from each other).`)) return;
+    try{ toast("Broadcasting…"); const r=await api("announcement/send",{method:"POST",body:{category,subject,body,autoNew}});
+      toast(`Sent to ${r.recipientCount} recipient(s)`); const h=await api("announcement/list"); renderHist(h.items);
+    }catch(e){ toast(e.message); } };
 }
 
 /* ---------- settings ---------- */
