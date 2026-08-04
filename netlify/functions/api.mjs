@@ -13199,6 +13199,37 @@ async function ensureInit() {
     settings.cfoFullAccessV1 = true;
     await s.setJSON("settings", settings);
   }
+  // One-time: repair supplier IPCs where the invoice amount was mistakenly entered
+  // in the Contra box (zero certified value + a contra) — a per-invoice payment that
+  // came out negative. Move the amount to the invoice value so it becomes a normal
+  // positive payment, and align any recorded payment / register / cost line.
+  if (!settings.fixNegContraV1) {
+    try {
+      const certs = await getAllJSON(s, "cert/");
+      let reg = null;
+      for (const c of certs) {
+        if (!c || c.status === "Cancelled") continue;
+        const cum = num(c.calc?.cumValue), contra = num(c.contra), inv = num(c.invoiceAmount);
+        if (cum === 0 && contra > 0 && inv === 0) {
+          c.invoiceAmount = contra; c.contra = 0;
+          const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
+          await recompute(c, sup);
+          if (c.payment) {
+            const newAmt = num(c.calc?.payable);
+            c.payment.amount = newAmt;
+            if (!reg) reg = await s.get("register", { type: "json" }) || [];
+            for (const r of reg) if (r && r.no === c.no) r.amount = newAmt;
+          }
+          if (Array.isArray(c.audit)) c.audit.push({ at: now(), by: "system", action: `Auto-corrected — invoice amount ${contra} had been entered as contra; moved to invoice value (now a positive payment)` });
+          await s.setJSON("cert/" + c.no, c);
+          try { await upsertCertExpense(s, c); } catch (e) {}
+        }
+      }
+      if (reg) await s.setJSON("register", reg);
+    } catch (e) {}
+    settings.fixNegContraV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
