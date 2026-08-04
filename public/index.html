@@ -2061,7 +2061,7 @@ function renderPnl(d){
      <div class="kpi" style="border-top-color:${ncColor}"><div class="v" style="color:${ncColor}">AED ${fmt(d.netCash)}</div><div class="l">Net cash position</div></div>
    </div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
-     <div class="card" style="margin:0"><h3>A · Income statement <span class="muted" style="font-weight:400;font-size:11px">— profitability (accrual)</span></h3>
+     <div class="card" style="margin:0"><h3>A · Income statement <span class="muted" style="font-weight:400;font-size:11px">— profitability (accrual · UAE progress-billing basis)</span></h3>
        <table>
         <tr><td class="lab">Revenue — value of work certified (ex-VAT)</td><td class="num"><b>${fmt(d.revenue)}</b></td></tr>
         <tr><td class="lab" style="padding-left:18px;color:#7a8494;font-size:12px">of which — work executed / installed</td><td class="num" style="color:#7a8494">${fmt(d.workExecuted)}</td></tr>
@@ -2073,7 +2073,7 @@ function renderPnl(d){
         <tr><td class="lab">Less: Overheads${d.hqCost?" (incl. MA HQ "+fmt(d.hqCost)+")":""}</td><td class="num">(${fmt(overhead)})</td></tr>
         <tr style="background:#e7efe9;font-weight:800"><td>NET PROFIT</td><td class="num" style="color:${nColor}">${fmt(d.netProfit)} · ${pctv(d.netProfit)}</td></tr>
        </table>
-       <div class="muted" style="font-size:11px;margin-top:6px">Revenue = value of work certified (ex-VAT). Retention is <b>not</b> deducted here — it is revenue earned but withheld (a receivable, section B). Advances are <b>not</b> revenue — they are a liability (section C). Where cost exceeds certified revenue early on, it is a <b>timing effect</b> (procurement &amp; prelims incurred ahead of certification) — see Work-in-Progress below.</div></div>
+       <div class="muted" style="font-size:11px;margin-top:6px"><b>Basis: UAE progress billing</b> — revenue is the value of work certified (ex-VAT), <b>including certified materials on site</b>, recognised as the client certifies each IPC. Retention is <b>not</b> deducted here — it is revenue earned but withheld (a receivable, section B). Advances are <b>not</b> revenue — they are a liability (section C). Where cost exceeds certified revenue early on, it is a <b>timing effect</b> (procurement &amp; prelims incurred ahead of certification) — see Work-in-Progress below.</div></div>
      <div class="card" style="margin:0"><h3>B · Client billing &amp; receivables</h3>
        <table>
         <tr><td class="lab">Work certified (ex-VAT)</td><td class="num">${fmt(d.revenue)}</td></tr>
