@@ -13376,7 +13376,15 @@ function computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra) {
   const retention = r2(gross * retentionPct);
   const afterRet = r2(gross - retention);
   let advanceRecovery = 0;
-  const advanceAmount = num(contract?.advanceAmount), advanceRate = num(contract?.recoveryRate);
+  const advanceAmount = num(contract?.advanceAmount);
+  let advanceRate = num(contract?.recoveryRate);
+  // If an advance/down payment exists but no explicit recovery rate is set, recover
+  // it pro-rata against the contract value so it is fully repaid by completion
+  // (rate = advance ÷ contract value). Prevents the advance silently never recovering.
+  if (advanceAmount > 0 && !(advanceRate > 0)) {
+    const base = num(contract?.contractSum);
+    if (base > 0) advanceRate = advanceAmount / base;
+  }
   if (advanceAmount > 0 && advanceRate > 0) {
     const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
     advanceRecovery = Math.min(r2(advanceRate * gross), remaining);

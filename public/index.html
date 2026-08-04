@@ -1410,7 +1410,8 @@ function ccCalc(grossCum,mos,contra,ct,prevNet,recoveredSoFar,prevContra){
   const gross=r2(num(grossCum)+num(mos));
   const retention=r2(gross*num(ct.retentionPct));
   const afterRet=r2(gross-retention);
-  let advRec=0; const advAmt=num(ct.advanceAmount), advRate=num(ct.recoveryRate);
+  let advRec=0; const advAmt=num(ct.advanceAmount); let advRate=num(ct.recoveryRate);
+  if(advAmt>0&&!(advRate>0)){ const base=num(ct.contractSum); if(base>0) advRate=advAmt/base; }
   if(advAmt>0&&advRate>0){ const rem=Math.max(0,r2(advAmt-num(recoveredSoFar))); advRec=Math.min(r2(advRate*gross),rem); }
   const net=r2(afterRet-r2(num(recoveredSoFar)+advRec)-r2(num(prevContra)+num(contra))-num(prevNet));
   const vat=r2(net*num(ct.vatPct));
@@ -1565,7 +1566,7 @@ async function contractDetail(id){
       <div class="kpi"><div class="v">AED ${fmt(sm.certifiedNet)}</div><div class="l">Net certified to date</div></div>
       <div class="kpi"><div class="v">AED ${fmt(sm.retentionHeld)}</div><div class="l">Retention held</div></div>
     </div>
-    <div class="muted" style="margin-top:6px">Retention ${pct(ct.retentionPct)} · Recovery ${pct(ct.recoveryRate)} · VAT ${pct(ct.vatPct)} · Ref ${esc(ct.subcontractRef||"—")}</div></div>
+    <div class="muted" style="margin-top:6px">Retention ${pct(ct.retentionPct)} · Recovery ${pct(num(ct.recoveryRate)>0?num(ct.recoveryRate):(num(ct.advanceAmount)>0&&num(ct.contractSum)>0?num(ct.advanceAmount)/num(ct.contractSum):0))}${!(num(ct.recoveryRate)>0)&&num(ct.advanceAmount)>0?" (pro-rata)":""} · VAT ${pct(ct.vatPct)} · Ref ${esc(ct.subcontractRef||"—")}</div></div>
    <div class="card"><div class="flex"><h2 style="margin:0">Payment certificates</h2>${can?`<button class="btn gold right" id="newCC">+ New certificate</button>`:""}</div><div style="height:8px"></div>
      ${certs.length?`<table><tr><th>No.</th><th>Date</th><th>Period</th><th class="num">Gross cum.</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
        ${certs.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.gross)}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`:`<div class="muted">No certificates yet.</div>`}
@@ -1647,7 +1648,7 @@ async function clientCertForm(contractId){
         <td style="padding:2px 8px"><span class="muted">Retention</span><br><b>${pct(ct.retentionPct)}</b></td>
         <td style="padding:2px 8px"><span class="muted">VAT</span><br><b>${pct(ct.vatPct)}</b></td>
       </tr></table>
-      ${isFirst&&num(ct.advanceAmount)>0?`<div class="note" style="margin-top:8px;font-size:11.5px">This is the <b>first certificate</b> for this project. The down payment of <b>AED ${fmt(ct.advanceAmount)}</b> is treated as paid separately (against the advance-payment guarantee) and is recovered from this and subsequent certificates at ${pct(ct.recoveryRate)} of work value until fully repaid.</div>`:""}
+      ${isFirst&&num(ct.advanceAmount)>0?`<div class="note" style="margin-top:8px;font-size:11.5px">This is the <b>first certificate</b> for this project. The down payment of <b>AED ${fmt(ct.advanceAmount)}</b> is treated as paid separately (against the advance-payment guarantee) and is recovered from this and subsequent certificates at ${pct(num(ct.recoveryRate)>0?num(ct.recoveryRate):(num(ct.advanceAmount)>0&&num(ct.contractSum)>0?num(ct.advanceAmount)/num(ct.contractSum):0))} of work value until fully repaid.</div>`:""}
     </div>`;
     $("#q_preview").innerHTML=info+`<div class="cert" style="max-width:520px">${sectionB(calc,ct)}</div>
       <div class="muted" style="font-size:11px;margin-top:4px">Advance recovered to date: ${fmt(calc.advRecoveredToDate)} · Advance still to recover: ${fmt(calc.advOutstanding)} · Retention held: ${fmt(calc.retentionHeld)}</div>`; };
