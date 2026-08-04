@@ -13230,6 +13230,38 @@ async function ensureInit() {
     settings.fixNegContraV1 = true;
     await s.setJSON("settings", settings);
   }
+  // One-time: per-invoice suppliers (rate / no fixed contract — equipment rental,
+  // one-off services) should carry no retention and no DLP (nothing to secure).
+  // Zero both on those supplier records and re-cost their not-yet-paid certificates.
+  if (!settings.zeroRetPerInvoiceV1) {
+    try {
+      const sups = await getAllJSON(s, "supplier/");
+      const changed = new Set();
+      for (const sp of sups) {
+        if (!sp) continue;
+        const perInvoice = sp.contractType === "Rate" || !(num(sp.contractValue) > 0);
+        if (perInvoice && (num(sp.retentionPct) > 0 || num(sp.dlpMonths) > 0)) {
+          sp.retentionPct = 0; sp.dlpMonths = 0; sp.retentionRelease = "";
+          await s.setJSON("supplier/" + sp.id, sp);
+          changed.add(sp.id);
+        }
+      }
+      if (changed.size) {
+        const certs = await getAllJSON(s, "cert/");
+        for (const c of certs) {
+          if (!c || !changed.has(c.supplierId)) continue;
+          if (["Paid", "Cancelled"].includes(c.status)) continue; // don't disturb settled payments
+          const sp = await s.get("supplier/" + c.supplierId, { type: "json" });
+          c.retentionPct = 0;
+          await recompute(c, sp);
+          await s.setJSON("cert/" + c.no, c);
+          try { await upsertCertExpense(s, c); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    settings.zeroRetPerInvoiceV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {

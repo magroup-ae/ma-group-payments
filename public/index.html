@@ -1245,6 +1245,9 @@ function supForm(s){
     // Per-invoice services/rentals are usually paid in full — default retention to none.
     if(rate && isNew && +$("#s_retentionPct").value===10) $("#s_retentionPct").value=0; };
   applyCT(); $("#s_contractType").onchange=applyCT;
+  // Retention exists only to secure a DLP — no DLP ⇒ no retention.
+  if($("#s_dlpMonths")) $("#s_dlpMonths").onchange=()=>{ if(+$("#s_dlpMonths").value===0){ $("#s_retentionPct").value=0; if($("#s_retentionRelease")) $("#s_retentionRelease").value=""; } };
+  if($("#s_retentionPct")) $("#s_retentionPct").onchange=()=>{ if(+$("#s_retentionPct").value>0 && +$("#s_dlpMonths").value===0){ $("#s_dlpMonths").value=12; } };
   $("#printReg").onclick=()=>printSupplierReg(collectSup(s));
   if(!isNew){
     document.querySelectorAll("[data-docview]").forEach(b=>b.onclick=async ()=>{ try{ const d=await api("supplier/"+encodeURIComponent(s.id)+"/doc?kind="+b.dataset.docview); if(!d.dataUrl){toast("Not found");return;} const w=window.open(); w.document.write('<iframe src="'+d.dataUrl+'" style="border:0;width:100%;height:100vh"></iframe>'); }catch(e){toast(e.message);} });
