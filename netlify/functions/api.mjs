@@ -14718,6 +14718,31 @@ var api_default = async (req, context) => {
     if (regChanged) await s.setJSON("register", reg);
     return json({ ok: true, ref: newRef, oldRef });
   }
+  const revM = path.match(/^cert\/([^/]+)\/reverse-payment$/);
+  if (revM && req.method === "POST") {
+    if (!can("admin")) return err("Only the CEO can reverse a payment", 403);
+    const key = "cert/" + decodeURIComponent(revM[1]);
+    const c = await s.get(key, { type: "json" });
+    if (!c || !c.payment) return err("No payment to reverse on this certificate", 404);
+    const b = await req.json().catch(() => ({}));
+    const reason = String(b.reason || "").trim();
+    const prevRef = c.payment.ref || "", prevMode = c.payment.mode || "", prevAmt = num(c.payment.amount);
+    // Remove this payment's entry from the payment register (frees the cheque number too).
+    const reg = await s.get("register", { type: "json" }) || [];
+    const newReg = reg.filter((r) => !(r && r.no === c.no));
+    if (newReg.length !== reg.length) await s.setJSON("register", newReg);
+    c.payment = null;
+    if (c.status === "Paid") c.status = "Approved";
+    if (c.audit) c.audit.push({ at: now(), by: me.name, action: `Payment reversed — ${prevMode} ${prevRef} AED ${prevAmt}${reason ? " — " + reason : ""}` });
+    await s.setJSON(key, c);
+    // Mark the mirrored project cost line back to unpaid (it stays as an approved cost).
+    try {
+      const xid = "XPC-" + c.no.replace(/[^A-Za-z0-9]+/g, "_");
+      const xp = await s.get("expense/" + xid, { type: "json" });
+      if (xp) { xp.status = "Pending"; xp.paid = 0; xp.amount = num(c.calc?.net); xp.updatedAt = now(); await s.setJSON("expense/" + xid, xp); }
+    } catch (e) {}
+    return json({ ok: true, status: c.status });
+  }
   const proofM = path.match(/^cert\/([^/]+)\/proof$/);
   if (proofM) {
     const no = decodeURIComponent(proofM[1]);

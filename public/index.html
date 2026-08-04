@@ -690,6 +690,7 @@ async function openCert(no){
         : `<button class="btn gold" id="chqBtn">Print cheque</button>`)
     : "";
   const amendChqBtn = (pm==="Cheque" && c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="amendChqBtn" title="Correct a mis-printed cheque number">Amend cheque no.</button>` : "";
+  const revBtn = (c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="revBtn2" style="color:var(--red);border-color:var(--red)" title="Reverse this payment and return the certificate to Approved">Reverse payment</button>` : "";
   const cashBtn = pm==="Cash" ? `<button class="btn gold" id="pcvBtn">Petty cash voucher</button>` : "";
   const rvBtn = c.payment ? `<button class="btn ghost" id="rvBtn">Receipt voucher</button>` : "";
   const canPay=["Accounts","CEO"].includes(ME.role);
@@ -703,7 +704,7 @@ async function openCert(no){
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
         ${(!canEdit&&ME.role==="CEO"&&c.status!=="Cancelled")?`<button class="btn ghost" id="ceoEditBtn" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}
-        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${cashBtn}${rvBtn}${proofBtn}
+        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${cashBtn}${rvBtn}${proofBtn}${revBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     ${(num(K.net)<0 && num(c.contra)>0 && num(K.cumValue)===0)?`<div class="note" style="margin-top:12px;background:#fdecec;border-left:4px solid #c0392b">
@@ -758,6 +759,11 @@ async function openCert(no){
     try{ await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body:{invoiceAmount:num(c.contra),contra:0}}); toast("Corrected — this is now a positive payment certificate"); await load(); openCert(c.no); }catch(e){ toast(e.message); }
   };
   if($("#amendChqBtn")) $("#amendChqBtn").onclick=()=>amendChequeNo(c.no, c.payment&&c.payment.ref, async()=>{ await load(); openCert(c.no); });
+  if($("#revBtn2")) $("#revBtn2").onclick=async ()=>{
+    const p=c.payment||{}; if(!confirm("Reverse this payment?\n\n"+(p.mode||"")+" "+(p.ref||"")+" · AED "+fmt(p.amount)+"\n\nThe certificate returns to Approved, the register entry is removed"+(p.mode==="Cheque"?" and the cheque number is freed":"")+". This is logged.")) return;
+    const reason=prompt("Reason for reversing (for the audit log):","Payment recorded in error")||"";
+    try{ const r=await api("cert/"+encodeURIComponent(c.no)+"/reverse-payment",{method:"POST",body:{reason}}); toast("Payment reversed — certificate is now "+r.status); await load(); openCert(c.no); }catch(e){ toast(e.message); }
+  };
   if(cashBtn) $("#pcvBtn").onclick=()=>printPettyCash(c);
   if(rvBtn) $("#rvBtn").onclick=()=>printReceiptVoucher(c);
   if(pm==="Bank Transfer"){
