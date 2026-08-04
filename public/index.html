@@ -1241,7 +1241,9 @@ function supForm(s){
   applyType(); $("#s_type").onchange=applyType;
   const applyCT=()=>{ const rate=$("#s_contractType").value==="Rate";
     $("#s_cvLab").textContent=rate?"Estimated / budget value (optional, excl VAT)":"Contract value (excl VAT)";
-    $("#s_ctHint").innerHTML=rate?"<b>Rate contract:</b> works are done on site as required and certified when the supplier submits an invoice. Each certificate is valued at the invoice amount — no % complete, no deduction of previous certificates.":""; };
+    $("#s_ctHint").innerHTML=rate?"<b>Rate / per-invoice:</b> certified at the submitted invoice amount — no % complete. Retention normally does <b>not</b> apply — leave it at 0 unless the contract requires it.":"";
+    // Per-invoice services/rentals are usually paid in full — default retention to none.
+    if(rate && isNew && +$("#s_retentionPct").value===10) $("#s_retentionPct").value=0; };
   applyCT(); $("#s_contractType").onchange=applyCT;
   $("#printReg").onclick=()=>printSupplierReg(collectSup(s));
   if(!isNew){
