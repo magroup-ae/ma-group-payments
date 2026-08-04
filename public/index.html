@@ -234,9 +234,9 @@ async function openAwardDoc(id, doPrint){
 const ONES=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
 const TENS=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
 function grp(n){ let s=""; if(n>=100){ s=ONES[Math.floor(n/100)]+" Hundred "; n%=100; } if(n>=20){ s+=TENS[Math.floor(n/10)]; if(n%10) s+=" "+ONES[n%10]; } else if(n>0) s+=ONES[n]; return s.trim(); }
-function words(amount){ if(!amount) return ""; const d=Math.floor(amount), f=Math.round((amount-d)*100), m=Math.floor(d/1e6), t=Math.floor(d%1e6/1e3), u=d%1e3;
+function words(amount){ const neg=num(amount)<0; amount=Math.abs(num(amount)); const d=Math.floor(amount), f=Math.round((amount-d)*100), m=Math.floor(d/1e6), t=Math.floor(d%1e6/1e3), u=d%1e3;
   let w=[m?grp(m)+" Million":"",t?grp(t)+" Thousand":"",u?grp(u):""].filter(Boolean).join(" ")||"Zero";
-  return "UAE Dirhams "+w+(f?" and "+grp(f)+" Fils":"")+" Only"; }
+  return "UAE Dirhams "+(neg?"Minus ":"")+w+(f?" and "+grp(f)+" Fils":"")+" Only"; }
 
 // compress images before upload (PDFs pass through unchanged). png=true keeps transparency (signature/stamp).
 function fileToDataUrl(file, cb, opts={}){
@@ -828,6 +828,7 @@ async function doAction(c,a){
   let body={action:a};
   if(a==="reject"||a==="cancel"){ const m=prompt(a==="reject"?"Rejection comment (required):":"Reason (optional):"); if(a==="reject"&&!m) return; body.comment=m||""; }
   if(a==="pay"){
+    if(num(c.calc&&c.calc.payable)<=0){ toast("This certificate nets "+fmt(c.calc.payable)+" — it is a back-charge / debit note, not a payment. Recover it from the supplier's next positive certificate instead of issuing a cheque."); return; }
     const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(500px,92vw)";
     dlg.innerHTML=`<h2 style="margin-top:0">Record payment — ${esc(c.no)}</h2><div class="grid">
       <div><label>Mode</label><select id="p_mode">${S.modes.map(m=>`<option>${m}</option>`).join("")}</select></div>
@@ -1003,10 +1004,10 @@ function printReceiptVoucher(c){ $("#printArea").innerHTML=receiptVoucherHtml(c)
 
 /* ---------- cheque words (bank style: "Three thousand ... and 10/100 only.") ---------- */
 function chequeWords(amount){
-  if(!amount) return "";
+  const neg=num(amount)<0; amount=Math.abs(num(amount));
   const d=Math.floor(amount), f=Math.round((amount-d)*100), m=Math.floor(d/1e6), t=Math.floor(d%1e6/1e3), u=d%1e3;
   let w=[m?grp(m).toLowerCase()+" million":"",t?grp(t).toLowerCase()+" thousand":"",u?grp(u).toLowerCase():""].filter(Boolean).join(" ")||"zero";
-  w = w + (f?" and "+String(f).padStart(2,"0")+"/100":"") + " only.";
+  w = (neg?"minus ":"")+w + (f?" and "+String(f).padStart(2,"0")+"/100":"") + " only.";
   return w.charAt(0).toUpperCase()+w.slice(1);
 }
 /* ---------- cheque PDF (exact size, single page, prints at 100%) ---------- */
@@ -1384,6 +1385,7 @@ function vCheques(){
 async function reprintCheque(no){
   let c; try{ c=await api("cert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
   if(!c.payment){ toast("No payment recorded"); return; }
+  if(num(c.payable)<=0){ toast("This is a back-charge / debit note (net "+fmt(c.payable)+"). A cheque cannot be issued for a nil or negative amount — recover it from the supplier's next certificate."); return; }
   const already=!!c.payment.printed;
   if(already && ME.role!=="CEO"){ toast("Cheque already printed — only the CEO can reprint"); return; }
   const go=async ()=>{ printCheque(c); try{ await api("cert/"+encodeURIComponent(no)+"/printed",{method:"POST"}); }catch(e){ toast(e.message); } if(VIEW==="cheques"){ await load(); render(); } };
