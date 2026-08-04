@@ -13232,10 +13232,12 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   prevContra = num(prevContra);
   const isRate = c.basis === "rate";
   const adjusted = isRate ? 0 : num(c.originalValue) + num(c.variations);
-  // Rate-based (services) contracts: each certificate stands alone, certified
-  // against the supplier's submitted invoice amount — no cumulative % of a
-  // fixed contract sum and no deduction of previous certificates.
-  const cumValue = isRate ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct));
+  // Per-invoice certification: rate/services contracts, AND any supplier with no
+  // fixed contract value (equipment rental, one-off services, testing, etc.).
+  // Each certificate stands alone, certified against the submitted invoice amount
+  // — no cumulative % of a contract sum and no deduction of previous certificates.
+  const perInvoice = isRate || adjusted <= 0;
+  const cumValue = perInvoice ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct));
   const gross = r2(cumValue + num(c.materialsOnSite));
   const retention = r2(gross * num(c.retentionPct));
   const afterRet = r2(gross - retention);
@@ -13253,12 +13255,13 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   // cumulative advance/contra (not just this period's) prevents prior-period
   // deductions being silently refunded on later certificates.
   const advRecToDate = r2(recoveredSoFar + advanceRecovery);
-  const net = isRate
+  const net = perInvoice
     ? r2(afterRet - advanceRecovery - num(c.contra))
     : r2(afterRet - advRecToDate - r2(prevContra + num(c.contra)) - prevNet);
   const vat = r2(net * num(c.vatPct));
   return {
     adjusted,
+    perInvoice,
     cumValue,
     gross,
     retention,

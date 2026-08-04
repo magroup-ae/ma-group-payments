@@ -647,13 +647,14 @@ function certForm(c){
     <button class="btn ghost" id="backBtn">Back</button></div></div>`;
   const showSup=()=>{ const sp=supById($("#f_supplierId").value)||sup;
     const rate=sp&&sp.contractType==="Rate";
-    $("#supInfo").innerHTML = sp?(rate
-      ?`<b>Rate contract (services)</b> · certify per submitted invoice · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · LPO ${esc(sp.lpoRef||"—")}`
+    const perInvoice = rate || !(num(sp&&sp.contractValue)>0); // no fixed contract → certify per invoice
+    $("#supInfo").innerHTML = sp?(perInvoice
+      ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract)"}</b> · certify the submitted invoice amount · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · LPO ${esc(sp.lpoRef||"—")}`
       :`Contract: <b>AED ${fmt(sp.contractValue)}</b> · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · Advance AED ${fmt(sp.advanceAmount)} @ ${pct(sp.advanceRecoveryRate)} · LPO ${esc(sp.lpoRef||"—")} (signed ${dmy(sp.signDate)})`):"";
-    $("#w_workPct").style.display=rate?"none":""; $("#w_variations").style.display=rate?"none":""; $("#w_invoiceAmount").style.display=rate?"":"none";
-    $("#progH").textContent=rate?"This certificate (per invoice)":"Progress this certificate";
-    $("#calcNote").innerHTML=rate
-      ?"<b>Rate-based certification:</b> the certificate is valued at the submitted invoice amount. Retention and VAT come from the supplier record; previous certificates are <b>not</b> deducted — each invoice is certified on its own."
+    $("#w_workPct").style.display=perInvoice?"none":""; $("#w_variations").style.display=perInvoice?"none":""; $("#w_invoiceAmount").style.display=perInvoice?"":"none";
+    $("#progH").textContent=perInvoice?"This certificate (per invoice)":"Progress this certificate";
+    $("#calcNote").innerHTML=perInvoice
+      ?"<b>Per-invoice certification:</b> enter the <b>Invoice amount</b> — the certificate is valued at that amount (plus any materials, less retention/VAT). Use <b>Contra / back-charges only to deduct</b> money the supplier owes you; leave it 0 for a normal payment."
       :"Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance."; };
   showSup(); $("#f_supplierId").onchange=showSup;
   $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
@@ -705,9 +706,12 @@ async function openCert(no){
         <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${cashBtn}${rvBtn}${proofBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
+    ${(num(K.net)<0 && num(c.contra)>0 && num(K.cumValue)===0)?`<div class="note" style="margin-top:12px;background:#fdecec;border-left:4px solid #c0392b">
+      <b>This certificate is negative (−${fmt(Math.abs(K.payable))}).</b> The amount <b>AED ${fmt(c.contra)}</b> was entered in <b>Contra / back-charges</b> (a deduction). If you meant to <b>pay</b> ${esc(c.supplier)}, it should be the <b>invoice amount</b> instead.
+      ${!["Paid","Cancelled"].includes(c.status)?`<div style="margin-top:8px"><button class="btn green" id="fixContraBtn">Fix → make it a AED ${fmt(c.contra)} payment</button> <span class="muted" style="font-size:11px">moves the amount to Invoice amount and clears contra</span></div>`:`<div style="margin-top:6px" class="muted">This certificate is already ${esc(c.status)} with a payment recorded — cancel/reverse the payment first, then correct it.</div>`}</div>`:""}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
-      <div><h3>Certificate calculation (AED)${c.basis==="rate"?' <span class="muted" style="font-size:11px;font-weight:400">— rate contract, per invoice</span>':""}</h3><table>
-        ${c.basis==="rate"?`
+      <div><h3>Certificate calculation (AED)${K.perInvoice?' <span class="muted" style="font-size:11px;font-weight:400">— per invoice</span>':""}</h3><table>
+        ${K.perInvoice?`
         ${row("Invoice amount (this certificate)",fmt(K.cumValue))}
         ${row("Materials on site",fmt(c.materialsOnSite))}
         ${row("Gross this certificate",fmt(K.gross),"tot")}
@@ -748,6 +752,10 @@ async function openCert(no){
     }
     printCheque(c);
     setTimeout(async ()=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/printed",{method:"POST"}); await load(); openCert(c.no); }catch(e){} }, 800);
+  };
+  if($("#fixContraBtn")) $("#fixContraBtn").onclick=async ()=>{
+    if(!confirm("Move AED "+fmt(c.contra)+" from Contra to Invoice amount, making this a positive payment to "+c.supplier+"?")) return;
+    try{ await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body:{invoiceAmount:num(c.contra),contra:0}}); toast("Corrected — this is now a positive payment certificate"); await load(); openCert(c.no); }catch(e){ toast(e.message); }
   };
   if($("#amendChqBtn")) $("#amendChqBtn").onclick=()=>amendChequeNo(c.no, c.payment&&c.payment.ref, async()=>{ await load(); openCert(c.no); });
   if(cashBtn) $("#pcvBtn").onclick=()=>printPettyCash(c);
@@ -887,8 +895,8 @@ function printCert(c){
    <tr><td class="lab">Project</td><td>${esc(c.project)}</td><td class="lab">Trade / Package</td><td>${esc(c.trade||"—")}</td></tr>
    <tr><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td></tr>
    <tr><td class="lab">Period</td><td colspan="3">${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
-   ${c.basis==="rate"?`<table><tr><td class="sec" colspan="2">1. VALUATION OF SERVICES / SUPPLY — RATE CONTRACT (AED)</td></tr>
-   ${r2r("Basis of certification","Rate contract — certified against submitted invoice")}
+   ${K.perInvoice?`<table><tr><td class="sec" colspan="2">1. VALUATION OF SERVICES / SUPPLY — PER INVOICE (AED)</td></tr>
+   ${r2r("Basis of certification","Certified against submitted invoice")}
    ${r2r("Invoice amount this certificate (excl VAT)",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
    <tr class="tot"><td>GROSS VALUE THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
    <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>
