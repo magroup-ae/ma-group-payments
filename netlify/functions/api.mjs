@@ -13620,11 +13620,11 @@ async function computePnl(s, project) {
   const [contracts, allCC, receipts] = await Promise.all([listContracts(), getAllJSON(s, "clientcert/"), getAllJSON(s, "clientreceipt/")]);
   const projContracts = contracts.filter((c) => !project || c.project === project);
   const cids = new Set(projContracts.map((c) => c.id));
-  let collected = 0;
-  for (const rc of receipts) { if (!rc) continue; if (project && rc.project !== project) continue; collected += num(rc.amount); }
+  let collectedAll = 0, advanceReceiptSum = 0;
+  for (const rc of receipts) { if (!rc) continue; if (project && rc.project !== project) continue; const amt = num(rc.amount); collectedAll += amt; if (rc.type === "advance") advanceReceiptSum += amt; }
   // Per-contract LATEST cumulative position (taken at the highest-gross IPC),
   // plus cumulative billing (net + VAT) summed across that contract's IPCs.
-  const maxGross = {}, latestRetention = {}, latestAdvRec = {};
+  const maxGross = {}, latestRetention = {}, latestAdvRec = {}, latestMos = {}, latestWork = {};
   const netCertified = {}, vatBilled = {};
   for (const c of allCC) {
     if (!c || !cids.has(c.contractId)) continue;
@@ -13634,12 +13634,16 @@ async function computePnl(s, project) {
       maxGross[c.contractId] = g;
       latestRetention[c.contractId] = num(c.calc?.retention);
       latestAdvRec[c.contractId] = num(c.calc?.advanceRecoveredToDate || c.calc?.advanceRecovery);
+      latestMos[c.contractId] = num(c.calc?.mos);
+      latestWork[c.contractId] = num(c.calc?.cumValue);
     }
     netCertified[c.contractId] = (netCertified[c.contractId] || 0) + num(c.calc?.net);
     vatBilled[c.contractId] = (vatBilled[c.contractId] || 0) + num(c.calc?.vat);
   }
-  let revenue = 0, netDue = 0, retentionHeld = 0, advanceRecovered = 0, vatDue = 0;
+  let revenue = 0, netDue = 0, retentionHeld = 0, advanceRecovered = 0, vatDue = 0, materialsOnSite = 0, workExecuted = 0;
   for (const cid in maxGross) revenue += maxGross[cid];
+  for (const cid in latestMos) materialsOnSite += latestMos[cid];
+  for (const cid in latestWork) workExecuted += latestWork[cid];
   for (const cid in netCertified) netDue += netCertified[cid];
   for (const cid in latestRetention) retentionHeld += latestRetention[cid];
   for (const cid in latestAdvRec) advanceRecovered += latestAdvRec[cid];
@@ -13648,6 +13652,14 @@ async function computePnl(s, project) {
   let advanceAgreed = 0;
   for (const c of projContracts) advanceAgreed += num(c.advanceAmount);
   revenue = r2(revenue);
+  // ---- cash position ----
+  // Advance received = logged advance receipts if any, else the agreed down payment
+  // (received upfront against the advance guarantee before works commence).
+  const advanceReceived = r2(advanceReceiptSum > 0 ? advanceReceiptSum : advanceAgreed);
+  const progressCollected = r2(collectedAll - advanceReceiptSum);
+  const totalCashIn = r2(advanceReceived + progressCollected);
+  const netCash = r2(totalCashIn - paidOut);
+  const collected = progressCollected;
   // ---- CFO income-statement waterfall ----
   const directCost = r2(byGroup.Direct || 0);
   const indirectCost = r2(byGroup.Indirect || 0);
@@ -13671,6 +13683,8 @@ async function computePnl(s, project) {
     advanceAgreed: r2(advanceAgreed), advanceOutstanding: r2(Math.max(0, advanceAgreed - advanceRecovered)),
     vatDue: r2(vatDue), grossBilledInclVat: r2(netDue + vatDue),
     collected: r2(collected), outstandingReceivable: r2(netDue + vatDue - collected),
+    materialsOnSite: r2(materialsOnSite), workExecuted: r2(workExecuted),
+    advanceReceived, progressCollected, totalCashIn, netCash,
     byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
