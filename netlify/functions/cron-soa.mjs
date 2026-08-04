@@ -1,4 +1,4 @@
-import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);
+import{createRequire as __cr}from "module";const require=__cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -12495,6 +12495,7 @@ async function getEmailCfg(s) {
     from: getEnv("MAIL_FROM") || saved.from || "info@maagroup.ae",
     fromName: saved.fromName || "MA Group Accounts",
     replyTo: getEnv("MAIL_REPLYTO") || saved.replyTo || "info@maagroup.ae",
+    logoUrl: getEnv("LOGO_URL") || saved.logoUrl || "https://ma-group-payments.netlify.app/logo.png",
     cc: saved.cc || "",
     bcc: saved.bcc || "",
     triggers: saved.triggers || {}
@@ -12510,7 +12511,7 @@ function emailShell(cfg, o) {
 <span style="display:none;max-height:0;overflow:hidden;opacity:0">${emEsc(o.preheader || o.title)}</span>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(20,30,50,.08)">
-<tr><td style="background:#1f3864;padding:22px 30px"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:.3px">MA GROUP</div><div style="color:#c7d2e6;font-size:11px;margin-top:2px">Marvellous Art \u2022 MA Building Contracting \u2022 MA Building Maintenance</div></td></tr>
+<tr><td style="background:#ffffff;padding:18px 30px 14px;border-bottom:1px solid #eef1f5"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="padding-right:14px;vertical-align:middle"><img src="${cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png"}" alt="MA Group" width="66" style="display:block;width:66px;height:auto;border:0"></td><td style="vertical-align:middle"><div style="color:#1f3864;font-size:20px;font-weight:800;letter-spacing:.3px">MA GROUP</div><div style="color:#8a93a3;font-size:11px;margin-top:2px">Marvellous Art \u2022 MA Building Contracting \u2022 MA Building Maintenance</div></td></tr></table></td></tr>
 <tr><td style="background:${o.band || "#bf9000"};padding:11px 30px;color:#ffffff;font-size:15px;font-weight:600">${emEsc(o.title)}</td></tr>
 <tr><td style="padding:26px 30px 8px"><p style="margin:0 0 15px;color:#1f2733;font-size:14px">Dear ${emEsc(o.greeting || "Partner")},</p>${lead}${tableHtml}${callout}${o.closing ? `<p style="margin:0 0 6px;color:#333c48;font-size:14px;line-height:1.65">${o.closing}</p>` : ""}</td></tr>
 <tr><td style="padding:14px 30px 26px"><p style="margin:0;color:#1f2733;font-size:14px;line-height:1.5">Best regards,<br><strong>MA Group \u2014 Accounts &amp; Administration</strong></p></td></tr>
@@ -12586,10 +12587,11 @@ async function sendMail(s, cfg, msg) {
       rec.detail = cfg.provider === "smtp" ? "Zoho Mail app password not set \u2014 composed but not sent" : "no provider token configured \u2014 composed but not sent";
     } else if (useSmtp) {
       const transport = import_nodemailer.default.createTransport({ host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpPort === 465, auth: { user: cfg.smtpUser, pass: cfg.smtpPass } });
-      await transport.sendMail({ from: `"${cfg.fromName}" <${cfg.from}>`, to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to, replyTo: cfg.replyTo, cc: split(cfg.cc).join(", ") || void 0, bcc: split(cfg.bcc).join(", ") || void 0, subject: msg.subject, html: msg.html });
+      await transport.sendMail({ from: `"${cfg.fromName}" <${cfg.from}>`, to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to, replyTo: cfg.replyTo, cc: split(cfg.cc).join(", ") || void 0, bcc: split(cfg.bcc).join(", ") || void 0, subject: msg.subject, html: msg.html, attachments: msg.attachments || void 0 });
       rec.status = "sent";
     } else {
       const body = { from: { address: cfg.from, name: cfg.fromName }, to: [{ email_address: { address: msg.to, name: msg.toName || msg.to } }], reply_to: [{ address: cfg.replyTo, name: cfg.fromName }], subject: msg.subject, htmlbody: msg.html };
+      if (msg.attachments && msg.attachments.length) body.attachments = msg.attachments.map((a) => ({ content: Buffer.from(String(a.content), "utf8").toString("base64"), mime_type: a.contentType || "application/octet-stream", name: a.filename || "attachment" }));
       const cc = split(cfg.cc);
       if (cc.length) body.cc = cc.map((a) => ({ email_address: { address: a } }));
       const bcc = split(cfg.bcc);
