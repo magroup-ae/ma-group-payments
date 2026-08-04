@@ -1406,6 +1406,9 @@ function vReg(){
 
 /* ---------- clients & client certificates (receivables) ---------- */
 let CLIENTS=[], CONTRACTS=[];
+// True advance/down-payment percentage = actual advance ÷ contract sum, so the
+// displayed % always matches the configured amount (not a stale default).
+function advPctOf(ct){ const a=num(ct&&ct.advanceAmount), cs=num(ct&&ct.contractSum); return (cs>0&&a>0)?a/cs:num(ct&&ct.advancePct); }
 function ccCalc(grossCum,mos,contra,ct,prevNet,recoveredSoFar,prevContra){
   const gross=r2(num(grossCum)+num(mos));
   const retention=r2(gross*num(ct.retentionPct));
@@ -1494,7 +1497,7 @@ async function clientDetail(id){
      <div class="muted" style="margin-top:4px">${esc([cl.address,cl.emirate].filter(Boolean).join(", "))}${cl.contactName?" · "+esc(cl.contactName):""}${cl.mobile?" · "+esc(cl.mobile):""}${cl.email?" · "+esc(cl.email):""}</div></div>
    <div class="card"><div class="flex"><h2 style="margin:0">Contracts / Projects</h2>${can?`<button class="btn gold right" id="newContract">+ Add contract</button>`:""}</div><div style="height:8px"></div>
      ${contracts.length?`<table><tr><th>Project</th><th>Cert ref</th><th class="num">Contract sum</th><th class="num">Advance</th><th class="num">Retention</th><th></th></tr>
-       ${contracts.map(c=>`<tr class="click" data-ct="${esc(c.id)}"><td><b>${esc(c.project)}</b></td><td>${esc(c.certPrefix)}</td><td class="num">${fmt(c.contractSum)}</td><td class="num">${pct(c.advancePct)}</td><td class="num">${pct(c.retentionPct)}</td><td><a href="#">open →</a></td></tr>`).join("")}</table>`:`<div class="muted">No contracts yet for this client.</div>`}
+       ${contracts.map(c=>`<tr class="click" data-ct="${esc(c.id)}"><td><b>${esc(c.project)}</b></td><td>${esc(c.certPrefix)}</td><td class="num">${fmt(c.contractSum)}</td><td class="num">${pct(advPctOf(c))}</td><td class="num">${pct(c.retentionPct)}</td><td><a href="#">open →</a></td></tr>`).join("")}</table>`:`<div class="muted">No contracts yet for this client.</div>`}
    </div>`;
   $("#clBack").onclick=()=>{VIEW="clients";render();};
   wireDelBtns(()=>{VIEW="clients";render();});
@@ -1520,8 +1523,8 @@ function contractForm(ct,clientId){
    <h3>Financial terms</h3><div class="grid">
      <div><label>Contract sum (excl VAT)</label><input id="k_contractSum" type="number" step="0.01" value="${ct.contractSum??""}"></div>
      <div><label>Approved variations</label><input id="k_variations" type="number" step="0.01" value="${ct.variations??0}"></div>
-     <div><label>Down payment / advance %</label><input id="k_advancePct" type="number" step="0.1" value="${Math.round((ct.advancePct??.2)*1000)/10}"></div>
-     <div><label>Advance amount (blank = auto)</label><input id="k_advanceAmount" type="number" step="0.01" value="${ct.advanceAmount??""}"></div>
+     <div><label>Down payment / advance %</label><input id="k_advancePct" type="number" step="0.01" value="${Math.round(advPctOf(ct)*10000)/100}"></div>
+     <div><label>Advance amount (blank = auto from %)</label><input id="k_advanceAmount" type="number" step="0.01" value="${ct.advanceAmount??""}"></div>
      <div><label>Retention %</label><input id="k_retentionPct" type="number" step="0.1" value="${Math.round((ct.retentionPct??.1)*1000)/10}"></div>
      <div><label>Advance recovery rate %</label><input id="k_recoveryRate" type="number" step="0.1" value="${Math.round((ct.recoveryRate??.2)*1000)/10}"></div>
      <div><label>VAT %</label><input id="k_vatPct" type="number" step="0.1" value="${Math.round((ct.vatPct??.05)*1000)/10}"></div>
@@ -1561,7 +1564,7 @@ async function contractDetail(id){
     <div class="right flex">${can?`<button class="btn ghost" id="ctEdit">Edit contract</button>`:""}${ME.role==="CEO"?`<button class="btn ghost" style="color:var(--red)" data-del-kind="clientcerts-contract" data-del-id="${esc(ct.id)}" data-del-name="ALL certificates for ${esc(ct.project)}">Delete all certs</button>`:""}${delBtn("contract",ct.id,ct.project)}<button class="btn ghost" id="ctBack">Back</button></div></div>
     <div class="kpis" style="margin-top:10px">
       <div class="kpi"><div class="v">AED ${fmt(ct.contractSum)}</div><div class="l">Contract sum</div></div>
-      <div class="kpi"><div class="v">AED ${fmt(ct.advanceAmount)}</div><div class="l">Advance (${pct(ct.advancePct)})</div></div>
+      <div class="kpi"><div class="v">AED ${fmt(ct.advanceAmount)}</div><div class="l">Advance (${pct(advPctOf(ct))})</div></div>
       <div class="kpi"><div class="v">AED ${fmt(sm.advanceOutstanding)}</div><div class="l">Advance to recover</div></div>
       <div class="kpi"><div class="v">AED ${fmt(sm.certifiedNet)}</div><div class="l">Net certified to date</div></div>
       <div class="kpi"><div class="v">AED ${fmt(sm.retentionHeld)}</div><div class="l">Retention held</div></div>
@@ -1643,7 +1646,7 @@ async function clientCertForm(contractId){
         <td style="padding:2px 8px"><span class="muted">Contract value (excl VAT)</span><br><b>AED ${fmt(ct.contractSum)}</b></td>
         <td style="padding:2px 8px"><span class="muted">Revised (with variations)</span><br><b>AED ${fmt(revised)}</b></td>
       </tr><tr>
-        <td style="padding:2px 8px 2px 0"><span class="muted">Down payment (${pct(ct.advancePct)})</span><br><b>AED ${fmt(ct.advanceAmount)}</b></td>
+        <td style="padding:2px 8px 2px 0"><span class="muted">Down payment (${pct(advPctOf(ct))})</span><br><b>AED ${fmt(ct.advanceAmount)}</b></td>
         <td style="padding:2px 8px"><span class="muted">Advance still to recover</span><br><b>AED ${fmt(ct.summary?.advanceOutstanding)}</b></td>
         <td style="padding:2px 8px"><span class="muted">Retention</span><br><b>${pct(ct.retentionPct)}</b></td>
         <td style="padding:2px 8px"><span class="muted">VAT</span><br><b>${pct(ct.vatPct)}</b></td>
@@ -1678,11 +1681,11 @@ async function openClientCert(no){
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
      <div><h3>Certificate</h3><table>
        ${row("Certificate date",dmy(c.date))}${row("Period",(c.periodFrom||"")+(c.periodTo?" – "+c.periodTo:""))}
-       ${row("Contract sum",fmt(ct.contractSum))}${row("Advance ("+pct(ct.advancePct)+")",fmt(ct.advanceAmount))}
+       ${row("Contract sum",fmt(ct.contractSum))}${row("Advance ("+pct(advPctOf(ct))+")",fmt(ct.advanceAmount))}
        ${row("Gross work executed (cum.)",fmt(K.cumValue))}${row("Materials on site",fmt(K.mos))}</table>
        <div class="cert" style="margin-top:10px">${sectionB(K,ct)}</div>
        <table style="margin-top:8px"><tr><td class="sec navy" colspan="2">C. ADVANCE &amp; RETENTION STATUS</td></tr>
-         ${row("Advance received ("+pct(ct.advancePct)+")",fmt(K.advanceAmount!==void 0?K.advanceAmount:ct.advanceAmount))}
+         ${row("Advance received ("+pct(advPctOf(ct))+")",fmt(K.advanceAmount!==void 0?K.advanceAmount:ct.advanceAmount))}
          ${row("Advance recovered to date",fmt(K.advanceRecoveredToDate))}
          ${row("Advance still to recover",fmt(K.advanceOutstanding))}
          ${row("Retention held to date",fmt(K.retention))}</table>
@@ -1783,7 +1786,7 @@ function printClientIPC(c){
    ${sectionB(K,ct)}
    <div class="amtbox"><div class="l">Amount certified for payment (incl. VAT)</div><div class="v">AED ${fmt(K.payable)}</div></div>
    <table><tr><td class="sec navy" colspan="4">C. ADVANCE (DOWN PAYMENT) &amp; RETENTION STATUS</td></tr>
-     <tr><td class="lab">Advance / down payment (${pct(ct.advancePct)})</td><td class="amt">${fmt(ct.advanceAmount)}</td><td class="lab">Advance recovered to date</td><td class="amt">${fmt(K.advanceRecoveredToDate)}</td></tr>
+     <tr><td class="lab">Advance / down payment (${pct(advPctOf(ct))})</td><td class="amt">${fmt(ct.advanceAmount)}</td><td class="lab">Advance recovered to date</td><td class="amt">${fmt(K.advanceRecoveredToDate)}</td></tr>
      <tr><td class="lab">Advance balance to recover</td><td class="amt">${fmt(K.advanceOutstanding)}</td><td class="lab">Retention held to date (${pct(ct.retentionPct)})</td><td class="amt">${fmt(K.retention)}</td></tr>
      <tr><td class="lab">Retention release</td><td colspan="3">${esc(ct.retentionRelease||"—")}</td></tr></table>
    <table><tr><td class="certify">We certify that the value of work properly executed to the date of valuation, after deduction of retention, advance recovery and previous certificates, amounts to the net sum stated above, and recommend the said amount for payment in accordance with the terms of the Contract.</td></tr></table>
