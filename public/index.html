@@ -218,6 +218,18 @@ async function api(path, opts={}){
   if (!r.ok) throw new Error(d.error || "Request failed");
   return d;
 }
+async function apiText(path){
+  const r = await fetch("/api/"+path, { headers: TOKEN?{authorization:"Bearer "+TOKEN}:{} });
+  if(!r.ok) throw new Error("Failed to load document");
+  return await r.text();
+}
+async function openAwardDoc(id, doPrint){
+  try{ const html=await apiText("award/"+id+"/html"); const w=window.open("","_blank");
+    if(!w){ toast("Allow pop-ups to view the document"); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    if(doPrint){ setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 400); }
+  }catch(e){ toast(e.message); }
+}
 
 const ONES=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
 const TENS=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
@@ -314,6 +326,7 @@ async function unlockSettings(){
 function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
   const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
+  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["awards","Contracts / LOA"]);
   if(ME.role==="CEO") tabs.push(["announce","Announcements"]);
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
@@ -327,7 +340,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, awards:vAwards, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -1081,6 +1094,7 @@ function supStatement(id){
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(s.name)}</h2>
      <span class="muted">${esc(s.trn?"TRN "+s.trn:"")} ${s.lpoRef?"· LPO "+esc(s.lpoRef):""}</span>
      <div class="right flex">${canEdit?`<button class="btn ghost" id="editSup">Edit supplier</button>`:""}
+       ${["CEO","PM","QS"].includes(ME.role)?`<button class="btn gold" id="awardSup">Issue LOA / Subcontract</button>`:""}
        <button class="btn ghost" id="stCsv">Export CSV</button><button class="btn" id="stPrint">Print statement</button>
        <button class="btn ghost" id="backSup2">← All suppliers</button></div></div>
    <div class="kpis" style="margin-top:12px">
@@ -1099,6 +1113,7 @@ function supStatement(id){
   document.querySelectorAll("tr[data-no]").forEach(r=>r.onclick=()=>openCert(r.dataset.no));
   $("#backSup2").onclick=vSups;
   if(canEdit) $("#editSup").onclick=()=>supForm(s);
+  if($("#awardSup")) $("#awardSup").onclick=()=>{ AW_PRESEL=s.id; VIEW="awards"; CUR=null; render(); };
   $("#stPrint").onclick=()=>printSupplierStatement(s,a,ordered);
   $("#stCsv").onclick=()=>{ let cc=0; const rows2=[["Cert No.","Date","Project","This Cert incl VAT","Cumulative","Retention","Status"]]
      .concat(ordered.map(c=>{cc+=c.payable||0;return [c.no,c.date,c.project,c.payable,cc,c.retention,c.status];}));
@@ -2312,6 +2327,95 @@ async function importAssetsExcel(){
     try{ const res=await api("assets/import",{method:"POST",body:{assets}}); toast(`Imported ${res.created} new · ${res.updated} updated · ${res.skipped} skipped`); vAssets(); }catch(e){ toast(e.message); }
   };
   inp.click();
+}
+
+/* ---------- contracts / LOA ---------- */
+let AWARD_THRESHOLD=10000, AW_PRESEL="";
+async function vAwards(){
+  if(!["CEO","PM","QS"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Contracts / LOA is available to commercial roles only.</div>`; return; }
+  $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
+  let data={items:[],threshold:10000};
+  try{ data=await api("award/list"); }catch(e){}
+  AWARD_THRESHOLD=data.threshold||10000;
+  const supOpts=`<option value="">— select supplier / subcontractor —</option>`+ (SUPS||[]).map(x=>`<option value="${esc(x.id)}">${esc(x.name)}${x.type&&x.type!=="Supplier"?" (subcontractor)":""}</option>`).join("");
+  const entOpts=(S.entities||[]).map(e=>`<option value="${esc(e.short)}">${esc(e.short)} — ${esc(e.name)}</option>`).join("");
+  const projList=(S.projects||[]).map(p=>`<option value="${esc(p.name)}">`).join("");
+  const stColors={Issued:"#8a8a8a",Sent:"#2E75B6",Countersigned:"#375623"};
+  $("#main").innerHTML=`
+   <div class="card">
+     <div class="flex"><h2 style="margin:0">Issue Letter of Award / Subcontract Agreement</h2>
+       <span class="right muted" style="font-size:12px">Threshold: below AED ${fmt(AWARD_THRESHOLD)} → LOA · AED ${fmt(AWARD_THRESHOLD)} and above → Subcontract Agreement</span></div>
+     <div class="note" style="margin:8px 0">Workflow: register the supplier → enter the quotation amount → the system selects the correct document, applies MA signature &amp; stamp, and emails it to the subcontractor to <b>sign, stamp and return within 24 hours</b>.</div>
+     <datalist id="projDL">${projList}</datalist>
+     <div class="grid">
+       <div><label>Supplier / Subcontractor *</label><select id="aw_sup">${supOpts}</select></div>
+       <div><label>Paying entity</label><select id="aw_ent">${entOpts}</select></div>
+       <div><label>Award / quotation amount (AED, ex-VAT) *</label><input id="aw_amt" type="number" min="0" step="0.01" placeholder="e.g. 8500"></div>
+       <div><label>Document type</label><div id="aw_type" style="padding:9px 0;font-weight:700;color:#1F3864">— enter amount —</div></div>
+       <div><label>Project</label><input id="aw_proj" list="projDL" placeholder="Project name"></div>
+       <div><label>Location / Emirate</label><input id="aw_loc" placeholder="e.g. Abu Dhabi, UAE"></div>
+       <div><label>Client / Employer</label><input id="aw_client" placeholder="(optional)"></div>
+       <div><label>Quotation ref.</label><input id="aw_qref" placeholder="Supplier quote no."></div>
+       <div><label>Quotation date</label><input id="aw_qdate" type="date"></div>
+       <div><label>Scope title (short)</label><input id="aw_stitle" placeholder="e.g. Gypsum & partition works"></div>
+     </div>
+     <div style="margin-top:10px"><label>Scope of works</label><textarea id="aw_scope" rows="4" style="width:100%;font-family:inherit" placeholder="Describe the works / supply. One line per item."></textarea></div>
+     <h3 style="margin:14px 0 6px">Commercial terms</h3>
+     <div class="grid">
+       <div><label>Commencement within (days of NTP)</label><input id="aw_cdays" type="number" value="7"></div>
+       <div><label>Completion date</label><input id="aw_comp" type="date"></div>
+       <div><label>Retention %</label><input id="aw_ret" type="number" value="10" step="0.5"></div>
+       <div><label>Delay damages %/day</label><input id="aw_dd" type="number" value="0.5" step="0.1"></div>
+       <div><label>Delay cap %</label><input id="aw_dc" type="number" value="10" step="1"></div>
+       <div><label>Security deposit cheque %</label><input id="aw_sec" type="number" value="5" step="1"></div>
+       <div><label>Performance cheque %</label><input id="aw_perf" type="number" value="5" step="1"></div>
+       <div><label>DLP (days)</label><input id="aw_dlp" type="number" value="365"></div>
+       <div><label>Payment within (days)</label><input id="aw_pay" type="number" value="30"></div>
+       <div><label>Sign-back window (hours)</label><input id="aw_hrs" type="number" value="24"></div>
+     </div>
+     <div class="flex" style="margin-top:14px;gap:10px"><span class="right"></span>
+       <button class="btn green" id="aw_gen">Generate document</button></div>
+   </div>
+   <div class="card"><h2 style="margin:0 0 8px">Issued awards &amp; agreements</h2><div id="aw_list"></div></div>`;
+  const renderList=(items)=>{ const h=$("#aw_list"); if(!h) return;
+    if(!items||!items.length){ h.innerHTML=`<div class="muted">No awards issued yet.</div>`; return; }
+    h.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Ref</th><th>Type</th><th>Supplier</th><th>Project</th><th class="num">Amount</th><th>Status</th><th>Actions</th></tr>
+      ${items.map(a=>`<tr><td>${esc(a.docNo)}</td><td>${a.type==="LOA"?'<span class="pill" style="background:#2E75B6">LOA</span>':'<span class="pill" style="background:#375623">Agreement</span>'}</td><td>${esc(a.supplierName)}</td><td>${esc(a.project||"—")}</td><td class="num">${fmt(a.amount)}</td>
+        <td><span class="pill" style="background:${stColors[a.status]||'#5B6B85'}">${esc(a.status)}</span>${a.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(a.sentAt)}</span>`:""}</td>
+        <td style="white-space:nowrap">
+          <button class="btn ghost aw_view" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">View / Print</button>
+          <button class="btn ghost aw_send" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">${a.status==="Issued"?"Send by email":"Re-send"}</button>
+          ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark received</button>`:""}
+          ${ME.role==="CEO"?`<button class="btn ghost aw_del" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px;color:var(--red)">Delete</button>`:""}
+        </td></tr>`).join("")}</table></div>`;
+    h.querySelectorAll(".aw_view").forEach(b=>b.onclick=()=>openAwardDoc(b.dataset.id,true));
+    h.querySelectorAll(".aw_send").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); if(!confirm(`Email this ${a.type==="LOA"?"Letter of Award":"Subcontract Agreement"} to ${esc(a.supplierName)} for signature within ${a.signBackHours||24} hours?`)) return;
+      try{ toast("Sending…"); const r=await api("award/"+b.dataset.id+"/send",{method:"POST"}); toast("Sent to "+r.to); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_recv").forEach(b=>b.onclick=async ()=>{ if(!confirm("Mark this award as signed & returned by the subcontractor?")) return;
+      try{ await api("award/"+b.dataset.id+"/received",{method:"POST"}); toast("Marked as countersigned"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_del").forEach(b=>b.onclick=async ()=>{ if(!confirm("Delete this award document? This cannot be undone.")) return;
+      try{ await api("award/"+b.dataset.id,{method:"DELETE"}); toast("Deleted"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+  };
+  renderList(data.items);
+  if(AW_PRESEL){ const sel=$("#aw_sup"); if(sel){ sel.value=AW_PRESEL; const sp=supById(AW_PRESEL); if(sp&&sp.project&&$("#aw_proj")) $("#aw_proj").value=sp.project; } AW_PRESEL=""; }
+  const typeBadge=()=>{ const amt=+$("#aw_amt").value||0; const el=$("#aw_type"); if(!el) return; if(!amt){ el.textContent="— enter amount —"; el.style.color="#8a8a8a"; return; }
+    if(amt<AWARD_THRESHOLD){ el.innerHTML='LETTER OF AWARD <span class="muted" style="font-weight:400">(below threshold)</span>'; el.style.color="#2E75B6"; }
+    else { el.innerHTML='SUBCONTRACT AGREEMENT <span class="muted" style="font-weight:400">(≥ threshold)</span>'; el.style.color="#375623"; } };
+  $("#aw_amt").oninput=typeBadge;
+  // Prefill some fields from the selected supplier's linked project, if any.
+  $("#aw_sup").onchange=()=>{ const s=supById($("#aw_sup").value); if(s&&s.project&&!$("#aw_proj").value) $("#aw_proj").value=s.project; };
+  $("#aw_gen").onclick=async ()=>{
+    const supplierId=$("#aw_sup").value, amount=+$("#aw_amt").value||0;
+    if(!supplierId){ toast("Select a supplier / subcontractor"); return; }
+    if(amount<=0){ toast("Enter the award / quotation amount"); return; }
+    const body={ supplierId, amount, entity:$("#aw_ent").value, project:$("#aw_proj").value.trim(), location:$("#aw_loc").value.trim(), client:$("#aw_client").value.trim(),
+      quotationRef:$("#aw_qref").value.trim(), quotationDate:$("#aw_qdate").value, scopeTitle:$("#aw_stitle").value.trim(), scope:$("#aw_scope").value.trim(),
+      commenceDays:+$("#aw_cdays").value||7, completion:$("#aw_comp").value, retentionPct:+$("#aw_ret").value||10, delayPctPerDay:+$("#aw_dd").value||0.5, delayCapPct:+$("#aw_dc").value||10,
+      securityDepPct:+$("#aw_sec").value||5, performancePct:+$("#aw_perf").value||5, dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24 };
+    try{ toast("Generating…"); const rec=await api("award/generate",{method:"POST",body}); toast(rec.docNo+" created ("+(rec.type==="LOA"?"Letter of Award":"Subcontract Agreement")+")");
+      const d=await api("award/list"); renderList(d.items); openAwardDoc(rec.id,false);
+    }catch(e){ toast(e.message); }
+  };
 }
 
 /* ---------- announcements ---------- */

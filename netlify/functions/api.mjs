@@ -13769,6 +13769,108 @@ async function hasAcceptedPolicy(s, userId) {
   const a = await s.get("policyack/" + userId, { type: "json" });
   return !!(a && a.version >= POLICY_VERSION);
 }
+var AWARD_THRESHOLD_DEFAULT = 1e4;
+function awardThreshold(settings) { return num(settings && settings.loaThreshold) || AWARD_THRESHOLD_DEFAULT; }
+function awardTypeFor(amount, settings) { return num(amount) < awardThreshold(settings) ? "LOA" : "AGREEMENT"; }
+// Full letterhead legal document (LOA for small packages, Subcontract Agreement for larger ones).
+function buildAwardDocHtml(rec, cfg, assets) {
+  const isAgr = rec.type === "AGREEMENT";
+  const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
+  const a = num(rec.amount);
+  const retPct = num(rec.retentionPct) || 10, delayDay = num(rec.delayPctPerDay) || 0.5, delayCap = num(rec.delayCapPct) || 10;
+  const secPct = num(rec.securityDepPct) || 5, perfPct = num(rec.performancePct) || 5;
+  const dlp = num(rec.dlpDays) || 365, payDays = num(rec.paymentDays) || 30, hrs = num(rec.signBackHours) || 24;
+  const secAmt = r2(a * secPct / 100), perfAmt = r2(a * perfPct / 100);
+  const ent = rec.entityName || "MA Group – Marvellous Art LLC";
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:52px;max-width:170px;object-fit:contain;display:block">` : `<div style="height:52px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:96px;opacity:.85;object-fit:contain">` : "";
+  const scopeHtml = String(rec.scope || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => `<p style="margin:0 0 6px">${esc(x)}</p>`).join("") || "<p>As per the quotation and drawings/specifications issued.</p>";
+  const clause = (n, t, body) => `<div class="cl"><div class="ct"><b>${n}. ${esc(t)}</b></div><div class="cb">${body}</div></div>`;
+  const partyTbl = `<table class="pt">
+    <tr><td class="k">Reference No.</td><td>${esc(rec.docNo)}</td><td class="k">Date</td><td>${dt(rec.createdAt)}</td></tr>
+    <tr><td class="k">Project</td><td colspan="3">${esc(rec.project || "—")}</td></tr>
+    <tr><td class="k">Location</td><td>${esc(rec.location || "—")}</td><td class="k">Client / Employer</td><td>${esc(rec.client || "—")}</td></tr>
+    <tr><td class="k">Main Contractor</td><td colspan="3">${esc(ent)} (“First Party”), TRN 104117106500003</td></tr>
+    <tr><td class="k">Subcontractor</td><td colspan="3"><b>${esc(rec.supplierName)}</b>${rec.supplierTL ? " · Trade Licence " + esc(rec.supplierTL) : ""}${rec.supplierTRN ? " · TRN " + esc(rec.supplierTRN) : ""} (“Second Party”)</td></tr>
+    ${rec.quotationRef ? `<tr><td class="k">Based on your quotation</td><td colspan="3">Ref. ${esc(rec.quotationRef)}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>` : ""}
+  </table>`;
+  const sigBlock = `<table class="sig"><tr>
+    <td><div class="sh">For and on behalf of the Main Contractor</div><div class="sn">${esc(ent)}</div>
+      <div style="position:relative;margin-top:6px">${signImg}<div style="position:absolute;left:120px;top:-16px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div><div class="sl">Date: ${dt(rec.createdAt)}</div><div class="sl">Company Stamp</div></td>
+    <td><div class="sh">Accepted &amp; agreed — Subcontractor</div><div class="sn">${esc(rec.supplierName)}</div>
+      <div style="height:58px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">Title: ______________________________</div><div class="sl">Signature: __________________________</div><div class="sl">Date: ______________  Company Stamp</div></td>
+  </tr></table>`;
+  let clauses = "";
+  if (!isAgr) {
+    clauses = [
+      clause(1, "Award value", `The award value is <b>${money(a)}</b> (fixed lump sum, exclusive of VAT). The price is fixed, firm and inclusive of all costs, and is not subject to any escalation. VAT will be added at the prevailing rate against a valid tax invoice.`),
+      clause(2, "Scope of works", scopeHtml),
+      clause(3, "Time for completion", `Commencement: within ${esc(rec.commenceDays || 7)} days of our written notice to proceed. Completion by <b>${dt(rec.completion)}</b>. Time is of the essence. Delay damages of <b>${delayDay}%</b> of the award value apply per day of delay, capped at <b>${delayCap}%</b>. We may reassign delayed or defective works to others at your cost plus 15% overhead.`),
+      clause(4, "Payment", `Monthly interim payment against quantities certified by our QS, payable within <b>${payDays} days</b> of certification and receipt of a valid VAT invoice, less retention of <b>${retPct}%</b> (released 50% on taking-over and 50% after the ${dlp}-day defects liability period). Submit each application by the 25th of the month with a works report and attendance signed by the MA site engineer.`),
+      clause(5, "Security", `Within 7 days of accepting this award and before mobilisation, deliver an undated security cheque of <b>${money(secAmt)}</b> (${secPct}%) and an undated performance cheque of <b>${money(perfAmt)}</b> (${perfPct}%), drawn on a UAE-licensed bank in favour of ${esc(ent)}. Delivery of the cheques is a condition precedent to mobilisation and to any payment.`),
+      clause(6, "Your obligations", `Maintain a valid UAE trade licence and all permits; comply with UAE Labour Law, WPS, and all HSE and site rules; hold workmen's compensation and third-party insurance; be solely responsible for your personnel and their wages and end-of-service; and replace any unsuitable personnel within 24 hours of notice. No variation or extra work is valid unless instructed by us in writing.`),
+      clause(7, "Set-off, confidentiality & law", `We may deduct or back-charge from any sum due (including retention) the cost of rectification by others, supplementary labour/plant, delay damages, fines and any other amount due from you. You shall keep all project information confidential and shall not publish site photos/data without our written consent. This award is governed by the laws of the United Arab Emirates and the courts of Abu Dhabi.`),
+      clause(8, "Acceptance", `Please confirm acceptance by <b>signing and stamping</b> below and returning a copy <b>within ${hrs} hours</b> of the date above, failing which this award may lapse without liability on us. Our standard Subcontract terms apply to any works commenced.`)
+    ].join("");
+  } else {
+    clauses = [
+      clause(1, "Scope of works", `${scopeHtml}<p style="margin:6px 0 0">The Works include all labour, materials, plant, tools, supervision and everything necessary for proper completion in accordance with the drawings, specifications, programme and the reasonable instructions of the MA Representative. You are deemed to have inspected the site and satisfied yourself as to all conditions.</p>`),
+      clause(2, "Subcontract price", `The Subcontract Price is <b>${money(a)}</b> (exclusive of VAT). Rates are fixed and firm, inclusive of all costs, overheads, profit and risks, with no escalation. VAT is added against a valid tax invoice. For re-measurable work you are paid only for quantities executed, measured and certified by the MA Representative.`),
+      clause(3, "Your obligations", `Maintain a valid UAE trade licence, permits and registrations; comply with UAE Labour Law (Decree-Law 33/2021), WPS, and all visa/work-permit rules; comply with all HSE and client/site rules and provide PPE and inductions; hold and evidence workmen's compensation and third-party liability insurance; be solely liable for your personnel, wages and end-of-service; not assign or further subcontract without our written consent; and replace unsuitable personnel within 24 hours of notice.`),
+      clause(4, "Security cheques", `Within 7 days of signing and before commencing, deliver: (a) an undated <b>security deposit cheque of ${money(secAmt)}</b> (${secPct}%); and (b) an undated <b>performance cheque of ${money(perfAmt)}</b> (${perfPct}%), each drawn on a UAE-licensed bank in favour of ${esc(ent)}. We may date and present either cheque on your default, non-payment, or termination for default; excess is refunded, shortfall remains a debt. Cheques are returned within 30 days after expiry of the DLP and rectification of defects, provided nothing is outstanding. Delivery of the cheques is a condition precedent to any payment.`),
+      clause(5, "Payment", `Submit a detailed interim application with signed joint measurement, works report and attendance by the <b>25th</b> of each month. We certify within <b>14 days</b> and pay the certified amount, less retention and deductions, within <b>${payDays} days</b> of certification and receipt of your valid VAT invoice. Retention is <b>${retPct}%</b> of each certificate up to ${retPct}% of the price: 50% released on taking-over, 50% after the <b>${dlp}-day DLP</b> and rectification of defects. We may withhold payment where security, insurances or documents are missing, where progress is behind due to your default, or where WPS wages are unpaid.`),
+      clause(6, "Time & delay", `Commence within ${esc(rec.commenceDays || 7)} days of our notice to proceed and complete by <b>${dt(rec.completion)}</b>. Time is of the essence. Extensions are granted only for our acts of prevention, instructed variations, or force majeure, and only if notified in writing within 7 days. Delay damages of <b>${delayDay}%</b> of the price per day apply, capped at <b>${delayCap}%</b>. If you fall behind, you shall recover the delay at your cost; we may also engage others to supplement, take over or reassign any part of the Works, and recover all extra cost plus 15% overhead from sums due, the security cheques, or as a debt.`),
+      clause(7, "Variations", `We may instruct variations in writing. You shall not execute any variation without a written instruction and have no entitlement to payment for unauthorised work. Variations are valued at the agreed rates or fair market rates agreed in writing before the work.`),
+      clause(8, "Quality, defects & DLP", `All Works shall conform to the specifications, approved samples and good industry practice; materials shall be new and of the specified quality; no work shall be covered up without inspection. You shall rectify defects notified during execution or the ${dlp}-day DLP at your cost; failing which we may rectify by others and back-charge the cost plus 15%. Decennial liability applies under Articles 880–883 of the UAE Civil Code where applicable.`),
+      clause(9, "Liability, indemnity & insurance", `You are responsible for the care of your Works, personnel and materials until taking-over, and shall indemnify us and the client against all claims, damage, fines and losses arising from your personnel, your damage to property, or your breach of law or this Agreement. Maintain the insurances required by law and this Agreement; failing which we may procure them and back-charge the premium.`),
+      clause(10, "Default & termination", `On abandonment, insufficient progress, unremedied defects, HSE breaches, unpaid wages/WPS, insolvency, unauthorised assignment, a dishonoured security cheque, or any material breach, we may (after 48 hours' notice, or immediately for serious defaults) terminate in whole or part, complete the Works ourselves or through others using your on-site materials and plant, and recover all additional costs plus 15% from sums due, the cheques, or as a debt. We may also terminate for convenience on 7 days' notice, paying only for Works properly executed and certified to that date, with no loss-of-profit claim.`),
+      clause(11, "Confidentiality", `You shall keep all project information, drawings, prices and documents confidential, use them only for the Works, and not publish any site photos, videos or data (including on social media) without our written consent. This obligation survives 5 years after completion or termination.`),
+      clause(12, "Force majeure", `Neither party is liable for failure caused by events beyond its reasonable control (Article 273, UAE Civil Code); shortage of labour, materials or funds and normal weather are excluded. If force majeure continues beyond 60 days either party may terminate, and you are paid for Works properly executed and certified.`),
+      clause(13, "Governing law & disputes", `This Agreement is governed by the federal laws of the United Arab Emirates and the laws of the Emirate of Abu Dhabi. The parties shall first attempt amicable settlement within 28 days; failing which the dispute shall be finally settled by the courts of Abu Dhabi. You shall continue the Works during any dispute.`),
+      clause(14, "General & acceptance", `This Agreement and its appendices are the entire agreement and supersede all prior LPOs, quotations and correspondence; any amendment must be in writing and signed by both parties. Nothing creates any relationship between you and the client, nor any partnership or employment between the parties. Please <b>sign and stamp</b> below and return a signed copy <b>within ${hrs} hours</b> of the date above.`)
+    ].join("");
+  }
+  const docsChecklist = isAgr ? `<div class="cl"><div class="ct"><b>Documents required before signature</b></div><div class="cb">Signed Agreement (all pages) · valid trade licence · TRN certificate · Emirates ID / passport of signatory · security deposit cheque · performance cheque · insurance certificates · bank details letter · manpower list with ID/visa. Missing items must be justified in writing.</div></div>` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.docNo)} — ${isAgr ? "Subcontract Agreement" : "Letter of Award"}</title>
+<style>
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12.5px;line-height:1.5}
+  .page{max-width:820px;margin:0 auto;padding:26px 34px}
+  .lh{display:flex;align-items:center;gap:14px;border-bottom:3px solid #1f3864;padding-bottom:10px}
+  .lh img{height:56px}
+  .lh .n1{font-size:20px;font-weight:800;color:#1f3864;letter-spacing:.3px}
+  .lh .n2{font-size:11px;color:#5b6472}
+  .title{text-align:center;margin:14px 0 4px;font-size:17px;font-weight:800;color:#1f3864;letter-spacing:.5px}
+  .sub{text-align:center;color:#7a8494;font-size:11px;margin-bottom:12px}
+  table.pt{width:100%;border-collapse:collapse;margin:8px 0 14px;font-size:12px}
+  table.pt td{border:1px solid #d8deea;padding:5px 9px;vertical-align:top}
+  table.pt td.k{background:#f4f6fb;color:#5b6472;width:20%;font-weight:600}
+  .subj{background:#1f3864;color:#fff;padding:7px 12px;border-radius:5px;font-weight:600;margin:6px 0 12px;font-size:12.5px}
+  .cl{margin:0 0 9px}
+  .cl .ct{color:#1f3864;margin-bottom:2px}
+  .cl .cb{text-align:justify}
+  table.sig{width:100%;border-collapse:collapse;margin-top:18px}
+  table.sig td{width:50%;border:1px solid #c9d2e2;padding:12px 14px;vertical-align:top}
+  .sh{font-size:10.5px;color:#7a8494;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+  .sn{font-weight:700;color:#1f3864}
+  .sl{font-size:11px;color:#33404f;margin-top:5px}
+  .note{background:#fff8e6;border-left:4px solid #bf9000;padding:9px 13px;border-radius:4px;font-size:11.5px;margin:12px 0}
+  @media print{.page{max-width:none;padding:12mm}}
+</style></head><body><div class="page">
+  <div class="lh"><img src="/logo.png" alt="" onerror="this.style.display='none'"><div><div class="n1">${esc(ent)}</div><div class="n2">Marvellous Art · MA Building Contracting · MA Building Maintenance — TRN 104117106500003 · +971 80062244 · info@maagroup.ae</div></div></div>
+  <div class="title">${isAgr ? "SUBCONTRACT AGREEMENT" : "LETTER OF AWARD"}</div>
+  <div class="sub">${isAgr ? "Subcontract / Supply Package — UAE" : "Subcontract / Supply Package — UAE"}</div>
+  ${partyTbl}
+  <div class="subj">Subject: ${isAgr ? "Subcontract Agreement" : "Letter of Award"} — ${esc(rec.scopeTitle || rec.project || "Works Package")}</div>
+  <p>Dear Sir/Madam,</p>
+  <p>${isAgr ? `This Subcontract Agreement is made between <b>${esc(ent)}</b> (the “Main Contractor”) and <b>${esc(rec.supplierName)}</b> (the “Subcontractor”) for the Works described below, on the following terms.` : `Further to your quotation and our discussions, <b>${esc(ent)}</b> (the “Main Contractor”) is pleased to award to <b>${esc(rec.supplierName)}</b> (the “Subcontractor”) the following work package, subject to the terms below.`}</p>
+  ${clauses}
+  ${docsChecklist}
+  <div class="note"><b>Action required:</b> Please print, <b>sign and stamp</b> this document and return a scanned copy to <b>${esc(cfg && cfg.replyTo || "info@maagroup.ae")}</b> within <b>${hrs} hours</b>. Commencement of any works constitutes acceptance of these terms.</div>
+  ${sigBlock}
+</div></body></html>`;
+}
 var api_default = async (req, context) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/(?:api|\.netlify\/functions\/api)\/?/, "");
@@ -13905,6 +14007,96 @@ var api_default = async (req, context) => {
     const recA = { id, category, subject, body, sentAt: now(), sentBy: me.name, recipientCount: delivered, totalTargets: emails.length, autoNew: b.autoNew !== false, lastStatus };
     await s.setJSON("announcement/" + id, recA);
     return json({ ok: true, id, recipientCount: delivered, totalTargets: emails.length, groups, lastStatus });
+  }
+  if (path === "award/threshold" && req.method === "GET") {
+    return json({ threshold: awardThreshold(settings) });
+  }
+  if (path === "award/generate" && req.method === "POST") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const b = await req.json();
+    const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
+    if (!sup) return err("Supplier not found", 404);
+    const amount = num(b.amount);
+    if (amount <= 0) return err("Enter the award / quotation amount");
+    const type = awardTypeFor(amount, settings);
+    const entObj = (settings.entities || []).find((e) => e.short === b.entity) || (settings.entities || [])[0] || { name: "MA Group – Marvellous Art LLC" };
+    const yr = String(now()).slice(0, 4);
+    settings.awardSeq = (num(settings.awardSeq) || 0) + 1;
+    const seq = String(settings.awardSeq).padStart(3, "0");
+    const docNo = (type === "LOA" ? "MA-LOA-" : "MA-SUB-") + yr + "/" + seq;
+    const id = "AWD" + Date.now().toString(36) + randomBytes(2).toString("hex");
+    const rec = {
+      id, docNo, type, status: "Issued",
+      supplierId: sup.id, supplierName: sup.name, supplierTL: sup.licenseNo || "", supplierTRN: sup.trn || "", supplierEmail: sup.email || "", supplierAttn: sup.contactName || "",
+      entity: entObj.short || "", entityName: entObj.name || "MA Group – Marvellous Art LLC",
+      project: b.project || "", location: b.location || "", client: b.client || "",
+      quotationRef: b.quotationRef || "", quotationDate: b.quotationDate || "",
+      scopeTitle: b.scopeTitle || "", scope: b.scope || "", amount,
+      commenceDays: num(b.commenceDays) || 7, commencement: b.commencement || "", completion: b.completion || "",
+      retentionPct: num(b.retentionPct) || 10, delayPctPerDay: num(b.delayPctPerDay) || 0.5, delayCapPct: num(b.delayCapPct) || 10,
+      securityDepPct: num(b.securityDepPct) || 5, performancePct: num(b.performancePct) || 5,
+      dlpDays: num(b.dlpDays) || 365, paymentDays: num(b.paymentDays) || 30, signBackHours: num(b.signBackHours) || 24,
+      createdAt: now(), createdBy: me.name, sentAt: "", receivedAt: ""
+    };
+    await s.setJSON("award/" + id, rec);
+    await s.setJSON("settings", settings);
+    return json(rec);
+  }
+  if (path === "award/list" && req.method === "GET") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const items = await getAllJSON(s, "award/");
+    items.sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
+    return json({ items, threshold: awardThreshold(settings) });
+  }
+  const awdHtml = path.match(/^award\/([^/]+)\/html$/);
+  if (awdHtml && req.method === "GET") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdHtml[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    const cfg = await getEmailCfg(s);
+    const sign = await s.get("asset/sign").catch(() => "") || "";
+    const stamp = await s.get("asset/stamp").catch(() => "") || "";
+    return new Response(buildAwardDocHtml(rec, cfg, { sign, stamp }), { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  const awdSend = path.match(/^award\/([^/]+)\/send$/);
+  if (awdSend && req.method === "POST") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdSend[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    if (!rec.supplierEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(rec.supplierEmail)) return err("This supplier has no valid email on file", 400);
+    const cfg = await getEmailCfg(s);
+    const sign = await s.get("asset/sign").catch(() => "") || "";
+    const stamp = await s.get("asset/stamp").catch(() => "") || "";
+    const html = buildAwardDocHtml(rec, cfg, { sign, stamp });
+    const label = rec.type === "LOA" ? "Letter of Award" : "Subcontract Agreement";
+    const subject = `${label} ${rec.docNo} — ${rec.project || "Works Package"} — Signature required within ${rec.signBackHours || 24}h`;
+    const r = await sendMail(s, cfg, { type: "awarddoc", to: rec.supplierEmail, toName: rec.supplierName, subject, html, supplierId: rec.supplierId });
+    rec.status = "Sent"; rec.sentAt = now(); rec.sendStatus = r.status;
+    await s.setJSON("award/" + rec.id, rec);
+    // Copy to the CEO/CFO for the record.
+    try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html }); } catch (e) { }
+    return json({ ok: true, status: r.status, to: rec.supplierEmail });
+  }
+  const awdRecv = path.match(/^award\/([^/]+)\/received$/);
+  if (awdRecv && req.method === "POST") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdRecv[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    rec.status = "Countersigned"; rec.receivedAt = now(); rec.receivedBy = me.name;
+    await s.setJSON("award/" + rec.id, rec);
+    return json({ ok: true });
+  }
+  const awdDel = path.match(/^award\/([^/]+)$/);
+  if (awdDel && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    await s.delete("award/" + awdDel[1]).catch(() => {});
+    return json({ ok: true });
+  }
+  if (awdDel && req.method === "GET") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdDel[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    return json(rec);
   }
   if (path === "admin/delete" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
