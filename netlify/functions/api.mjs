@@ -14687,6 +14687,34 @@ var api_default = async (req, context) => {
     }
     return json({ ok: true });
   }
+  const chqNoM = path.match(/^cert\/([^/]+)\/chequeno$/);
+  if (chqNoM && req.method === "POST") {
+    if (!can("admin")) return err("Only the CEO can amend a cheque number", 403);
+    const key = "cert/" + decodeURIComponent(chqNoM[1]);
+    const c = await s.get(key, { type: "json" });
+    if (!c || !c.payment) return err("No payment recorded on this certificate", 404);
+    if (c.payment.mode !== "Cheque") return err("This payment is not by cheque", 400);
+    const b = await req.json().catch(() => ({}));
+    const newRef = String(b.ref || "").trim();
+    if (!newRef) return err("Enter the corrected cheque number");
+    const oldRef = String(c.payment.ref || "").trim();
+    if (newRef.toLowerCase() === oldRef.toLowerCase()) return json({ ok: true, unchanged: true });
+    // Anti-duplication: the corrected number must not belong to another payment.
+    const reg = await s.get("register", { type: "json" }) || [];
+    const dupR = reg.find((r) => r && r.mode === "Cheque" && r.no !== c.no && String(r.ref || "").trim().toLowerCase() === newRef.toLowerCase());
+    if (dupR) return err(`Cheque no. ${newRef} is already used on payment ${dupR.no} (${dupR.date}, ${dupR.payee}). Choose a different number.`, 409);
+    const reason = String(b.reason || "").trim();
+    c.payment.ref = newRef;
+    c.payment.chequeAmended = now();
+    c.payment.chequeAmendedBy = me.name;
+    if (c.audit) c.audit.push({ at: now(), by: me.name, action: `Cheque no. amended ${oldRef ? "from " + oldRef + " " : ""}to ${newRef}${reason ? " — " + reason : ""}` });
+    await s.setJSON(key, c);
+    // Keep the payment register in sync.
+    let regChanged = false;
+    for (const r of reg) { if (r && r.no === c.no && r.mode === "Cheque") { r.ref = newRef; regChanged = true; } }
+    if (regChanged) await s.setJSON("register", reg);
+    return json({ ok: true, ref: newRef, oldRef });
+  }
   const proofM = path.match(/^cert\/([^/]+)\/proof$/);
   if (proofM) {
     const no = decodeURIComponent(proofM[1]);

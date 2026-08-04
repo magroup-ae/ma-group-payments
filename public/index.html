@@ -688,6 +688,7 @@ async function openCert(no){
             : `<button class="btn" id="chqBtn" disabled title="Cheque already printed${c.payment.printedAt?" on "+dmy(c.payment.printedAt):""} — only the CEO can reprint" style="opacity:.5;cursor:not-allowed">Cheque printed ✓</button>`)
         : `<button class="btn gold" id="chqBtn">Print cheque</button>`)
     : "";
+  const amendChqBtn = (pm==="Cheque" && c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="amendChqBtn" title="Correct a mis-printed cheque number">Amend cheque no.</button>` : "";
   const cashBtn = pm==="Cash" ? `<button class="btn gold" id="pcvBtn">Petty cash voucher</button>` : "";
   const rvBtn = c.payment ? `<button class="btn ghost" id="rvBtn">Receipt voucher</button>` : "";
   const canPay=["Accounts","CEO"].includes(ME.role);
@@ -701,7 +702,7 @@ async function openCert(no){
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
         ${(!canEdit&&ME.role==="CEO"&&c.status!=="Cancelled")?`<button class="btn ghost" id="ceoEditBtn" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}
-        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${cashBtn}${rvBtn}${proofBtn}
+        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${cashBtn}${rvBtn}${proofBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
@@ -748,6 +749,7 @@ async function openCert(no){
     printCheque(c);
     setTimeout(async ()=>{ try{ await api("cert/"+encodeURIComponent(c.no)+"/printed",{method:"POST"}); await load(); openCert(c.no); }catch(e){} }, 800);
   };
+  if($("#amendChqBtn")) $("#amendChqBtn").onclick=()=>amendChequeNo(c.no, c.payment&&c.payment.ref, async()=>{ await load(); openCert(c.no); });
   if(cashBtn) $("#pcvBtn").onclick=()=>printPettyCash(c);
   if(rvBtn) $("#rvBtn").onclick=()=>printReceiptVoucher(c);
   if(pm==="Bank Transfer"){
@@ -1363,7 +1365,7 @@ function vCheques(){
   // pull payment ref/bank/date from REG for each cheque cert
   const regByNo={}; REG.forEach(r=>{ if(r.mode==="Cheque") regByNo[r.no]=r; });
   const rows=cheques.map(c=>{ const r=regByNo[c.no]||{};
-    return `<tr><td><b>${esc(c.no)}</b></td><td>${esc(r.ref||"—")}</td><td>${dmy(r.date)}</td><td>${esc(c.supplier)}</td>
+    return `<tr><td><b>${esc(c.no)}</b></td><td>${esc(r.ref||"—")}${ME.role==="CEO"?` <a href="#" class="chqAmend" data-no="${esc(c.no)}" data-ref="${esc(r.ref||"")}" title="Amend cheque number" style="font-size:11px;text-decoration:none">✎</a>`:""}</td><td>${dmy(r.date)}</td><td>${esc(c.supplier)}</td>
       <td>${esc(r.bank||"—")}</td><td class="num">${fmt(c.payable)}</td>
       <td>${!canPrint?"—":(c.chequePrinted?(ME.role==="CEO"?`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Reprint 🔒</button>`:`<span class="muted" title="Only the CEO can reprint">printed ✓</span>`):`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Print</button>`)}</td></tr>`; }).join("");
   const approvedNoPay=CERTS.filter(c=>c.status==="Approved").length;
@@ -1377,10 +1379,21 @@ function vCheques(){
    <div class="note" style="margin-top:12px"><b>To print:</b> click Print — a cheque-sized PDF opens; print at <b>Actual size / 100%</b> on A4 and feed your ENBD cheque. Adjust alignment in Settings → Cheque Layout if ever needed.</div>
    </div>`;
   document.querySelectorAll("[data-chq]").forEach(b=>b.onclick=()=>reprintCheque(b.dataset.chq));
+  document.querySelectorAll(".chqAmend").forEach(a=>a.onclick=e=>{ e.preventDefault(); amendChequeNo(a.dataset.no, a.dataset.ref, async()=>{ await load(); vCheques(); }); });
   $("#chqCsv").onclick=()=>{ const rows2=[["CertNo","ChequeNo","Date","Supplier","Payee","Bank","Amount"]]
     .concat(cheques.map(c=>{const r=regByNo[c.no]||{};return [c.no,r.ref||"",r.date||"",c.supplier,r.payee||c.supplier,r.bank||"",c.payable];}));
     const csv=rows2.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
     const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cheque_Register.csv"; a.click(); };
+}
+async function amendChequeNo(no,curRef,after){
+  const cur=curRef?String(curRef):"";
+  const nn=prompt("Correct cheque number\n\nCurrent: "+(cur||"(none)")+"\n\nEnter the correct cheque number:", cur);
+  if(nn===null) return; const ref=nn.trim(); if(!ref){ toast("Cheque number cannot be empty"); return; }
+  if(ref===cur){ toast("No change"); return; }
+  const reason=prompt("Reason for the correction (for the audit log):","Cheque misprint")||"";
+  try{ const r=await api("cert/"+encodeURIComponent(no)+"/chequeno",{method:"POST",body:{ref,reason}});
+    toast("Cheque no. amended"+(r.oldRef?" from "+r.oldRef:"")+" to "+r.ref); if(after) after();
+  }catch(e){ toast(e.message); }
 }
 async function reprintCheque(no){
   let c; try{ c=await api("cert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
