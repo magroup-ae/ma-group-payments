@@ -13714,13 +13714,16 @@ async function computeTreasury(s) {
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
-  let cost = 0, paidOut = 0, ipcCost = 0;
+  let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0;
   const byType = {}, byCat = {}, byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byDate = {}, byProject = {};
   let hqCost = 0;
   for (const e of expenses) {
     const a = num(e.amount), p = num(e.paid);
     const isHQ = e.project === HQ_PROJECT;
     if (e.source === "supplier-ipc") ipcCost += a; // subcontract cost certified via IPCs
+    // Payments funded out of the client's down payment (advance) — a memo of how
+    // much of the advance has been consumed. Uses cash paid if any, else the cost.
+    if (e.fromAdvance) advanceUtilised += (p > 0 ? p : a);
     cost += a; paidOut += p;
     if (isHQ) hqCost += a;
     byType[e.costType] = (byType[e.costType] || 0) + a;
@@ -13785,6 +13788,9 @@ async function computePnl(s, project) {
   const totalCashIn = r2(advanceReceived + progressCollected);
   const netCash = r2(totalCashIn - paidOut);
   const collected = progressCollected;
+  // ---- down-payment (advance) utilisation ----
+  advanceUtilised = r2(advanceUtilised);
+  const advanceBalanceRemaining = r2(advanceReceived - advanceUtilised);
   // ---- CFO income-statement waterfall ----
   const directCost = r2(byGroup.Direct || 0);
   const indirectCost = r2(byGroup.Indirect || 0);
@@ -13811,6 +13817,7 @@ async function computePnl(s, project) {
     collected: r2(collected), outstandingReceivable: r2(netDue + vatDue - collected),
     materialsOnSite: r2(materialsOnSite), workExecuted: r2(workExecuted),
     advanceReceived, progressCollected, totalCashIn, netCash,
+    advanceUtilised, advanceBalanceRemaining,
     byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
@@ -15604,6 +15611,7 @@ var api_default = async (req, context) => {
       vatPct: b.vatPct === void 0 ? num(ex?.vatPct) : num(b.vatPct),
       status: str("status") || "Pending",
       paid: b.paid === void 0 ? num(ex?.paid) : num(b.paid),
+      fromAdvance: b.fromAdvance === void 0 ? !!ex?.fromAdvance : !!b.fromAdvance,
       notes: str("notes"),
       supplierCertNo: ex?.supplierCertNo || b.supplierCertNo || null,
       source: ex?.source || "manual",
@@ -15651,6 +15659,7 @@ var api_default = async (req, context) => {
         supplier: String(r.supplier || ""), supplierId: null, invoiceNo: String(r.invoiceNo || ""), description: String(r.description || ""),
         poRef: String(r.poRef || ""), boqRef: String(r.boqRef || ""),
         budgeted: num(r.budgeted), amount: num(r.amount), vatPct: num(r.vatPct), vat: r2(num(r.amount) * num(r.vatPct)), gross: r2(num(r.amount) * (1 + num(r.vatPct))), status, paid: num(r.paid),
+        fromAdvance: !!r.fromAdvance,
         notes: String(r.notes || ""), supplierCertNo: null, source: "import",
         createdBy: me.name, createdAt: now(), updatedAt: now()
       });
@@ -15666,6 +15675,43 @@ var api_default = async (req, context) => {
       await Promise.all(items.slice(i, i + 25).map((e) => s.setJSON("expense/" + e.id, e)));
     }
     return json({ created: items.length, suppliersRegistered: names.length });
+  }
+  if (path === "expenses/bulk-assign" && req.method === "POST") {
+    // Bulk-tag existing cost-log rows (typically old imported payments): set
+    // their project and/or mark them as paid from the client down payment.
+    if (!can("expense")) return err("No rights", 403);
+    const b = await req.json();
+    const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
+    if (!ids.length) return err("No rows selected");
+    const setProject = b.project !== void 0 && b.project !== null && String(b.project).trim() !== "";
+    const project = setProject ? String(b.project).trim() : null;
+    const setAdvance = b.fromAdvance !== void 0 && b.fromAdvance !== null;
+    const fromAdvance = !!b.fromAdvance;
+    let updated = 0, ipcMoved = 0;
+    for (const id of ids) {
+      const e = await s.get("expense/" + id, { type: "json" });
+      if (!e) continue;
+      let changed = false;
+      // Reallocating a Supplier-IPC line moves its parent certificate too, and is CEO-only.
+      if (setProject && String(e.project || "") !== project) {
+        if (e.source === "supplier-ipc") {
+          if (me.role === "CEO" && e.supplierCertNo) {
+            try {
+              const pc = await s.get("cert/" + e.supplierCertNo, { type: "json" });
+              if (pc && String(pc.project || "") !== project) {
+                pc.project = project; pc.audit = pc.audit || [];
+                pc.audit.push({ at: now(), by: me.name, action: `Project reallocated to ${project} (bulk assign)` });
+                await s.setJSON("cert/" + pc.no, pc); ipcMoved++;
+              }
+              e.project = project; changed = true;
+            } catch {}
+          }
+        } else { e.project = project; changed = true; }
+      }
+      if (setAdvance && !!e.fromAdvance !== fromAdvance) { e.fromAdvance = fromAdvance; changed = true; }
+      if (changed) { e.updatedAt = now(); e.updatedBy = me.name; await s.setJSON("expense/" + id, e); updated++; }
+    }
+    return json({ ok: true, updated, ipcMoved });
   }
   if (path === "suppliers/sync-costlog" && req.method === "POST") {
     if (!can("suppliers")) return err("No rights", 403);
