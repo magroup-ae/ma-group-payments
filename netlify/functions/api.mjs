@@ -13088,6 +13088,7 @@ var DEFAULT_SETTINGS = {
     { code: "HQ", name: "MA HQ – Operations", fixed: true, kind: "overhead" }
   ],
   banks: ["Emirates NBD \u2014 M 3303"],
+  bankOpening: {},
   modes: ["Cheque", "Cash", "Bank Transfer"],
   trades: [
     "Civil / Substructure Works",
@@ -13665,6 +13666,37 @@ async function upsertCertExpense(s, c) {
     createdBy: existing?.createdBy || "system", createdAt: existing?.createdAt || now(), updatedAt: now()
   };
   await s.setJSON("expense/" + id, exp);
+}
+async function computeTreasury(s) {
+  const settings = await s.get("settings", { type: "json" }) || {};
+  const opening = settings.bankOpening || {};
+  const [register, receipts, moves] = await Promise.all([
+    s.get("register", { type: "json" }).then((r) => r || []),
+    getAllJSON(s, "clientreceipt/"),
+    getAllJSON(s, "bankmove/")
+  ]);
+  const acc = {};
+  const ensure = (name) => { name = name || "(unallocated)"; if (!acc[name]) acc[name] = { name, opening: 0, openingDate: "", inflow: 0, outflow: 0 }; return acc[name]; };
+  for (const nm of (settings.banks || [])) { const a = ensure(nm); a.opening = num(opening[nm] && opening[nm].balance); a.openingDate = (opening[nm] && opening[nm].date) || ""; }
+  const ledger = [];
+  for (const r of register) { if (!r) continue; const a = ensure(r.bank); const amt = num(r.amount); a.outflow += amt; ledger.push({ date: r.date || "", account: a.name, kind: "Payment", ref: r.ref || "", party: r.payee || r.supplier || "", note: "IPC " + (r.no || ""), inAmt: 0, outAmt: amt }); }
+  for (const rc of receipts) { if (!rc) continue; const a = ensure(rc.bank); const amt = num(rc.amount); a.inflow += amt; ledger.push({ date: rc.date || "", account: a.name, kind: "Receipt", ref: rc.ref || "", party: rc.project || "", note: rc.isAdvance ? "Advance received" : rc.isRetentionRelease ? "Retention release" : "Client receipt", inAmt: amt, outAmt: 0 }); }
+  for (const m of moves) { if (!m) continue; const amt = num(m.amount); const t = m.type;
+    if (t === "transfer") {
+      const from = ensure(m.account), to = ensure(m.toAccount); from.outflow += amt; to.inflow += amt;
+      ledger.push({ date: m.date || "", account: from.name, kind: "Transfer out", ref: m.ref || "", party: to.name, note: m.description || "", inAmt: 0, outAmt: amt });
+      ledger.push({ date: m.date || "", account: to.name, kind: "Transfer in", ref: m.ref || "", party: from.name, note: m.description || "", inAmt: amt, outAmt: 0 });
+    } else {
+      const a = ensure(m.account); const isIn = (t === "deposit" || t === "adjust-in");
+      if (isIn) a.inflow += amt; else a.outflow += amt;
+      ledger.push({ date: m.date || "", account: a.name, kind: t === "deposit" ? "Deposit" : t === "charge" ? "Bank charge" : t === "withdrawal" ? "Withdrawal" : "Adjustment", ref: m.ref || "", party: "", note: m.description || "", inAmt: isIn ? amt : 0, outAmt: isIn ? 0 : amt, id: m.id });
+    }
+  }
+  const accounts = Object.values(acc).map((a) => ({ ...a, opening: r2(a.opening), inflow: r2(a.inflow), outflow: r2(a.outflow), balance: r2(a.opening + a.inflow - a.outflow) }));
+  accounts.sort((x, y) => x.name === "(unallocated)" ? 1 : y.name === "(unallocated)" ? -1 : x.name.localeCompare(y.name));
+  ledger.sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : 0));
+  const totalBalance = r2(accounts.reduce((t, a) => t + a.balance, 0));
+  return { accounts, totalBalance, ledger: ledger.slice(0, 300) };
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
@@ -15180,6 +15212,45 @@ var api_default = async (req, context) => {
   if (crDel && req.method === "DELETE") {
     if (!can("admin")) return err("CEO only", 403);
     await s.delete("clientreceipt/" + decodeURIComponent(crDel[1]));
+    return json({ ok: true });
+  }
+  if (path === "treasury" && req.method === "GET") {
+    if (!can("pnl") && !can("pay")) return err("Not permitted", 403);
+    return json(await computeTreasury(s));
+  }
+  if (path === "bankopening" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const b = await req.json();
+    const stg = await s.get("settings", { type: "json" }) || {};
+    const name = String(b.name || "").trim();
+    if (!name) return err("Account name required");
+    if (!Array.isArray(stg.banks)) stg.banks = [];
+    if (!stg.banks.includes(name)) stg.banks.push(name);
+    stg.bankOpening = stg.bankOpening || {};
+    stg.bankOpening[name] = { balance: num(b.balance), date: String(b.date || "").slice(0, 10) };
+    await s.setJSON("settings", stg);
+    return json({ ok: true });
+  }
+  if (path === "bankmove" && req.method === "POST") {
+    if (!can("pay") && !can("admin")) return err("Not permitted", 403);
+    const b = await req.json();
+    const type = String(b.type || "").trim();
+    const okTypes = ["deposit", "withdrawal", "charge", "transfer", "adjust-in", "adjust-out"];
+    if (!okTypes.includes(type)) return err("Invalid movement type");
+    if (!(num(b.amount) > 0)) return err("Enter an amount");
+    if (!String(b.account || "").trim()) return err("Choose the account");
+    if (type === "transfer" && !String(b.toAccount || "").trim()) return err("Choose the destination account for a transfer");
+    const stg = await s.get("settings", { type: "json" }) || {};
+    const id = await nextId(s, stg, "bankMoveSeq", "BM", "bankmove/", 4);
+    const rec = { id, type, account: String(b.account).trim(), toAccount: String(b.toAccount || "").trim(), amount: num(b.amount), date: String(b.date || now().slice(0, 10)).slice(0, 10), ref: String(b.ref || ""), description: String(b.description || ""), createdBy: me.name, createdAt: now() };
+    await s.setJSON("bankmove/" + id, rec);
+    await s.setJSON("settings", stg);
+    return json(rec);
+  }
+  const bmDel = path.match(/^bankmove\/([^/]+)$/);
+  if (bmDel && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    await s.delete("bankmove/" + decodeURIComponent(bmDel[1]));
     return json({ ok: true });
   }
   if (path === "clientcert" && req.method === "POST") {
