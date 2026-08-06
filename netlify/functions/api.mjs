@@ -13679,7 +13679,7 @@ async function computeTreasury(s) {
   const ensure = (name) => { name = name || "(unallocated)"; if (!acc[name]) acc[name] = { name, opening: 0, openingDate: "", inflow: 0, outflow: 0 }; return acc[name]; };
   for (const nm of (settings.banks || [])) { const a = ensure(nm); a.opening = num(opening[nm] && opening[nm].balance); a.openingDate = (opening[nm] && opening[nm].date) || ""; }
   const ledger = [];
-  for (const r of register) { if (!r) continue; const a = ensure(r.bank); const amt = num(r.amount); a.outflow += amt; ledger.push({ date: r.date || "", account: a.name, kind: "Payment", ref: r.ref || "", party: r.payee || r.supplier || "", note: "IPC " + (r.no || ""), inAmt: 0, outAmt: amt }); }
+  for (const r of register) { if (!r) continue; const a = ensure(r.bank); const amt = num(r.amount); a.outflow += amt; ledger.push({ date: r.date || "", account: a.name, kind: "Payment", ref: r.ref || "", party: r.payee || r.supplier || "", note: "IPC " + (r.no || ""), certNo: r.no || "", inAmt: 0, outAmt: amt }); }
   for (const rc of receipts) { if (!rc) continue; const a = ensure(rc.bank); const amt = num(rc.amount); a.inflow += amt; ledger.push({ date: rc.date || "", account: a.name, kind: "Receipt", ref: rc.ref || "", party: rc.project || "", note: rc.isAdvance ? "Advance received" : rc.isRetentionRelease ? "Retention release" : "Client receipt", inAmt: amt, outAmt: 0 }); }
   for (const m of moves) { if (!m) continue; const amt = num(m.amount); const t = m.type;
     if (t === "transfer") {
@@ -14839,6 +14839,32 @@ var api_default = async (req, context) => {
     if (regChanged) await s.setJSON("register", reg);
     return json({ ok: true, ref: newRef, oldRef });
   }
+  const payAmtM = path.match(/^cert\/([^/]+)\/paymentamount$/);
+  if (payAmtM && req.method === "POST") {
+    if (!can("admin")) return err("Only the CEO can amend a payment amount", 403);
+    const key = "cert/" + decodeURIComponent(payAmtM[1]);
+    const c = await s.get(key, { type: "json" });
+    if (!c || !c.payment) return err("No payment recorded on this certificate", 404);
+    const b = await req.json().catch(() => ({}));
+    const newAmt = num(b.amount);
+    if (!(newAmt > 0)) return err("Enter a valid amount");
+    const oldAmt = num(c.payment.amount);
+    if (newAmt === oldAmt) return json({ ok: true, unchanged: true });
+    const reason = String(b.reason || "").trim();
+    c.payment.amount = newAmt;
+    c.payment.amountAmended = now();
+    c.payment.amountAmendedBy = me.name;
+    if (c.audit) c.audit.push({ at: now(), by: me.name, action: `Payment amount amended from AED ${oldAmt} to AED ${newAmt}${reason ? " — " + reason : ""}` });
+    await s.setJSON(key, c);
+    // Keep the payment register (and therefore the bank balance) in sync.
+    const reg = await s.get("register", { type: "json" }) || [];
+    let regChanged = false;
+    for (const r of reg) { if (r && r.no === c.no) { r.amount = newAmt; regChanged = true; } }
+    if (regChanged) await s.setJSON("register", reg);
+    // Mirror the paid amount on the project cost line.
+    try { const xid = "XPC-" + c.no.replace(/[^A-Za-z0-9]+/g, "_"); const xp = await s.get("expense/" + xid, { type: "json" }); if (xp) { xp.paid = newAmt; xp.updatedAt = now(); await s.setJSON("expense/" + xid, xp); } } catch (e) {}
+    return json({ ok: true, amount: newAmt, oldAmount: oldAmt });
+  }
   const revM = path.match(/^cert\/([^/]+)\/reverse-payment$/);
   if (revM && req.method === "POST") {
     if (!can("admin")) return err("Only the CEO can reverse a payment", 403);
@@ -15241,10 +15267,11 @@ var api_default = async (req, context) => {
     if (!String(b.account || "").trim()) return err("Choose the account");
     if (type === "transfer" && !String(b.toAccount || "").trim()) return err("Choose the destination account for a transfer");
     const stg = await s.get("settings", { type: "json" }) || {};
-    const id = await nextId(s, stg, "bankMoveSeq", "BM", "bankmove/", 4);
-    const rec = { id, type, account: String(b.account).trim(), toAccount: String(b.toAccount || "").trim(), amount: num(b.amount), date: String(b.date || now().slice(0, 10)).slice(0, 10), ref: String(b.ref || ""), description: String(b.description || ""), createdBy: me.name, createdAt: now() };
+    let id = b.id, ex = null;
+    if (id) { ex = await s.get("bankmove/" + id, { type: "json" }); if (!ex) return err("Movement not found", 404); }
+    else { id = await nextId(s, stg, "bankMoveSeq", "BM", "bankmove/", 4); await s.setJSON("settings", stg); }
+    const rec = { id, type, account: String(b.account).trim(), toAccount: String(b.toAccount || "").trim(), amount: num(b.amount), date: String(b.date || now().slice(0, 10)).slice(0, 10), ref: String(b.ref || ""), description: String(b.description || ""), createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedBy: me.name, updatedAt: now() };
     await s.setJSON("bankmove/" + id, rec);
-    await s.setJSON("settings", stg);
     return json(rec);
   }
   const bmDel = path.match(/^bankmove\/([^/]+)$/);

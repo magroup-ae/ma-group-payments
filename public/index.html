@@ -699,6 +699,7 @@ async function openCert(no){
         : `<button class="btn gold" id="chqBtn">Print cheque</button>`)
     : "";
   const amendChqBtn = (pm==="Cheque" && c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="amendChqBtn" title="Correct a mis-printed cheque number">Amend cheque no.</button>` : "";
+  const amendAmtBtn = (c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="amendAmtBtn" title="Correct the recorded payment amount">Amend amount</button>` : "";
   const revBtn = (c.payment && ME.role==="CEO") ? `<button class="btn ghost" id="revBtn2" style="color:var(--red);border-color:var(--red)" title="Reverse this payment and return the certificate to Approved">Reverse payment</button>` : "";
   const cashBtn = pm==="Cash" ? `<button class="btn gold" id="pcvBtn">Petty cash voucher</button>` : "";
   const rvBtn = c.payment ? `<button class="btn ghost" id="rvBtn">Receipt voucher</button>` : "";
@@ -713,7 +714,7 @@ async function openCert(no){
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
         ${(!canEdit&&ME.role==="CEO"&&c.status!=="Cancelled")?`<button class="btn ghost" id="ceoEditBtn" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}
-        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${cashBtn}${rvBtn}${proofBtn}${revBtn}
+        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${amendAmtBtn}${cashBtn}${rvBtn}${proofBtn}${revBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     ${(c.payment && Math.abs(num(c.payment.amount)-num(K.payable))>0.01)?`<div class="note" style="margin-top:12px;background:#fff4e5;border-left:4px solid #bf9000">
@@ -770,6 +771,7 @@ async function openCert(no){
     try{ await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body:{invoiceAmount:num(c.contra),contra:0}}); toast("Corrected — this is now a positive payment certificate"); await load(); openCert(c.no); }catch(e){ toast(e.message); }
   };
   if($("#amendChqBtn")) $("#amendChqBtn").onclick=()=>amendChequeNo(c.no, c.payment&&c.payment.ref, async()=>{ await load(); openCert(c.no); });
+  if($("#amendAmtBtn")) $("#amendAmtBtn").onclick=()=>amendPaymentAmount(c.no, c.payment&&c.payment.amount, async()=>{ await load(); openCert(c.no); });
   if($("#revBtn2")) $("#revBtn2").onclick=async ()=>{
     const p=c.payment||{}; if(!confirm("Reverse this payment?\n\n"+(p.mode||"")+" "+(p.ref||"")+" · AED "+fmt(p.amount)+"\n\nThe certificate returns to Approved, the register entry is removed"+(p.mode==="Cheque"?" and the cheque number is freed":"")+". This is logged.")) return;
     const reason=prompt("Reason for reversing (for the audit log):","Payment recorded in error")||"";
@@ -1423,6 +1425,16 @@ async function amendChequeNo(no,curRef,after){
   const reason=prompt("Reason for the correction (for the audit log):","Cheque misprint")||"";
   try{ const r=await api("cert/"+encodeURIComponent(no)+"/chequeno",{method:"POST",body:{ref,reason}});
     toast("Cheque no. amended"+(r.oldRef?" from "+r.oldRef:"")+" to "+r.ref); if(after) after();
+  }catch(e){ toast(e.message); }
+}
+async function amendPaymentAmount(no,curAmt,after){
+  const cur=num(curAmt);
+  const nn=prompt("Correct payment amount (AED)\n\nCurrent: "+fmt(cur)+"\n\nEnter the correct amount:", cur);
+  if(nn===null) return; const amount=+nn||0; if(amount<=0){ toast("Enter a valid amount"); return; }
+  if(amount===cur){ toast("No change"); return; }
+  const reason=prompt("Reason for the correction (for the audit log):","Amount correction")||"";
+  try{ const r=await api("cert/"+encodeURIComponent(no)+"/paymentamount",{method:"POST",body:{amount,reason}});
+    toast("Amount amended"+(r.oldAmount!=null?" from "+fmt(r.oldAmount):"")+" to "+fmt(r.amount)); if(after) after();
   }catch(e){ toast(e.message); }
 }
 async function reprintCheque(no){
@@ -2438,7 +2450,7 @@ async function vBank(){
    </div>
    <div class="card"><h2 style="margin:0 0 8px">Account ledger <span class="muted" style="font-size:12px;font-weight:400">— most recent 300 movements</span></h2>
      <div style="overflow-x:auto"><table><tr><th>Date</th><th>Account</th><th>Type</th><th>Ref</th><th>Party / Note</th><th class="num">In</th><th class="num">Out</th></tr>
-     ${d.ledger.length?d.ledger.map(l=>`<tr><td style="white-space:nowrap">${dmy(l.date)}</td><td>${esc(l.account)}</td><td>${esc(l.kind)}</td><td>${esc(l.ref||"—")}</td><td>${esc(l.party||l.note||"")}${l.party&&l.note?` <span class="muted">· ${esc(l.note)}</span>`:""}${l.id&&isCEO?` <a href="#" class="bmDel" data-id="${esc(l.id)}" style="color:var(--red);font-size:11px">✕</a>`:""}</td><td class="num" style="color:var(--green)">${l.inAmt?fmt(l.inAmt):""}</td><td class="num" style="color:var(--red)">${l.outAmt?fmt(l.outAmt):""}</td></tr>`).join(""):`<tr><td colspan="7" class="muted">No movements yet.</td></tr>`}
+     ${d.ledger.length?d.ledger.map(l=>`<tr><td style="white-space:nowrap">${dmy(l.date)}</td><td>${esc(l.account)}</td><td>${esc(l.kind)}</td><td>${esc(l.ref||"—")}</td><td>${esc(l.party||l.note||"")}${l.party&&l.note?` <span class="muted">· ${esc(l.note)}</span>`:""}${l.certNo&&isCEO?` <a href="#" class="payAmend" data-no="${esc(l.certNo)}" data-amt="${l.outAmt}" title="Amend payment amount" style="font-size:11px;text-decoration:none">✎</a>`:""}${l.id&&isCEO?` <a href="#" class="bmDel" data-id="${esc(l.id)}" style="color:var(--red);font-size:11px">✕</a>`:""}</td><td class="num" style="color:var(--green)">${l.inAmt?fmt(l.inAmt):""}</td><td class="num" style="color:var(--red)">${l.outAmt?fmt(l.outAmt):""}</td></tr>`).join(""):`<tr><td colspan="7" class="muted">No movements yet.</td></tr>`}
      </table></div></div>`;
   $("#bkCsv").onclick=()=>{ const rows=[["Date","Account","Type","Ref","Party","Note","In","Out"]].concat(d.ledger.map(l=>[l.date,l.account,l.kind,l.ref,l.party,l.note,l.inAmt||"",l.outAmt||""]));
     const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_bank_ledger.csv"; a.click(); };
@@ -2470,6 +2482,7 @@ async function vBank(){
       const body={type:tsel.value,amount:amt,account:$("#bm_acc",dlg).value,toAccount:$("#bm_to",dlg).value,date:$("#bm_date",dlg).value,ref:$("#bm_ref",dlg).value,description:$("#bm_desc",dlg).value};
       try{ await api("bankmove",{method:"POST",body}); dlg.close(); toast("Movement recorded"); vBank(); }catch(e){ toast(e.message); } }; };
   document.querySelectorAll(".bmDel").forEach(x=>x.onclick=async e=>{ e.preventDefault(); if(!confirm("Delete this manual movement?")) return; try{ await api("bankmove/"+x.dataset.id,{method:"DELETE"}); toast("Deleted"); vBank(); }catch(err){ toast(err.message); } });
+  document.querySelectorAll(".payAmend").forEach(x=>x.onclick=e=>{ e.preventDefault(); amendPaymentAmount(x.dataset.no, +x.dataset.amt||0, ()=>vBank()); });
 }
 
 /* ---------- contracts / LOA ---------- */
