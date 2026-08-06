@@ -13694,9 +13694,23 @@ async function computeTreasury(s) {
   }
   const accounts = Object.values(acc).map((a) => ({ ...a, opening: r2(a.opening), inflow: r2(a.inflow), outflow: r2(a.outflow), balance: r2(a.opening + a.inflow - a.outflow) }));
   accounts.sort((x, y) => x.name === "(unallocated)" ? 1 : y.name === "(unallocated)" ? -1 : x.name.localeCompare(y.name));
-  ledger.sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : 0));
+  // Running balance per account (bank-statement style): order each account's
+  // movements oldest→newest, carry the balance forward, and add an Opening line.
+  const byAcc = {};
+  for (const e of ledger) { (byAcc[e.account] = byAcc[e.account] || []).push(e); }
+  const withRun = [];
+  for (const name in byAcc) {
+    const a = acc[name] || { opening: 0, openingDate: "" };
+    const arr = byAcc[name].slice().sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+    let run = num(a.opening);
+    withRun.push({ date: a.openingDate || "", account: name, kind: "Opening balance", ref: "", party: "", note: "", inAmt: 0, outAmt: 0, balanceAfter: r2(run), opening: true });
+    for (const e of arr) { run = r2(run + num(e.inAmt) - num(e.outAmt)); e.balanceAfter = run; withRun.push(e); }
+  }
+  withRun.forEach((e, i) => e._i = i);
+  withRun.sort((x, y) => x.date < y.date ? 1 : x.date > y.date ? -1 : y._i - x._i);
+  for (const e of withRun) delete e._i;
   const totalBalance = r2(accounts.reduce((t, a) => t + a.balance, 0));
-  return { accounts, totalBalance, ledger: ledger.slice(0, 300) };
+  return { accounts, totalBalance, ledger: withRun.slice(0, 400) };
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);

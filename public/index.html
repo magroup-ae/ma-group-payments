@@ -2433,9 +2433,9 @@ async function vBank(){
   const accs=d.accounts.filter(a=>a.name!=="(unallocated)");
   const unalloc=d.accounts.find(a=>a.name==="(unallocated)");
   const bankOpts=accs.map(a=>`<option>${esc(a.name)}</option>`).join("");
-  const cards=accs.map(a=>`<div class="kpi" style="border-top-color:${a.balance>=0?'var(--green)':'var(--red)'};text-align:left;min-width:220px">
+  const cards=accs.map(a=>`<div class="kpi bkCard" data-name="${esc(a.name)}" data-bal="${a.opening}" data-date="${esc(a.openingDate||'')}" style="border-top-color:${a.balance>=0?'var(--green)':'var(--red)'};text-align:left;min-width:220px${isCEO?';cursor:pointer':''}" ${isCEO?'title="Click to correct the opening balance"':''}>
       <div class="v" style="color:${a.balance>=0?'var(--green)':'var(--red)'}">AED ${fmt(a.balance)}</div>
-      <div class="l"><b>${esc(a.name)}</b></div>
+      <div class="l"><b>${esc(a.name)}</b>${isCEO?' <span class="muted" style="font-size:10px">✎</span>':''}</div>
       <div class="muted" style="font-size:11px;margin-top:4px">Opening ${fmt(a.opening)}${a.openingDate?" ("+dmy(a.openingDate)+")":""} · in ${fmt(a.inflow)} · out ${fmt(a.outflow)}</div>
     </div>`).join("")||`<div class="muted">No accounts yet — set an opening balance below.</div>`;
   $("#main").innerHTML=`
@@ -2449,22 +2449,25 @@ async function vBank(){
      <div class="muted" style="margin-top:8px;font-size:11px">Live balance = opening balance + client receipts (in) − supplier payments/cheques (out) ± manual movements. Every cheque or payment you record is deducted automatically from its account.</div>
    </div>
    <div class="card"><h2 style="margin:0 0 8px">Account ledger <span class="muted" style="font-size:12px;font-weight:400">— most recent 300 movements</span></h2>
-     <div style="overflow-x:auto"><table><tr><th>Date</th><th>Account</th><th>Type</th><th>Ref</th><th>Party / Note</th><th class="num">In</th><th class="num">Out</th></tr>
-     ${d.ledger.length?d.ledger.map(l=>`<tr><td style="white-space:nowrap">${dmy(l.date)}</td><td>${esc(l.account)}</td><td>${esc(l.kind)}</td><td>${esc(l.ref||"—")}</td><td>${esc(l.party||l.note||"")}${l.party&&l.note?` <span class="muted">· ${esc(l.note)}</span>`:""}${l.certNo&&isCEO?` <a href="#" class="payAmend" data-no="${esc(l.certNo)}" data-amt="${l.outAmt}" title="Amend payment amount" style="font-size:11px;text-decoration:none">✎</a>`:""}${l.id&&isCEO?` <a href="#" class="bmDel" data-id="${esc(l.id)}" style="color:var(--red);font-size:11px">✕</a>`:""}</td><td class="num" style="color:var(--green)">${l.inAmt?fmt(l.inAmt):""}</td><td class="num" style="color:var(--red)">${l.outAmt?fmt(l.outAmt):""}</td></tr>`).join(""):`<tr><td colspan="7" class="muted">No movements yet.</td></tr>`}
-     </table></div></div>`;
+     <div style="overflow-x:auto"><table><tr><th>Date</th><th>Account</th><th>Type</th><th>Ref</th><th>Party / Note</th><th class="num">In</th><th class="num">Out</th><th class="num">Balance</th></tr>
+     ${d.ledger.length?d.ledger.map(l=>`<tr${l.opening?' style="background:#f4f6fb"':''}><td style="white-space:nowrap">${l.date?dmy(l.date):"—"}</td><td>${esc(l.account)}</td><td>${l.opening?'<b>Opening balance</b>':esc(l.kind)}</td><td>${esc(l.ref||"—")}</td><td>${esc(l.party||l.note||"")}${l.party&&l.note?` <span class="muted">· ${esc(l.note)}</span>`:""}${l.certNo&&isCEO?` <a href="#" class="payAmend" data-no="${esc(l.certNo)}" data-amt="${l.outAmt}" title="Amend payment amount" style="font-size:11px;text-decoration:none">✎</a>`:""}${l.id&&isCEO?` <a href="#" class="bmDel" data-id="${esc(l.id)}" style="color:var(--red);font-size:11px">✕</a>`:""}</td><td class="num" style="color:var(--green)">${l.inAmt?fmt(l.inAmt):""}</td><td class="num" style="color:var(--red)">${l.outAmt?fmt(l.outAmt):""}</td><td class="num" style="font-weight:700;color:${num(l.balanceAfter)>=0?'#1F3864':'var(--red)'}">${l.balanceAfter!=null?fmt(l.balanceAfter):""}</td></tr>`).join(""):`<tr><td colspan="8" class="muted">No movements yet.</td></tr>`}
+     </table></div>
+     <div class="muted" style="font-size:11px;margin-top:6px">The <b>Balance</b> column is the account's running balance after each movement — read top-to-bottom like a bank statement. To correct an opening balance, click the account card above (CEO).</div></div>`;
   $("#bkCsv").onclick=()=>{ const rows=[["Date","Account","Type","Ref","Party","Note","In","Out"]].concat(d.ledger.map(l=>[l.date,l.account,l.kind,l.ref,l.party,l.note,l.inAmt||"",l.outAmt||""]));
     const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_bank_ledger.csv"; a.click(); };
-  if($("#bkOpen")) $("#bkOpen").onclick=()=>{ const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(460px,92vw)";
-    dlg.innerHTML=`<h2 style="margin-top:0">Set opening balance / add account</h2><div class="grid">
-      <div style="grid-column:1/-1"><label>Account name (bank + last digits)</label><input id="bo_name" list="bo_list" placeholder="e.g. Emirates NBD — M 3303"><datalist id="bo_list">${bankOpts}</datalist></div>
-      <div><label>Opening balance (AED)</label><input id="bo_bal" type="number" step="0.01" value="0"></div>
-      <div><label>As of date</label><input id="bo_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">The opening balance is your bank statement balance on the chosen date. All payments and receipts after it adjust the live balance automatically.</div>
+  const showOpeningDialog=(pname,pbal,pdate)=>{ const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(460px,92vw)";
+    dlg.innerHTML=`<h2 style="margin-top:0">${pname?"Correct opening balance":"Set opening balance / add account"}</h2><div class="grid">
+      <div style="grid-column:1/-1"><label>Account name (bank + last digits)</label><input id="bo_name" list="bo_list" value="${esc(pname||"")}" placeholder="e.g. Emirates NBD — M 3303"><datalist id="bo_list">${bankOpts}</datalist></div>
+      <div><label>Opening balance (AED)</label><input id="bo_bal" type="number" step="0.01" value="${pbal!=null&&pbal!==""?pbal:0}"></div>
+      <div><label>As of date</label><input id="bo_date" type="date" value="${pdate||new Date().toISOString().slice(0,10)}"></div></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">The opening balance is your bank statement balance on the chosen date. All payments and receipts after it adjust the live balance automatically. Re-saving an existing account <b>overwrites</b> its opening balance — use this to fix a mistake.</div>
       <div style="height:12px"></div><div class="flex"><button class="btn green" id="bo_ok">Save</button><button class="btn ghost" id="bo_no">Cancel</button></div>`;
     document.body.appendChild(dlg); dlg.showModal();
     $("#bo_no",dlg).onclick=()=>dlg.close();
     $("#bo_ok",dlg).onclick=async ()=>{ const name=$("#bo_name",dlg).value.trim(); if(!name){ toast("Enter the account name"); return; }
-      try{ await api("bankopening",{method:"POST",body:{name,balance:+$("#bo_bal",dlg).value||0,date:$("#bo_date",dlg).value}}); dlg.close(); toast("Saved"); await load(); vBank(); }catch(e){ toast(e.message); } }; };
+      try{ await api("bankopening",{method:"POST",body:{name,balance:+$("#bo_bal",dlg).value||0,date:$("#bo_date",dlg).value}}); dlg.close(); toast("Opening balance saved"); await load(); vBank(); }catch(e){ toast(e.message); } }; };
+  if($("#bkOpen")) $("#bkOpen").onclick=()=>showOpeningDialog("","","");
+  if(isCEO) document.querySelectorAll(".bkCard").forEach(c=>c.onclick=()=>showOpeningDialog(c.dataset.name, c.dataset.bal, c.dataset.date));
   if($("#bkMove")) $("#bkMove").onclick=()=>{ const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(480px,92vw)";
     dlg.innerHTML=`<h2 style="margin-top:0">Record bank movement</h2><div class="grid">
       <div><label>Type</label><select id="bm_type"><option value="deposit">Deposit / money in</option><option value="withdrawal">Withdrawal / cash out</option><option value="charge">Bank charge / fee</option><option value="transfer">Transfer between accounts</option><option value="adjust-in">Adjustment (+)</option><option value="adjust-out">Adjustment (−)</option></select></div>
