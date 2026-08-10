@@ -13937,13 +13937,37 @@ function buildAwardDocHtml(rec, cfg, assets) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
   const a = num(rec.amount);
   const retPct = num(rec.retentionPct) || 10, delayDay = num(rec.delayPctPerDay) || 0.5, delayCap = num(rec.delayCapPct) || 10;
-  const secPct = num(rec.securityDepPct) || 5, perfPct = num(rec.performancePct) || 5;
+  const perfPct = num(rec.performancePct) || 10;
   const dlp = num(rec.dlpDays) || 365, payDays = num(rec.paymentDays) || 30, hrs = num(rec.signBackHours) || 24;
-  const secAmt = r2(a * secPct / 100), perfAmt = r2(a * perfPct / 100);
+  const perfAmt = r2(a * perfPct / 100);
+  // UAE-standard security: performance security (bank guarantee for agreements,
+  // undated cheque for small LOAs), retention 10% capped at 5% of the price,
+  // and an advance-payment guarantee equal to the advance.
+  const perfType = rec.perfSecurityType || (isAgr ? "guarantee" : "cheque");
+  const perfValidity = rec.perfValidity || "valid until 28 days after the end of the Defects Liability Period";
+  const secDays = num(rec.securityDeliveryDays) || 7;
+  const retCapPct = rec.retentionCapPct != null && rec.retentionCapPct !== "" ? num(rec.retentionCapPct) : 5;
+  const advGuarType = rec.advGuaranteeType || "guarantee";
+  const priceWord = isAgr ? "Subcontract Price" : "award value";
   const advAmt = num(rec.advanceAmount);
   const advRecPct = num(rec.advanceRecoveryPct) || (advAmt > 0 && a > 0 ? r2(advAmt / a * 100) : 0);
   const advPctOfAward = a > 0 ? r2(advAmt / a * 100) : 0;
   const ent = rec.entityName || "MA Group – Marvellous Art LLC";
+  // Instrument description used by the Performance Security clause.
+  const perfInstrument = perfType === "guarantee"
+    ? `an <b>unconditional, irrevocable, on-demand bank guarantee for ${money(perfAmt)}</b> (${perfPct}% of the ${priceWord}), issued by a UAE-licensed bank in favour of ${esc(ent)}, ${perfValidity}`
+    : perfType === "cheque"
+    ? `an <b>undated performance cheque for ${money(perfAmt)}</b> (${perfPct}% of the ${priceWord}), drawn on a UAE-licensed bank in favour of ${esc(ent)}`
+    : "";
+  const perfReturn = perfType === "guarantee"
+    ? "The guarantee is released within 30 days after expiry of its validity, provided all your obligations are discharged."
+    : perfType === "cheque"
+    ? "The cheque is returned within 30 days after the end of the DLP and rectification of defects, provided nothing is outstanding."
+    : "";
+  const retentionText = `retention of <b>${retPct}%</b> of each certificate, capped at <b>${retCapPct}% of the ${priceWord}</b> (released 50% on taking-over and 50% after the ${dlp}-day defects liability period)`;
+  const perfClauseText = perfType === "none"
+    ? `No separate performance security is required for this ${isAgr ? "Agreement" : "award"}; your performance is secured by the retention held under the Payment clause and by our rights of set-off and back-charge.`
+    : `Within ${secDays} days of ${isAgr ? "signing" : "accepting this award"} and before mobilisation, deliver ${perfInstrument}. Delivery of the performance security is a <b>condition precedent to mobilisation and to any payment</b>. We may call, date or present it — in whole or in part — to recover any amount due from you, including delay damages, back-charges, unrecovered advance, or the cost of completion by others. ${perfReturn}`;
   const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:52px;max-width:170px;object-fit:contain;display:block">` : `<div style="height:52px"></div>`;
   const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:96px;opacity:.85;object-fit:contain">` : "";
   const scopeHtml = String(rec.scope || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => `<p style="margin:0 0 6px">${esc(x)}</p>`).join("") || "<p>As per the quotation and drawings/specifications issued.</p>";
@@ -13957,8 +13981,11 @@ function buildAwardDocHtml(rec, cfg, assets) {
     ${(rec.supplierAttn || rec.supplierEmail) ? `<tr><td class="k">Attention / Email</td><td colspan="3">${esc(rec.supplierAttn || "—")}${rec.supplierEmail ? " · " + esc(rec.supplierEmail) : ""}</td></tr>` : ""}
     ${rec.quotationRef ? `<tr><td class="k">Based on your quotation</td><td colspan="3">Ref. ${esc(rec.quotationRef)}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>` : ""}
   </table>`;
+  const advSecurity = advGuarType === "guarantee"
+    ? `an <b>advance-payment guarantee equal to 100% of the advance (${money(advAmt)})</b> issued by a UAE-licensed bank, which reduces pro-rata as the advance is recovered`
+    : `an <b>additional undated cheque of equal value (${money(advAmt)})</b>`;
   const advClauseText = advAmt > 0
-    ? `An advance / down payment of <b>${money(advAmt)}</b> (${advPctOfAward}% of the award value) will be paid to you against your valid tax invoice and an <b>advance-payment guarantee</b> (or an additional undated cheque of equal value, at our election). The advance is a <b>loan against the works</b>, not additional value, and is <b>recovered by deduction from every interim certificate at ${advRecPct}% of the certified gross</b> until fully repaid. Any unrecovered balance becomes immediately due on completion or termination, and may be recovered from sums due, retention, or the security cheques.`
+    ? `An advance / down payment of <b>${money(advAmt)}</b> (${advPctOfAward}% of the ${priceWord}) will be paid to you against your valid tax invoice and ${advSecurity}. The advance is a <b>loan against the works</b>, not additional value, and is <b>recovered by deduction from every interim certificate at ${advRecPct}% of the certified gross</b> until fully repaid. Any unrecovered balance becomes immediately due on completion or termination, and may be recovered from sums due, retention, or the performance security.`
     : "";
   const sigBlock = `<table class="sig"><tr>
     <td><div class="sh">For and on behalf of the Main Contractor</div><div class="sn">${esc(ent)}</div>
@@ -13974,9 +14001,9 @@ function buildAwardDocHtml(rec, cfg, assets) {
       ["Award value", `The award value is <b>${money(a)}</b> (fixed lump sum, exclusive of VAT). The price is fixed, firm and inclusive of all costs, and is not subject to any escalation. VAT will be added at the prevailing rate against a valid tax invoice.`],
       ["Scope of works", scopeHtml],
       ["Time for completion", `Commencement: within ${esc(rec.commenceDays || 7)} days of our written notice to proceed. Completion by <b>${dt(rec.completion)}</b>. Time is of the essence. Delay damages of <b>${delayDay}%</b> of the award value apply per day of delay, capped at <b>${delayCap}%</b>. We may reassign delayed or defective works to others at your cost plus 15% overhead.`],
-      ["Payment", `Monthly interim payment against quantities certified by our QS, payable within <b>${payDays} days</b> of certification and receipt of a valid VAT invoice, less retention of <b>${retPct}%</b> (released 50% on taking-over and 50% after the ${dlp}-day defects liability period). Submit each application by the 25th of the month with a works report and attendance signed by the MA site engineer.`],
+      ["Payment", `Monthly interim payment against quantities certified by our QS, payable within <b>${payDays} days</b> of certification and receipt of a valid VAT invoice, less ${retentionText}. Submit each application by the 25th of the month with a works report and attendance signed by the MA site engineer.`],
       ...(advAmt > 0 ? [["Advance / down payment & recovery", advClauseText]] : []),
-      ["Security", `Within 7 days of accepting this award and before mobilisation, deliver an undated security cheque of <b>${money(secAmt)}</b> (${secPct}%) and an undated performance cheque of <b>${money(perfAmt)}</b> (${perfPct}%), drawn on a UAE-licensed bank in favour of ${esc(ent)}. Delivery of the cheques is a condition precedent to mobilisation and to any payment.`],
+      ["Performance security", perfClauseText],
       ["Your obligations", `Maintain a valid UAE trade licence and all permits; comply with UAE Labour Law, WPS, and all HSE and site rules; hold workmen's compensation and third-party insurance; be solely responsible for your personnel and their wages and end-of-service; and replace any unsuitable personnel within 24 hours of notice. No variation or extra work is valid unless instructed by us in writing.`],
       ["Set-off, confidentiality & law", `We may deduct or back-charge from any sum due (including retention) the cost of rectification by others, supplementary labour/plant, delay damages, fines and any other amount due from you. You shall keep all project information confidential and shall not publish site photos/data without our written consent. This award is governed by the laws of the United Arab Emirates and the courts of Abu Dhabi.`],
       ["Acceptance", `Please confirm acceptance by <b>signing and stamping</b> below and returning a copy <b>within ${hrs} hours</b> of the date above, failing which this award may lapse without liability on us. Our standard Subcontract terms apply to any works commenced.`]
@@ -13986,14 +14013,14 @@ function buildAwardDocHtml(rec, cfg, assets) {
       ["Scope of works", `${scopeHtml}<p style="margin:6px 0 0">The Works include all labour, materials, plant, tools, supervision and everything necessary for proper completion in accordance with the drawings, specifications, programme and the reasonable instructions of the MA Representative. You are deemed to have inspected the site and satisfied yourself as to all conditions.</p>`],
       ["Subcontract price", `The Subcontract Price is <b>${money(a)}</b> (exclusive of VAT). Rates are fixed and firm, inclusive of all costs, overheads, profit and risks, with no escalation. VAT is added against a valid tax invoice. For re-measurable work you are paid only for quantities executed, measured and certified by the MA Representative.`],
       ["Your obligations", `Maintain a valid UAE trade licence, permits and registrations; comply with UAE Labour Law (Decree-Law 33/2021), WPS, and all visa/work-permit rules; comply with all HSE and client/site rules and provide PPE and inductions; hold and evidence workmen's compensation and third-party liability insurance; be solely liable for your personnel, wages and end-of-service; not assign or further subcontract without our written consent; and replace unsuitable personnel within 24 hours of notice.`],
-      ["Security cheques", `Within 7 days of signing and before commencing, deliver: (a) an undated <b>security deposit cheque of ${money(secAmt)}</b> (${secPct}%); and (b) an undated <b>performance cheque of ${money(perfAmt)}</b> (${perfPct}%), each drawn on a UAE-licensed bank in favour of ${esc(ent)}. We may date and present either cheque on your default, non-payment, or termination for default; excess is refunded, shortfall remains a debt. Cheques are returned within 30 days after expiry of the DLP and rectification of defects, provided nothing is outstanding. Delivery of the cheques is a condition precedent to any payment.`],
-      ["Payment", `Submit a detailed interim application with signed joint measurement, works report and attendance by the <b>25th</b> of each month. We certify within <b>14 days</b> and pay the certified amount, less retention and deductions, within <b>${payDays} days</b> of certification and receipt of your valid VAT invoice. Retention is <b>${retPct}%</b> of each certificate up to ${retPct}% of the price: 50% released on taking-over, 50% after the <b>${dlp}-day DLP</b> and rectification of defects. We may withhold payment where security, insurances or documents are missing, where progress is behind due to your default, or where WPS wages are unpaid.`],
+      ["Performance security", perfClauseText],
+      ["Payment", `Submit a detailed interim application with signed joint measurement, works report and attendance by the <b>25th</b> of each month. We certify within <b>14 days</b> and pay the certified amount, less ${retentionText} and any deductions, within <b>${payDays} days</b> of certification and receipt of your valid VAT invoice. We may withhold payment where security, insurances or documents are missing, where progress is behind due to your default, or where WPS wages are unpaid.`],
       ...(advAmt > 0 ? [["Advance / down payment & recovery", advClauseText]] : []),
-      ["Time & delay", `Commence within ${esc(rec.commenceDays || 7)} days of our notice to proceed and complete by <b>${dt(rec.completion)}</b>. Time is of the essence. Extensions are granted only for our acts of prevention, instructed variations, or force majeure, and only if notified in writing within 7 days. Delay damages of <b>${delayDay}%</b> of the price per day apply, capped at <b>${delayCap}%</b>. If you fall behind, you shall recover the delay at your cost; we may also engage others to supplement, take over or reassign any part of the Works, and recover all extra cost plus 15% overhead from sums due, the security cheques, or as a debt.`],
+      ["Time & delay", `Commence within ${esc(rec.commenceDays || 7)} days of our notice to proceed and complete by <b>${dt(rec.completion)}</b>. Time is of the essence. Extensions are granted only for our acts of prevention, instructed variations, or force majeure, and only if notified in writing within 7 days. Delay damages of <b>${delayDay}%</b> of the price per day apply, capped at <b>${delayCap}%</b>. If you fall behind, you shall recover the delay at your cost; we may also engage others to supplement, take over or reassign any part of the Works, and recover all extra cost plus 15% overhead from sums due, the retention, the performance security, or as a debt.`],
       ["Variations", `We may instruct variations in writing. You shall not execute any variation without a written instruction and have no entitlement to payment for unauthorised work. Variations are valued at the agreed rates or fair market rates agreed in writing before the work.`],
       ["Quality, defects & DLP", `All Works shall conform to the specifications, approved samples and good industry practice; materials shall be new and of the specified quality; no work shall be covered up without inspection. You shall rectify defects notified during execution or the ${dlp}-day DLP at your cost; failing which we may rectify by others and back-charge the cost plus 15%. Decennial liability applies under Articles 880–883 of the UAE Civil Code where applicable.`],
       ["Liability, indemnity & insurance", `You are responsible for the care of your Works, personnel and materials until taking-over, and shall indemnify us and the client against all claims, damage, fines and losses arising from your personnel, your damage to property, or your breach of law or this Agreement. Maintain the insurances required by law and this Agreement; failing which we may procure them and back-charge the premium.`],
-      ["Default & termination", `On abandonment, insufficient progress, unremedied defects, HSE breaches, unpaid wages/WPS, insolvency, unauthorised assignment, a dishonoured security cheque, or any material breach, we may (after 48 hours' notice, or immediately for serious defaults) terminate in whole or part, complete the Works ourselves or through others using your on-site materials and plant, and recover all additional costs plus 15% from sums due, the cheques, or as a debt. We may also terminate for convenience on 7 days' notice, paying only for Works properly executed and certified to that date, with no loss-of-profit claim.`],
+      ["Default & termination", `On abandonment, insufficient progress, unremedied defects, HSE breaches, unpaid wages/WPS, insolvency, unauthorised assignment, a dishonoured cheque or a lapsed/withdrawn performance security, or any material breach, we may (after 48 hours' notice, or immediately for serious defaults) terminate in whole or part, complete the Works ourselves or through others using your on-site materials and plant, and recover all additional costs plus 15% from sums due, the cheques, or as a debt. We may also terminate for convenience on 7 days' notice, paying only for Works properly executed and certified to that date, with no loss-of-profit claim.`],
       ["Confidentiality", `You shall keep all project information, drawings, prices and documents confidential, use them only for the Works, and not publish any site photos, videos or data (including on social media) without our written consent. This obligation survives 5 years after completion or termination.`],
       ["Force majeure", `Neither party is liable for failure caused by events beyond its reasonable control (Article 273, UAE Civil Code); shortage of labour, materials or funds and normal weather are excluded. If force majeure continues beyond 60 days either party may terminate, and you are paid for Works properly executed and certified.`],
       ["Governing law & disputes", `This Agreement is governed by the federal laws of the United Arab Emirates and the laws of the Emirate of Abu Dhabi. The parties shall first attempt amicable settlement within 28 days; failing which the dispute shall be finally settled by the courts of Abu Dhabi. You shall continue the Works during any dispute.`],
@@ -14001,7 +14028,9 @@ function buildAwardDocHtml(rec, cfg, assets) {
     ];
   }
   const clauses = list.map((x, i) => clause(i + 1, x[0], x[1])).join("");
-  const docsChecklist = isAgr ? `<div class="cl"><div class="ct"><b>Documents required before signature</b></div><div class="cb">Signed Agreement (all pages) · valid trade licence · TRN certificate · Emirates ID / passport of signatory · security deposit cheque · performance cheque · insurance certificates · bank details letter · manpower list with ID/visa. Missing items must be justified in writing.</div></div>` : "";
+  const secDocItem = perfType === "guarantee" ? "performance bank guarantee" : perfType === "cheque" ? "performance cheque" : "";
+  const advDocItem = advAmt > 0 ? (advGuarType === "guarantee" ? " · advance-payment guarantee" : " · advance cheque") : "";
+  const docsChecklist = isAgr ? `<div class="cl"><div class="ct"><b>Documents required before signature</b></div><div class="cb">Signed Agreement (all pages) · valid trade licence · TRN certificate · Emirates ID / passport of signatory${secDocItem ? " · " + secDocItem : ""}${advDocItem} · insurance certificates · bank details letter · manpower list with ID/visa. Missing items must be justified in writing.</div></div>` : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.docNo)} — ${isAgr ? "Subcontract Agreement" : "Letter of Award"}</title>
 <style>
   *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12.5px;line-height:1.5}
@@ -14203,11 +14232,17 @@ var api_default = async (req, context) => {
       scopeTitle: b.scopeTitle || "", scope: b.scope || "", amount,
       commenceDays: num(b.commenceDays) || 7, commencement: b.commencement || "", completion: b.completion || "",
       retentionPct: num(b.retentionPct) || 10, delayPctPerDay: num(b.delayPctPerDay) || 0.5, delayCapPct: num(b.delayCapPct) || 10,
-      securityDepPct: num(b.securityDepPct) || 5, performancePct: num(b.performancePct) || 5,
+      retentionCapPct: (b.retentionCapPct != null && b.retentionCapPct !== "") ? num(b.retentionCapPct) : 5,
+      performancePct: num(b.performancePct) || 10,
+      perfSecurityType: b.perfSecurityType || (type === "AGREEMENT" ? "guarantee" : "cheque"),
+      perfValidity: b.perfValidity || "valid until 28 days after the end of the Defects Liability Period",
+      securityDeliveryDays: num(b.securityDeliveryDays) || 7,
+      advGuaranteeType: b.advGuaranteeType || "guarantee",
+      securityDepPct: num(b.securityDepPct) || 0,
       dlpDays: num(b.dlpDays) || 365, paymentDays: num(b.paymentDays) || 30, signBackHours: num(b.signBackHours) || 24,
       advanceAmount: (b.advanceAmount != null && b.advanceAmount !== "") ? num(b.advanceAmount) : num(sup.advanceAmount),
       advanceRecoveryPct: (b.advanceRecoveryPct != null && b.advanceRecoveryPct !== "") ? num(b.advanceRecoveryPct) : r2(num(sup.advanceRecoveryRate) * 100),
-      createdAt: now(), createdBy: me.name, sentAt: "", receivedAt: ""
+      createdAt: now(), createdBy: me.name, sentAt: "", receivedAt: "", audit: []
     };
     await s.setJSON("award/" + id, rec);
     await s.setJSON("settings", settings);
@@ -14247,6 +14282,45 @@ var api_default = async (req, context) => {
     // Copy to the CEO/CFO for the record.
     try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html }); } catch (e) { }
     return json({ ok: true, status: r.status, to: rec.supplierEmail });
+  }
+  const awdUpd = path.match(/^award\/([^/]+)\/update$/);
+  if (awdUpd && req.method === "POST") {
+    // Amend a draft/issued award before it is countersigned.
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdUpd[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    if (rec.status === "Countersigned") return err("This document is already signed & returned — it cannot be amended. Delete and re-issue if a change is needed.", 400);
+    const b = await req.json();
+    const amount = (b.amount != null && b.amount !== "") ? num(b.amount) : num(rec.amount);
+    if (amount <= 0) return err("Enter the award / quotation amount");
+    // Type may flip across the threshold — refresh the ref prefix, keep the sequence.
+    const newType = awardTypeFor(amount, settings);
+    if (newType !== rec.type) {
+      const m = String(rec.docNo).match(/(\d{4})\/(\d+)$/);
+      const yr = m ? m[1] : String(now()).slice(0, 4);
+      const seq = m ? m[2] : String(num(settings.awardSeq)).padStart(3, "0");
+      rec.docNo = (newType === "LOA" ? "MA-LOA-" : "MA-SUB-") + yr + "/" + seq;
+      rec.type = newType;
+    }
+    // Swap supplier (re-pull its details) if changed.
+    if (b.supplierId && b.supplierId !== rec.supplierId) {
+      const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
+      if (sup) { rec.supplierId = sup.id; rec.supplierName = sup.name; rec.supplierTL = sup.licenseNo || ""; rec.supplierTRN = sup.trn || ""; rec.supplierEmail = sup.email || ""; rec.supplierAttn = sup.contactName || ""; }
+    }
+    if (b.entity !== void 0) { const entObj = (settings.entities || []).find((e) => e.short === b.entity); if (entObj) { rec.entity = entObj.short; rec.entityName = entObj.name; } }
+    rec.amount = amount;
+    for (const k of ["project", "location", "client", "quotationRef", "quotationDate", "scopeTitle", "scope", "completion", "commencement", "perfValidity", "perfSecurityType", "advGuaranteeType"]) {
+      if (b[k] !== void 0) rec[k] = typeof b[k] === "string" ? b[k] : b[k];
+    }
+    for (const k of ["commenceDays", "retentionPct", "delayPctPerDay", "delayCapPct", "performancePct", "retentionCapPct", "securityDeliveryDays", "dlpDays", "paymentDays", "signBackHours", "advanceAmount", "advanceRecoveryPct"]) {
+      if (b[k] !== void 0 && b[k] !== "") rec[k] = num(b[k]);
+    }
+    rec.updatedAt = now(); rec.updatedBy = me.name;
+    rec.audit = rec.audit || [];
+    rec.audit.push({ at: now(), by: me.name, action: rec.status === "Sent" ? "Amended after sending — reverted to Issued for re-send" : "Amended before sending" });
+    if (rec.status === "Sent") rec.status = "Issued";
+    await s.setJSON("award/" + rec.id, rec);
+    return json(rec);
   }
   const awdRecv = path.match(/^award\/([^/]+)\/received$/);
   if (awdRecv && req.method === "POST") {

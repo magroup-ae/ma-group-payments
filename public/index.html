@@ -2523,7 +2523,7 @@ async function vBank(){
 }
 
 /* ---------- contracts / LOA ---------- */
-let AWARD_THRESHOLD=10000, AW_PRESEL="";
+let AWARD_THRESHOLD=10000, AW_PRESEL="", AW_EDIT=null;
 async function vAwards(){
   if(!["CEO","PM","QS"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Contracts / LOA is available to commercial roles only.</div>`; return; }
   $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
@@ -2538,7 +2538,8 @@ async function vAwards(){
    <div class="card">
      <div class="flex"><h2 style="margin:0">Issue Letter of Award / Subcontract Agreement</h2>
        <span class="right muted" style="font-size:12px">Threshold: below AED ${fmt(AWARD_THRESHOLD)} → LOA · AED ${fmt(AWARD_THRESHOLD)} and above → Subcontract Agreement</span></div>
-     <div class="note" style="margin:8px 0">Workflow: register the supplier → enter the quotation amount → the system selects the correct document, applies MA signature &amp; stamp, and emails it to the subcontractor to <b>sign, stamp and return within 24 hours</b>.</div>
+     <div class="note" style="margin:8px 0">Workflow: register the supplier → enter the quotation amount → the system selects the correct document, applies MA signature &amp; stamp, and emails it to the subcontractor to <b>sign, stamp and return within 24 hours</b>. You can <b>amend any issued document before sending</b> it.</div>
+     <div id="aw_editbar" class="note" style="display:none;background:#fff8e6;border-color:var(--gold);margin:8px 0"></div>
      <datalist id="projDL">${projList}</datalist>
      <div class="grid">
        <div><label>Supplier / Subcontractor *</label><select id="aw_sup">${supOpts}</select></div>
@@ -2561,15 +2562,27 @@ async function vAwards(){
        <div><label>Retention %</label><input id="aw_ret" type="number" value="10" step="0.5"></div>
        <div><label>Delay damages %/day</label><input id="aw_dd" type="number" value="0.5" step="0.1"></div>
        <div><label>Delay cap %</label><input id="aw_dc" type="number" value="10" step="1"></div>
-       <div><label>Security deposit cheque %</label><input id="aw_sec" type="number" value="5" step="1"></div>
-       <div><label>Performance cheque %</label><input id="aw_perf" type="number" value="5" step="1"></div>
+       <div><label>Retention cap % (of contract)</label><input id="aw_retcap" type="number" value="5" step="0.5"></div>
        <div><label>DLP (days)</label><input id="aw_dlp" type="number" value="365"></div>
        <div><label>Payment within (days)</label><input id="aw_pay" type="number" value="30"></div>
        <div><label>Sign-back window (hours)</label><input id="aw_hrs" type="number" value="24"></div>
+     </div>
+     <h3 style="margin:14px 0 6px">Performance security & guarantees <span class="muted" style="font-weight:400;font-size:11px">— UAE standard</span></h3>
+     <div class="grid">
+       <div><label>Performance security</label><select id="aw_perftype">
+         <option value="guarantee">Bank guarantee (unconditional, on-demand)</option>
+         <option value="cheque">Undated performance cheque</option>
+         <option value="none">None — retention only</option></select></div>
+       <div><label>Performance security %</label><input id="aw_perf" type="number" value="10" step="0.5"></div>
+       <div><label>Security delivery within (days)</label><input id="aw_secdays" type="number" value="7"></div>
+       <div style="grid-column:1/-1"><label>Performance security validity</label><input id="aw_perfval" value="valid until 28 days after the end of the Defects Liability Period"></div>
        <div><label>Advance / down payment (AED)</label><input id="aw_adv" type="number" step="0.01" value="0" placeholder="0 = none"></div>
        <div><label>Advance recovery % (of each cert)</label><input id="aw_advrec" type="number" step="0.1" value="0" placeholder="e.g. 15"></div>
+       <div><label>Advance security</label><select id="aw_advguar">
+         <option value="guarantee">Advance-payment guarantee (bank)</option>
+         <option value="cheque">Undated cheque of equal value</option></select></div>
      </div>
-     <div class="muted" style="font-size:11px;margin-top:4px">Name, Trade Licence, TRN and email fill automatically from the supplier record. If an advance is entered, the document adds a down-payment clause recovered pro-rata from each certificate.</div>
+     <div class="muted" style="font-size:11px;margin-top:4px">UAE standard: performance security <b>10%</b> (bank guarantee for agreements, undated cheque for small LOAs); retention <b>10% per certificate capped at 5%</b> of the contract, released 50% at taking-over &amp; 50% after the DLP; advance secured by a guarantee equal to the advance. Name, Trade Licence, TRN and email fill automatically from the supplier record. Everything here is editable — you can also amend an issued document before sending it.</div>
      <div class="flex" style="margin-top:14px;gap:10px"><span class="right"></span>
        <button class="btn green" id="aw_gen">Generate document</button></div>
    </div>
@@ -2581,11 +2594,13 @@ async function vAwards(){
         <td><span class="pill" style="background:${stColors[a.status]||'#5B6B85'}">${esc(a.status)}</span>${a.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(a.sentAt)}</span>`:""}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost aw_view" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">View / Print</button>
+          ${a.status!=="Countersigned"?`<button class="btn ghost aw_edit" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Edit / amend</button>`:""}
           <button class="btn ghost aw_send" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">${a.status==="Issued"?"Send by email":"Re-send"}</button>
           ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark received</button>`:""}
           ${ME.role==="CEO"?`<button class="btn ghost aw_del" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px;color:var(--red)">Delete</button>`:""}
         </td></tr>`).join("")}</table></div>`;
     h.querySelectorAll(".aw_view").forEach(b=>b.onclick=()=>openAwardDoc(b.dataset.id,true));
+    h.querySelectorAll(".aw_edit").forEach(b=>b.onclick=async ()=>{ try{ const rec=await api("award/"+b.dataset.id); AW_EDIT=rec; await vAwards(); window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_send").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); if(!confirm(`Email this ${a.type==="LOA"?"Letter of Award":"Subcontract Agreement"} to ${esc(a.supplierName)} for signature within ${a.signBackHours||24} hours?`)) return;
       try{ toast("Sending…"); const r=await api("award/"+b.dataset.id+"/send",{method:"POST"}); toast("Sent to "+r.to); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_recv").forEach(b=>b.onclick=async ()=>{ if(!confirm("Mark this award as signed & returned by the subcontractor?")) return;
@@ -2612,7 +2627,28 @@ async function vAwards(){
     box.style.display="";
     box.innerHTML=`<b>Auto-filled from supplier record:</b> ${esc(s.name)} · TL ${esc(s.licenseNo||"—")} · TRN ${esc(s.trn||"—")} · ${esc(s.email||"—")}${(+s.advanceAmount>0)?` · advance AED ${fmt(s.advanceAmount)} @ ${pct(s.advanceRecoveryRate||0)} recovery`:""}${miss.length?`<br><span style="color:var(--red)">⚠ missing on the supplier record: ${miss.join(", ")} — complete it in Suppliers so the document is not blank.</span>`:""}`;
   };
-  $("#aw_sup").onchange=awSupInfo; awSupInfo();
+  $("#aw_sup").onchange=()=>{ if(!AW_EDIT) awSupInfo(); else awSupInfo(); };
+  awSupInfo();
+  // When the amount crosses the threshold, default the performance-security instrument
+  // to a bank guarantee for agreements and an undated cheque for small LOAs.
+  const defPerfType=()=>{ if(AW_EDIT) return; const amt=+$("#aw_amt").value||0; const sel=$("#aw_perftype"); if(sel) sel.value=(amt>=AWARD_THRESHOLD?"guarantee":"cheque"); };
+  const prevAmtIn=$("#aw_amt").oninput; $("#aw_amt").oninput=()=>{ if(prevAmtIn) prevAmtIn(); defPerfType(); };
+  // ----- amend mode: prefill the whole form from the record being edited -----
+  if(AW_EDIT){ const r=AW_EDIT;
+    const setv=(id,v)=>{ const el=$("#"+id); if(el!=null&&v!=null) el.value=v; };
+    setv("aw_sup",r.supplierId); setv("aw_ent",r.entity); setv("aw_amt",r.amount); setv("aw_proj",r.project);
+    setv("aw_loc",r.location); setv("aw_client",r.client); setv("aw_qref",r.quotationRef); setv("aw_qdate",(r.quotationDate||"").slice(0,10));
+    setv("aw_stitle",r.scopeTitle); setv("aw_scope",r.scope); setv("aw_cdays",r.commenceDays); setv("aw_comp",(r.completion||"").slice(0,10));
+    setv("aw_ret",r.retentionPct); setv("aw_dd",r.delayPctPerDay); setv("aw_dc",r.delayCapPct); setv("aw_retcap",r.retentionCapPct!=null?r.retentionCapPct:5);
+    setv("aw_dlp",r.dlpDays); setv("aw_pay",r.paymentDays); setv("aw_hrs",r.signBackHours);
+    setv("aw_perftype",r.perfSecurityType||"guarantee"); setv("aw_perf",r.performancePct!=null?r.performancePct:10);
+    setv("aw_secdays",r.securityDeliveryDays!=null?r.securityDeliveryDays:7); setv("aw_perfval",r.perfValidity||"");
+    setv("aw_adv",r.advanceAmount||0); setv("aw_advrec",r.advanceRecoveryPct||0); setv("aw_advguar",r.advGuaranteeType||"guarantee");
+    typeBadge();
+    const btn=$("#aw_gen"); if(btn) btn.textContent="Save amendment";
+    const bar=$("#aw_editbar"); if(bar){ bar.style.display=""; bar.innerHTML=`<b>Amending ${esc(r.docNo)}</b> (${r.type==="LOA"?"Letter of Award":"Subcontract Agreement"}, status: ${esc(r.status)}) — make your changes and click <b>Save amendment</b>. <a href="#" id="aw_cancel">Cancel</a>`;
+      $("#aw_cancel").onclick=(e)=>{ e.preventDefault(); AW_EDIT=null; vAwards(); }; }
+  }
   $("#aw_gen").onclick=async ()=>{
     const supplierId=$("#aw_sup").value, amount=+$("#aw_amt").value||0;
     if(!supplierId){ toast("Select a supplier / subcontractor"); return; }
@@ -2620,9 +2656,15 @@ async function vAwards(){
     const body={ supplierId, amount, entity:$("#aw_ent").value, project:$("#aw_proj").value.trim(), location:$("#aw_loc").value.trim(), client:$("#aw_client").value.trim(),
       quotationRef:$("#aw_qref").value.trim(), quotationDate:$("#aw_qdate").value, scopeTitle:$("#aw_stitle").value.trim(), scope:$("#aw_scope").value.trim(),
       commenceDays:+$("#aw_cdays").value||7, completion:$("#aw_comp").value, retentionPct:+$("#aw_ret").value||10, delayPctPerDay:+$("#aw_dd").value||0.5, delayCapPct:+$("#aw_dc").value||10,
-      securityDepPct:+$("#aw_sec").value||5, performancePct:+$("#aw_perf").value||5, dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24,
+      retentionCapPct:+$("#aw_retcap").value||0, performancePct:+$("#aw_perf").value||10, perfSecurityType:$("#aw_perftype").value, perfValidity:$("#aw_perfval").value.trim(),
+      securityDeliveryDays:+$("#aw_secdays").value||7, advGuaranteeType:$("#aw_advguar").value,
+      dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24,
       advanceAmount:+$("#aw_adv").value||0, advanceRecoveryPct:+$("#aw_advrec").value||0 };
-    try{ toast("Generating…"); const rec=await api("award/generate",{method:"POST",body}); toast(rec.docNo+" created ("+(rec.type==="LOA"?"Letter of Award":"Subcontract Agreement")+")");
+    const editing=AW_EDIT;
+    try{ toast(editing?"Saving…":"Generating…");
+      const rec=await api(editing?("award/"+editing.id+"/update"):"award/generate",{method:"POST",body});
+      toast(rec.docNo+(editing?" amended":" created")+" ("+(rec.type==="LOA"?"Letter of Award":"Subcontract Agreement")+")");
+      AW_EDIT=null;
       const d=await api("award/list"); renderList(d.items); openAwardDoc(rec.id,false);
     }catch(e){ toast(e.message); }
   };
