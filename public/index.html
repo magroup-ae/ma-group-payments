@@ -327,6 +327,7 @@ function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
   const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
   if(["CEO","PM","QS","Accounts"].includes(ME.role)) tabs.push(["bank","Bank"]);
+  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["procure","Procurement"]);
   if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["awards","Contracts / LOA"]);
   if(ME.role==="CEO") tabs.push(["announce","Announcements"]);
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
@@ -341,7 +342,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, awards:vAwards, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -2523,7 +2524,7 @@ async function vBank(){
 }
 
 /* ---------- contracts / LOA ---------- */
-let AWARD_THRESHOLD=10000, AW_PRESEL="", AW_EDIT=null;
+let AWARD_THRESHOLD=10000, AW_PRESEL="", AW_EDIT=null, AW_PREFILL=null;
 async function vAwards(){
   if(!["CEO","PM","QS"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Contracts / LOA is available to commercial roles only.</div>`; return; }
   $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
@@ -2610,6 +2611,7 @@ async function vAwards(){
   };
   renderList(data.items);
   if(AW_PRESEL){ const sel=$("#aw_sup"); if(sel){ sel.value=AW_PRESEL; const sp=supById(AW_PRESEL); if(sp&&sp.project&&$("#aw_proj")) $("#aw_proj").value=sp.project; } AW_PRESEL=""; }
+  if(AW_PREFILL){ const p=AW_PREFILL; if(p.amount&&$("#aw_amt")){ $("#aw_amt").value=p.amount; typeBadge&&typeBadge(); } if(p.project&&$("#aw_proj")) $("#aw_proj").value=p.project; if(p.scopeTitle&&$("#aw_stitle")) $("#aw_stitle").value=p.scopeTitle; if(p.scope&&$("#aw_scope")) $("#aw_scope").value=p.scope; AW_PREFILL=null; }
   const typeBadge=()=>{ const amt=+$("#aw_amt").value||0; const el=$("#aw_type"); if(!el) return; if(!amt){ el.textContent="— enter amount —"; el.style.color="#8a8a8a"; return; }
     if(amt<AWARD_THRESHOLD){ el.innerHTML='LETTER OF AWARD <span class="muted" style="font-weight:400">(below threshold)</span>'; el.style.color="#2E75B6"; }
     else { el.innerHTML='SUBCONTRACT AGREEMENT <span class="muted" style="font-weight:400">(≥ threshold)</span>'; el.style.color="#375623"; } };
@@ -2669,6 +2671,228 @@ async function vAwards(){
     }catch(e){ toast(e.message); }
   };
 }
+
+/* ---------- procurement (vendor directory + RFQ / inquiry) ---------- */
+let PROC={vendors:[],trades:[]}, PROC_TAB="dir", PROC_SEL=new Set(), RFQS=[], RFQ_CUR=null, RFQ_DRAFT=null;
+async function vProc(){
+  if(!["CEO","PM","QS"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Procurement is available to commercial roles only.</div>`; return; }
+  $("#main").innerHTML=`<div class="card"><div class="muted">Loading procurement…</div></div>`;
+  try{ const [meta,pv,rq]=await Promise.all([api("procurement/meta"),api("pvendors"),api("rfqs")]);
+    PROC.vendors=pv.items||[]; PROC.trades=pv.trades||[]; PROC.meta=meta; RFQS=rq.items||[];
+  }catch(e){ $("#main").innerHTML=`<div class="card">${esc(e.message)}</div>`; return; }
+  const sub=(k,l)=>`<button class="btn ${PROC_TAB===k?'gold':'ghost'}" onclick="PROC_TAB='${k}';RFQ_CUR=null;vProc()">${l}</button>`;
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Procurement</h2>
+     <span class="muted">${PROC.vendors.length} vendors · ${PROC.meta.withEmail} with email · ${PROC.trades.length} trades</span>
+     <div class="right flex" style="gap:6px">${sub("dir","Directory")}${sub("issue","Issue Inquiry")}${sub("rfqs","Inquiries ("+RFXcount()+")")}</div></div>
+   </div><div id="proc_body"></div>`;
+  if(PROC_TAB==="dir") procDir();
+  else if(PROC_TAB==="issue") procIssue();
+  else procRfqs();
+}
+function RFXcount(){ return RFQS.filter(r=>r.status!=="Awarded"&&r.status!=="Cancelled").length; }
+function procVById(id){ return PROC.vendors.find(v=>v.id===id); }
+
+function procDir(){
+  const b=$("#proc_body");
+  const trades=[...new Set(PROC.vendors.map(v=>v.trade))].sort();
+  const emirates=[...new Set(PROC.vendors.map(v=>v.emirate).filter(Boolean))].sort();
+  b.innerHTML=`<div class="card">
+    <div class="flex" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <select id="pdTrade" style="max-width:230px"><option value="">All trades</option>${trades.map(t=>`<option>${esc(t)}</option>`).join("")}</select>
+      <select id="pdType"><option value="">All types</option><option>Supplier</option><option>Subcontractor</option><option>Both</option></select>
+      <select id="pdEmail"><option value="">Email: any</option><option value="1">Has email</option><option value="0">No email</option></select>
+      <input id="pdQ" placeholder="Search name / specialty / phone…" style="max-width:240px">
+      <div class="right flex" style="gap:6px"><button class="btn ghost" id="pdAdd">+ Add vendor</button>
+        <button class="btn gold" id="pdMakeRfq">Create inquiry from selected (<span id="pdSelN">0</span>)</button></div>
+    </div>
+    <div id="pdList" class="muted">…</div></div>`;
+  const render=()=>{
+    const tr=$("#pdTrade").value, ty=$("#pdType").value, em=$("#pdEmail").value, q=($("#pdQ").value||"").toLowerCase();
+    let list=PROC.vendors.filter(v=>(!tr||v.trade===tr)&&(!ty||v.type===ty||(ty!=="Both"&&v.type==="Both"))
+      &&(em===""||(em==="1"?/@/.test(v.email||""):!/@/.test(v.email||"")))
+      &&(!q||((v.name+" "+v.specialty+" "+v.phone+" "+v.whatsapp+" "+v.emirate+" "+v.contactName).toLowerCase().includes(q))));
+    $("#pdList").classList.remove("muted");
+    $("#pdList").innerHTML=`<div class="muted" style="margin-bottom:6px">${list.length} of ${PROC.vendors.length}</div>
+      <div style="overflow-x:auto"><table><tr><th></th><th>Vendor</th><th>Trade</th><th>Specialty</th><th>Contact</th><th>Phone</th><th>Email</th><th>Emirate</th><th>Type</th><th></th></tr>
+      ${list.map(v=>`<tr class="click" data-v="${esc(v.id)}"><td><input type="checkbox" class="pdChk" data-id="${esc(v.id)}" ${PROC_SEL.has(v.id)?"checked":""} onclick="event.stopPropagation()"></td>
+        <td><b>${esc(v.name)}</b>${v.supplierId?` <span class="pill" style="background:#375623;font-size:9px">registered</span>`:""}</td>
+        <td>${esc(v.trade)}</td><td class="muted" style="max-width:220px">${esc(v.specialty||"—")}</td>
+        <td>${esc(v.contactName||"—")}</td><td>${esc(v.phone||v.whatsapp||"—")}</td>
+        <td>${/@/.test(v.email||"")?esc(v.email):`<span style="color:var(--red)">✗ none</span>`}</td>
+        <td>${esc(v.emirate||"—")}</td><td>${esc(v.type)}</td>
+        <td><a href="#" data-del="${esc(v.id)}" title="delete">✕</a></td></tr>`).join("")}</table></div>`;
+    $("#pdList").querySelectorAll("[data-v]").forEach(r=>r.onclick=e=>{ if(e.target.dataset.del||e.target.classList.contains("pdChk"))return; procVendorForm(procVById(r.dataset.v)); });
+    $("#pdList").querySelectorAll(".pdChk").forEach(c=>c.onchange=()=>{ if(c.checked)PROC_SEL.add(c.dataset.id); else PROC_SEL.delete(c.dataset.id); $("#pdSelN").textContent=PROC_SEL.size; });
+    $("#pdList").querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault();e.stopPropagation(); if(ME.role!=="CEO"){toast("Only the CEO can delete a vendor");return;} const v=procVById(a.dataset.del); if(!confirm("Delete vendor "+(v?v.name:"")+"?"))return; try{ await api("pvendor/"+a.dataset.del,{method:"DELETE"}); PROC.vendors=PROC.vendors.filter(x=>x.id!==a.dataset.del); render(); }catch(x){toast(x.message);} });
+    $("#pdSelN").textContent=PROC_SEL.size;
+  };
+  ["pdTrade","pdType","pdEmail","pdQ"].forEach(id=>$("#"+id).addEventListener("input",render));
+  $("#pdAdd").onclick=()=>procVendorForm(null);
+  $("#pdMakeRfq").onclick=()=>{ if(!PROC_SEL.size){toast("Tick the vendors first, or use Issue Inquiry and pick a trade");return;} RFQ_DRAFT={vendorIds:[...PROC_SEL], trade:(procVById([...PROC_SEL][0])||{}).trade||""}; PROC_TAB="issue"; vProc(); };
+  render();
+}
+function procVendorForm(v){
+  const isNew=!v; v=v||{type:"Supplier",status:"Active",trade:"General Trading / Materials"};
+  const b=$("#proc_body");
+  const tradeOpts=PROC.trades.map(t=>`<option ${t===v.trade?"selected":""}>${esc(t)}</option>`).join("");
+  b.innerHTML=`<div class="card"><h3 style="margin-top:0">${isNew?"Add vendor":"Edit vendor"}</h3>
+    <div class="grid">
+      <div style="grid-column:1/-1"><label>Company name *</label><input id="pv_name" value="${esc(v.name||"")}"></div>
+      <div><label>Trade / category</label><select id="pv_trade">${tradeOpts}</select></div>
+      <div><label>Type</label><select id="pv_type"><option ${v.type==="Supplier"?"selected":""}>Supplier</option><option ${v.type==="Subcontractor"?"selected":""}>Subcontractor</option><option ${v.type==="Both"?"selected":""}>Both</option></select></div>
+      <div style="grid-column:1/-1"><label>Specialty / trade detail</label><input id="pv_specialty" value="${esc(v.specialty||"")}"></div>
+      <div><label>Contact person</label><input id="pv_contactName" value="${esc(v.contactName||"")}"></div>
+      <div><label>Phone</label><input id="pv_phone" value="${esc(v.phone||"")}"></div>
+      <div><label>WhatsApp</label><input id="pv_whatsapp" value="${esc(v.whatsapp||"")}"></div>
+      <div><label>Email</label><input id="pv_email" value="${esc(v.email||"")}"></div>
+      <div><label>Website</label><input id="pv_website" value="${esc(v.website||"")}"></div>
+      <div><label>Emirate / area</label><input id="pv_emirate" value="${esc(v.emirate||"")}"></div>
+      <div><label>Status</label><select id="pv_status"><option ${v.status==="Active"?"selected":""}>Active</option><option ${v.status==="On Hold"?"selected":""}>On Hold</option><option ${v.status==="Blacklisted"?"selected":""}>Blacklisted</option></select></div>
+      <div style="grid-column:1/-1"><label>Notes</label><input id="pv_notes" value="${esc(v.notes||"")}"></div>
+    </div>
+    <div style="height:10px"></div><div class="flex"><button class="btn green" id="pv_save">${isNew?"Add":"Save"}</button><button class="btn ghost" id="pv_back">Back</button></div></div>`;
+  $("#pv_back").onclick=()=>procDir();
+  $("#pv_save").onclick=async()=>{ const g=k=>$("#pv_"+k).value; const body={name:g("name").trim(),trade:g("trade"),type:g("type"),specialty:g("specialty"),contactName:g("contactName"),phone:g("phone"),whatsapp:g("whatsapp"),email:g("email").trim(),website:g("website"),emirate:g("emirate"),status:g("status"),notes:g("notes")};
+    if(!body.name){toast("Vendor name is required");return;} if(!isNew)body.id=v.id;
+    try{ const saved=await api("pvendor",{method:"POST",body}); const i=PROC.vendors.findIndex(x=>x.id===saved.id); if(i>=0)PROC.vendors[i]=saved; else PROC.vendors.push(saved); toast("Saved"); procDir(); }catch(e){toast(e.message);} };
+}
+let IW=null; // issue working RFQ
+async function procIssue(){
+  const b=$("#proc_body");
+  if(!IW){
+    if(RFQ_CUR){ IW=JSON.parse(JSON.stringify(RFQ_CUR)); }
+    else { IW={id:"",project:"",location:"",trade:(RFQ_DRAFT&&RFQ_DRAFT.trade)||"",scopeTitle:"",scope:"",requirements:"",dueDate:"",entity:(S.entities[0]||{}).short||"",deliveryTerms:"",siteVisit:"",notes:"",vendorIds:(RFQ_DRAFT&&RFQ_DRAFT.vendorIds)||[],files:[]}; }
+    RFQ_DRAFT=null;
+  }
+  const entOpts=(S.entities||[]).map(e=>`<option value="${esc(e.short)}" ${e.short===IW.entity?"selected":""}>${esc(e.short)}</option>`).join("");
+  const projOpts=(S.projects||[]).map(p=>`<option value="${esc(p.name)}">`).join("");
+  const tradeOpts=`<option value="">— all trades —</option>`+PROC.trades.map(t=>`<option ${t===IW.trade?"selected":""}>${esc(t)}</option>`).join("");
+  b.innerHTML=`<div class="card">
+    <div class="flex"><h3 style="margin:0">${IW.id?("Inquiry "+esc(IW.rfqNo||"")):"New inquiry (RFQ)"}</h3>
+      <span class="right muted">Draft saves first, then attach files &amp; send</span></div>
+    <datalist id="projDL2">${projOpts}</datalist>
+    <div class="grid" style="margin-top:10px">
+      <div><label>Project</label><input id="iw_project" list="projDL2" value="${esc(IW.project||"")}"></div>
+      <div><label>Location / Emirate</label><input id="iw_location" value="${esc(IW.location||"")}"></div>
+      <div><label>Trade / package</label><select id="iw_trade">${tradeOpts}</select></div>
+      <div><label>Paying entity</label><select id="iw_entity">${entOpts}</select></div>
+      <div style="grid-column:1/-1"><label>Scope title (short)</label><input id="iw_scopeTitle" value="${esc(IW.scopeTitle||"")}" placeholder="e.g. Supply & installation of porcelain tiles"></div>
+      <div style="grid-column:1/-1"><label>Scope of works / supply (one line per item)</label><textarea id="iw_scope" rows="4" style="width:100%;font-family:inherit">${esc(IW.scope||"")}</textarea></div>
+      <div style="grid-column:1/-1"><label>Technical requirements / specifications (optional, one line per item)</label><textarea id="iw_requirements" rows="3" style="width:100%;font-family:inherit">${esc(IW.requirements||"")}</textarea></div>
+      <div><label>Reply by (submission deadline)</label><input id="iw_dueDate" type="date" value="${esc((IW.dueDate||'').slice(0,10))}"></div>
+      <div><label>Delivery / site terms</label><input id="iw_deliveryTerms" value="${esc(IW.deliveryTerms||"")}"></div>
+      <div style="grid-column:1/-1"><label>Site visit / notes to vendor</label><input id="iw_notes" value="${esc(IW.notes||"")}"></div>
+    </div>
+    <h4 style="margin:14px 0 4px">Attachments — BOQ, drawings, specifications</h4>
+    <div class="note" style="font-size:11px">Up to 7 MB per file (≈22 MB total). For very large drawing sets, put a shared cloud link in the scope. Files are emailed to each selected vendor.</div>
+    <div id="iw_files" style="margin:8px 0"></div>
+    <div><input type="file" id="iw_file" multiple></div>
+    <h4 style="margin:16px 0 4px">Select vendors <span class="muted" style="font-weight:400;font-size:11px">— filtered by the trade above; vendors without email go to a call list</span></h4>
+    <div class="flex" style="gap:8px;margin-bottom:6px"><button class="btn ghost" id="iw_all">Select all with email</button><button class="btn ghost" id="iw_none">Clear</button><span class="muted" id="iw_selinfo"></span></div>
+    <div id="iw_vendors" style="max-height:280px;overflow:auto;border:1px solid #e3e7ee;border-radius:8px;padding:6px"></div>
+    <div style="height:12px"></div>
+    <div class="flex" style="gap:8px"><button class="btn green" id="iw_save">Save draft</button>
+      <button class="btn ghost" id="iw_preview">Preview</button>
+      <button class="btn gold" id="iw_send">Send inquiry →</button>
+      <button class="btn ghost" id="iw_back">Back to list</button></div>
+    <div id="iw_sendinfo" style="margin-top:8px"></div>
+  </div>`;
+  const collect=()=>{ IW.project=$("#iw_project").value.trim(); IW.location=$("#iw_location").value.trim(); IW.trade=$("#iw_trade").value; IW.entity=$("#iw_entity").value;
+    IW.scopeTitle=$("#iw_scopeTitle").value.trim(); IW.scope=$("#iw_scope").value; IW.requirements=$("#iw_requirements").value; IW.dueDate=$("#iw_dueDate").value; IW.deliveryTerms=$("#iw_deliveryTerms").value.trim(); IW.notes=$("#iw_notes").value.trim(); };
+  const renderVendors=()=>{ const tr=$("#iw_trade").value; const list=PROC.vendors.filter(v=>(!tr||v.trade===tr)&&v.status==="Active");
+    const sel=new Set(IW.vendorIds||[]);
+    $("#iw_vendors").innerHTML=list.length?list.map(v=>`<label style="display:flex;align-items:center;gap:8px;padding:3px 4px;border-bottom:1px solid #f0f2f6">
+      <input type="checkbox" class="ivChk" data-id="${esc(v.id)}" ${sel.has(v.id)?"checked":""}>
+      <span style="flex:1"><b>${esc(v.name)}</b> <span class="muted">· ${esc(v.emirate||"")}</span></span>
+      <span>${/@/.test(v.email||"")?`<span class="muted">${esc(v.email)}</span>`:`<span style="color:var(--red)">no email → ${esc(v.phone||v.whatsapp||"call")}</span>`}</span></label>`).join(""):`<div class="muted">No active vendors for this trade. Pick a different trade or add vendors in the Directory.</div>`;
+    $("#iw_vendors").querySelectorAll(".ivChk").forEach(c=>c.onchange=()=>{ const s=new Set(IW.vendorIds||[]); if(c.checked)s.add(c.dataset.id); else s.delete(c.dataset.id); IW.vendorIds=[...s]; selInfo(); });
+    selInfo();
+  };
+  const selInfo=()=>{ const sel=(IW.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length;
+    $("#iw_selinfo").textContent=`${sel.length} selected · ${withE} will be emailed · ${sel.length-withE} on call list`; };
+  const renderFiles=()=>{ const fs=IW.files||[]; $("#iw_files").innerHTML=fs.length?fs.map(f=>`<span class="pill" style="background:#eef2f8;color:#1f3864;margin:2px 4px 2px 0">📎 ${esc(f.name)} <a href="#" data-fx="${f.idx}" style="color:var(--red)">✕</a></span>`).join(""):`<span class="muted">No files attached yet.</span>`;
+    $("#iw_files").querySelectorAll("[data-fx]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!IW.id)return; try{ const r=await api("rfq/"+IW.id+"/file/"+a.dataset.fx,{method:"DELETE"}); IW.files=r.files; renderFiles(); }catch(x){toast(x.message);} }); };
+  const ensureSaved=async()=>{ collect(); if(!IW.scopeTitle&&!IW.scope){toast("Add a scope title or scope first");return null;} const body={...IW}; delete body.files; delete body.quotes; const saved=await api("rfq",{method:"POST",body}); IW.id=saved.id; IW.rfqNo=saved.rfqNo; IW.status=saved.status; if(saved.files)IW.files=saved.files; return saved; };
+  $("#iw_trade").onchange=renderVendors;
+  $("#iw_all").onclick=()=>{ const tr=$("#iw_trade").value; const s=new Set(IW.vendorIds||[]); PROC.vendors.filter(v=>(!tr||v.trade===tr)&&v.status==="Active"&&/@/.test(v.email||"")).forEach(v=>s.add(v.id)); IW.vendorIds=[...s]; renderVendors(); };
+  $("#iw_none").onclick=()=>{ IW.vendorIds=[]; renderVendors(); };
+  $("#iw_back").onclick=()=>{ IW=null; PROC_TAB="rfqs"; vProc(); };
+  $("#iw_save").onclick=async()=>{ try{ await ensureSaved(); toast("Draft saved "+(IW.rfqNo||"")); renderFiles(); }catch(e){toast(e.message);} };
+  $("#iw_preview").onclick=async()=>{ try{ const sv=await ensureSaved(); if(!sv)return; const html=await apiText("rfq/"+IW.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); }catch(e){toast(e.message);} };
+  $("#iw_file").onchange=async()=>{ const inp=$("#iw_file"); if(!inp.files.length)return; try{ const sv=await ensureSaved(); if(!sv){inp.value="";return;} for(const f of inp.files){ if(f.size>7*1024*1024){toast(f.name+" exceeds 7 MB — skipped");continue;} toast("Uploading "+f.name+"…"); const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);}); const rr=await api("rfq/"+IW.id+"/attach",{method:"POST",body:{name:f.name,type:f.type,data}}); IW.files=rr.files; } inp.value=""; renderFiles(); toast("Attached"); }catch(e){toast(e.message);} };
+  $("#iw_send").onclick=async()=>{ try{ const sv=await ensureSaved(); if(!sv)return; if(!(IW.vendorIds||[]).length){toast("Select at least one vendor");return;}
+    const sel=IW.vendorIds; const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length;
+    if(!confirm(`Send RFQ ${IW.rfqNo} to ${withE} vendor(s) by email now?\n${sel.length-withE} vendor(s) have no email and will appear on a call list.`))return;
+    toast("Sending inquiries…"); const r=await api("rfq/"+IW.id+"/send",{method:"POST"});
+    const cl=(r.callList||[]);
+    $("#iw_sendinfo").innerHTML=`<div class="note" style="background:#e7efe9;border-color:#2E7D32">✔ Emailed to <b>${r.emailed}</b> vendor(s).${cl.length?` <b>${cl.length}</b> need calling:<br>`+cl.map(c=>`${esc(c.name)} — ${esc(c.phone||c.whatsapp||"no number")}`).join("<br>"):""}</div>`;
+    IW.status="Sent"; const i=RFQS.findIndex(x=>x.id===IW.id); const rec=await api("rfq/"+IW.id); if(i>=0)RFQS[i]=rec; else RFQS.unshift(rec);
+    toast("Inquiry sent");
+  }catch(e){toast(e.message);} };
+  renderVendors(); renderFiles(); selInfo();
+}
+
+function procRfqs(){
+  const b=$("#proc_body");
+  if(RFQ_CUR){ return rfqDetail(); }
+  const stc={Draft:"#8a8a8a",Sent:"#2E75B6",Quoting:"#bf9000",Awarded:"#375623",Cancelled:"#c0392b"};
+  b.innerHTML=`<div class="card"><div class="flex"><h3 style="margin:0">Inquiries (RFQs)</h3>
+     <button class="right btn gold" id="rqNew">+ New inquiry</button></div>
+    ${RFQS.length?`<div style="overflow-x:auto"><table><tr><th>RFQ</th><th>Project</th><th>Trade</th><th class="num">Vendors</th><th class="num">Quotes</th><th>Status</th><th>Date</th><th></th></tr>
+     ${RFQS.map(r=>`<tr class="click" data-r="${esc(r.id)}"><td>${esc(r.rfqNo)}</td><td>${esc(r.project||"—")}</td><td>${esc(r.trade||"—")}</td>
+        <td class="num">${(r.vendorIds||[]).length}</td><td class="num">${(r.quotes||[]).length}</td>
+        <td><span class="pill" style="background:${stc[r.status]||'#5B6B85'}">${esc(r.status)}</span></td><td>${dmy(r.createdAt)}</td>
+        <td>${ME.role==="CEO"?`<a href="#" data-del="${esc(r.id)}" style="color:var(--red)">✕</a>`:""}</td></tr>`).join("")}</table></div>`
+     :`<div class="muted">No inquiries yet. Click “New inquiry” or select vendors in the Directory.</div>`}</div>`;
+  $("#rqNew").onclick=()=>{ IW=null; RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
+  b.querySelectorAll("[data-r]").forEach(row=>row.onclick=async e=>{ if(e.target.dataset.del)return; try{ RFQ_CUR=await api("rfq/"+row.dataset.r); rfqDetail(); }catch(x){toast(x.message);} });
+  b.querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault();e.stopPropagation(); if(!confirm("Delete this RFQ?"))return; try{ await api("rfq/"+a.dataset.del,{method:"DELETE"}); RFQS=RFQS.filter(x=>x.id!==a.dataset.del); procRfqs(); }catch(x){toast(x.message);} });
+}
+async function rfqDetail(){
+  const r=RFQ_CUR, b=$("#proc_body");
+  const invited=(r.vendorIds||[]).map(id=>procVById(id)).filter(Boolean);
+  const qOf=id=>(r.quotes||[]).find(q=>q.vendorId===id)||{};
+  const amounts=(r.quotes||[]).map(q=>num(q.amount)).filter(a=>a>0); const lowest=amounts.length?Math.min(...amounts):0;
+  const callList=(r.callList||[]);
+  b.innerHTML=`<div class="card">
+    <div class="flex"><h3 style="margin:0">${esc(r.rfqNo)} <span class="pill" style="background:#5B6B85">${esc(r.status)}</span></h3>
+      <div class="right flex" style="gap:6px">
+        <button class="btn ghost" id="rd_print">View / Print</button>
+        ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn ghost" id="rd_edit">Edit</button>`:""}
+        ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn gold" id="rd_send">${r.status==="Draft"?"Send":"Re-send"}</button>`:""}
+        <button class="btn ghost" id="rd_back">Back</button></div></div>
+    <div class="muted" style="margin:4px 0 10px">${esc(r.project||"—")}${r.location?" · "+esc(r.location):""} · ${esc(r.trade||"—")}${r.dueDate?" · reply by "+dmy(r.dueDate):""}${r.sentAt?" · sent "+dmy(r.sentAt)+" to "+r.sentCount+" by email":""}</div>
+    ${r.scopeTitle?`<div><b>${esc(r.scopeTitle)}</b></div>`:""}
+    ${(r.files||[]).length?`<div style="margin:6px 0">${(r.files||[]).map(f=>`<a href="#" class="rd_file" data-i="${f.idx}" data-n="${esc(f.name)}" class="pill">📎 ${esc(f.name)}</a>`).join(" · ")}</div>`:""}
+    ${callList.length?`<div class="note" style="background:#fff8e6;border-color:#bf9000"><b>Call list</b> (no email): ${callList.map(c=>esc(c.name)+" — "+esc(c.phone||c.whatsapp||"no number")).join(" · ")}</div>`:""}
+    <h4 style="margin:14px 0 6px">Quotes &amp; comparison</h4>
+    ${invited.length?`<div style="overflow-x:auto"><table><tr><th>Vendor</th><th class="num">Quote (AED)</th><th>VAT</th><th>Lead time</th><th>Validity</th><th>Payment</th><th>Notes</th><th></th></tr>
+      ${invited.map(v=>{const q=qOf(v.id);const isLow=num(q.amount)>0&&num(q.amount)===lowest;return `<tr data-vend="${esc(v.id)}">
+        <td><b>${esc(v.name)}</b>${q.status==="Accepted"?` <span class="pill" style="background:#375623;font-size:9px">ACCEPTED</span>`:""}${isLow?` <span class="pill" style="background:#2E7D32;font-size:9px">lowest</span>`:""}<br><span class="muted" style="font-size:10px">${/@/.test(v.email||"")?esc(v.email):esc(v.phone||"call")}</span></td>
+        <td class="num"><input class="q_amount" type="number" step="0.01" value="${q.amount??""}" style="width:110px;text-align:right"></td>
+        <td><select class="q_vat"><option value="0" ${!q.vatIncl?"selected":""}>excl</option><option value="1" ${q.vatIncl?"selected":""}>incl</option></select></td>
+        <td><input class="q_lead" value="${esc(q.leadTime||"")}" style="width:90px" placeholder="e.g. 3 wks"></td>
+        <td><input class="q_valid" value="${esc(q.validity||"")}" style="width:80px" placeholder="30 days"></td>
+        <td><input class="q_pay" value="${esc(q.paymentTerms||"")}" style="width:100px"></td>
+        <td><input class="q_notes" value="${esc(q.notes||"")}" style="width:140px"></td>
+        <td style="white-space:nowrap"><button class="btn ghost q_save" style="padding:3px 7px;font-size:11px">Save</button>
+          ${r.status!=="Awarded"?`<button class="btn gold q_award" style="padding:3px 7px;font-size:11px">Accept → LOA</button>`:""}</td></tr>`;}).join("")}</table></div>`
+      :`<div class="muted">No vendors on this inquiry.</div>`}
+    ${r.status==="Awarded"?`<div class="note" style="background:#e7efe9;border-color:#2E7D32;margin-top:10px">Awarded to <b>${esc((procVById(r.awardedVendorId)||{}).name||"")}</b> at AED ${fmt(r.awardedAmount)}. A supplier record was created — issue the LOA/Subcontract from Contracts / LOA, then process the Payment Certificate.</div>`:""}
+  </div>`;
+  $("#rd_back").onclick=()=>{ RFQ_CUR=null; procRfqs(); };
+  $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400); }catch(e){toast(e.message);} };
+  if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
+  if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
+  b.querySelectorAll(".rd_file").forEach(a=>a.onclick=e=>{ e.preventDefault(); openRfqFile(r.id,a.dataset.i,a.dataset.n); });
+  b.querySelectorAll("tr[data-vend]").forEach(row=>{ const vid=row.dataset.vend;
+    const g=cls=>row.querySelector("."+cls);
+    const save=async(extra={})=>{ const body={vendorId:vid,amount:+g("q_amount").value||0,vatIncl:g("q_vat").value==="1",leadTime:g("q_lead").value,validity:g("q_valid").value,paymentTerms:g("q_pay").value,notes:g("q_notes").value,...extra}; RFQ_CUR=await api("rfq/"+r.id+"/quote",{method:"POST",body}); };
+    g("q_save").onclick=async()=>{ try{ await save(); toast("Quote saved"); rfqDetail(); }catch(e){toast(e.message);} };
+    if(g("q_award"))g("q_award").onclick=async()=>{ if(!(+g("q_amount").value>0)){toast("Enter the vendor's quoted amount first");return;} if(!confirm("Accept this vendor and create their supplier record for the LOA / Subcontract?"))return; try{ await save({status:"Accepted"}); const res=await api("rfq/"+r.id+"/award",{method:"POST",body:{vendorId:vid}}); toast("Awarded → opening Contracts / LOA"); AW_PRESEL=res.supplierId; AW_PREFILL={amount:res.amount,project:res.project,scopeTitle:r.scopeTitle,scope:res.scope}; await load().catch(()=>{}); IW=null; RFQ_CUR=null; VIEW="awards"; CUR=null; render(); }catch(e){toast(e.message);} };
+  });
+}
+async function openRfqFile(rfqId,idx,name){ try{ const res=await fetch("/api/rfqfile/"+rfqId+"/"+idx,{headers:TOKEN?{authorization:"Bearer "+TOKEN}:{}}); if(!res.ok)throw new Error("Download failed"); const blob=await res.blob(); const url=URL.createObjectURL(blob); const w=window.open(url,"_blank"); if(!w){const a=document.createElement("a");a.href=url;a.download=name||"file";a.click();} setTimeout(()=>URL.revokeObjectURL(url),60000); }catch(e){toast(e.message);} }
 
 /* ---------- announcements ---------- */
 const ANN_CATS=["Payment & Certification","General Information","Instruction / Notice","Policy Update"];
