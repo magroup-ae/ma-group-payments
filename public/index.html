@@ -2681,8 +2681,9 @@ async function vProc(){
     PROC.vendors=pv.items||[]; PROC.trades=pv.trades||[]; PROC.meta=meta; RFQS=rq.items||[];
   }catch(e){ $("#main").innerHTML=`<div class="card">${esc(e.message)}</div>`; return; }
   const sub=(k,l)=>`<button class="btn ${PROC_TAB===k?'gold':'ghost'}" onclick="PROC_TAB='${k}';RFQ_CUR=null;vProc()">${l}</button>`;
+  const withEmailN=PROC.vendors.filter(v=>/@/.test(v.email||"")).length, regN=PROC.vendors.filter(v=>v.supplierId).length;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Procurement</h2>
-     <span class="muted">${PROC.vendors.length} vendors · ${PROC.meta.withEmail} with email · ${PROC.trades.length} trades</span>
+     <span class="muted">${PROC.vendors.length} vendors · ${regN} registered · ${withEmailN} with email · ${PROC.trades.length} trades</span>
      <div class="right flex" style="gap:6px">${sub("dir","Directory")}${sub("issue","Issue Inquiry")}${sub("rfqs","Inquiries ("+RFXcount()+")")}</div></div>
    </div><div id="proc_body"></div>`;
   if(PROC_TAB==="dir") procDir();
@@ -2701,15 +2702,17 @@ function procDir(){
       <select id="pdTrade" style="max-width:230px"><option value="">All trades</option>${trades.map(t=>`<option>${esc(t)}</option>`).join("")}</select>
       <select id="pdType"><option value="">All types</option><option>Supplier</option><option>Subcontractor</option><option>Both</option></select>
       <select id="pdEmail"><option value="">Email: any</option><option value="1">Has email</option><option value="0">No email</option></select>
+      <select id="pdReg"><option value="">All vendors</option><option value="1">Registered suppliers</option><option value="0">Directory only</option></select>
       <input id="pdQ" placeholder="Search name / specialty / phone…" style="max-width:240px">
       <div class="right flex" style="gap:6px"><button class="btn ghost" id="pdAdd">+ Add vendor</button>
         <button class="btn gold" id="pdMakeRfq">Create inquiry from selected (<span id="pdSelN">0</span>)</button></div>
     </div>
     <div id="pdList" class="muted">…</div></div>`;
   const render=()=>{
-    const tr=$("#pdTrade").value, ty=$("#pdType").value, em=$("#pdEmail").value, q=($("#pdQ").value||"").toLowerCase();
+    const tr=$("#pdTrade").value, ty=$("#pdType").value, em=$("#pdEmail").value, rg=$("#pdReg").value, q=($("#pdQ").value||"").toLowerCase();
     let list=PROC.vendors.filter(v=>(!tr||v.trade===tr)&&(!ty||v.type===ty||(ty!=="Both"&&v.type==="Both"))
       &&(em===""||(em==="1"?/@/.test(v.email||""):!/@/.test(v.email||"")))
+      &&(rg===""||(rg==="1"?!!v.supplierId:!v.supplierId))
       &&(!q||((v.name+" "+v.specialty+" "+v.phone+" "+v.whatsapp+" "+v.emirate+" "+v.contactName).toLowerCase().includes(q))));
     $("#pdList").classList.remove("muted");
     $("#pdList").innerHTML=`<div class="muted" style="margin-bottom:6px">${list.length} of ${PROC.vendors.length}</div>
@@ -2726,7 +2729,7 @@ function procDir(){
     $("#pdList").querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault();e.stopPropagation(); if(ME.role!=="CEO"){toast("Only the CEO can delete a vendor");return;} const v=procVById(a.dataset.del); if(!confirm("Delete vendor "+(v?v.name:"")+"?"))return; try{ await api("pvendor/"+a.dataset.del,{method:"DELETE"}); PROC.vendors=PROC.vendors.filter(x=>x.id!==a.dataset.del); render(); }catch(x){toast(x.message);} });
     $("#pdSelN").textContent=PROC_SEL.size;
   };
-  ["pdTrade","pdType","pdEmail","pdQ"].forEach(id=>$("#"+id).addEventListener("input",render));
+  ["pdTrade","pdType","pdEmail","pdReg","pdQ"].forEach(id=>$("#"+id).addEventListener("input",render));
   $("#pdAdd").onclick=()=>procVendorForm(null);
   $("#pdMakeRfq").onclick=()=>{ if(!PROC_SEL.size){toast("Tick the vendors first, or use Issue Inquiry and pick a trade");return;} RFQ_DRAFT={vendorIds:[...PROC_SEL], trade:(procVById([...PROC_SEL][0])||{}).trade||""}; PROC_TAB="issue"; vProc(); };
   render();

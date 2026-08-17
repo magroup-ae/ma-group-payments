@@ -13167,6 +13167,46 @@ function canonTrade(cat, trade) {
   return "General Trading / Materials";
 }
 
+function dirNm(x) { return String(x || "").trim().toLowerCase(); }
+// Mirror a finance supplier/subcontractor into the procurement directory so the
+// two are one growing vendor base. Creates a directory entry if none matches by
+// link or name, else links it and fills blank contact/trade fields (never
+// overwrites existing directory data). Pass ctx.{items,stg} to batch in a loop.
+async function dirUpsertFromSupplier(s, sup, ctx) {
+  if (!sup || !sup.name) return null;
+  ctx = ctx || {};
+  const items = ctx.items || await getAllJSON(s, "pvendor/");
+  const isEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || "").trim());
+  const phone = sup.mobile || sup.tel || sup.contact || "";
+  const trade = canonTrade(sup.category, sup.trade);
+  let pv = items.find((v) => v.supplierId === sup.id) || items.find((v) => dirNm(v.name) === dirNm(sup.name));
+  if (pv) {
+    let ch = false;
+    if (pv.supplierId !== sup.id) { pv.supplierId = sup.id; ch = true; }
+    if (!isEmail(pv.email) && isEmail(sup.email)) { pv.email = String(sup.email).trim(); ch = true; }
+    if (!pv.phone && phone) { pv.phone = phone; ch = true; }
+    if (!pv.contactName && sup.contactName) { pv.contactName = sup.contactName; ch = true; }
+    if (!pv.emirate && sup.emirate) { pv.emirate = sup.emirate; ch = true; }
+    if (!pv.website && sup.website) { pv.website = sup.website; ch = true; }
+    if ((!pv.trade || pv.trade === "General Trading / Materials") && trade && trade !== "General Trading / Materials") { pv.trade = trade; ch = true; }
+    if (sup.type === "Subcontractor" && pv.type === "Supplier") { pv.type = "Both"; ch = true; }
+    if (ch) { pv.updatedAt = now(); await s.setJSON("pvendor/" + pv.id, pv); }
+    return pv.id;
+  }
+  const stg = ctx.stg || await s.get("settings", { type: "json" });
+  const id = await nextId(s, stg, "pvendorSeq", "PV", "pvendor/", 4);
+  if (!ctx.stg) await s.setJSON("settings", stg);
+  pv = {
+    id, seq: Number(String(id).replace(/\D/g, "")) || 0, name: sup.name, trade, specialty: sup.trade || "",
+    contactName: sup.contactName || "", phone, whatsapp: "", email: isEmail(sup.email) ? String(sup.email).trim() : "", website: sup.website || "",
+    emirate: sup.emirate || "", type: sup.type === "Subcontractor" ? "Subcontractor" : (sup.type === "Both" ? "Both" : "Supplier"),
+    status: "Active", rating: 0, notes: "", supplierId: sup.id, source: "supplier-registry",
+    createdAt: now(), createdBy: "system", updatedAt: now()
+  };
+  await s.setJSON("pvendor/" + id, pv);
+  if (ctx.items) ctx.items.push(pv);
+  return id;
+}
 async function ensureInit() {
   const s = store();
   let settings = await s.get("settings", { type: "json" });
@@ -14394,7 +14434,21 @@ var api_default = async (req, context) => {
   // ============ PROCUREMENT: vendor directory ============
   if (path === "pvendors" && req.method === "GET") {
     if (!can("procurement")) return err("Not permitted", 403);
-    const items = await getAllJSON(s, "pvendor/");
+    let items = await getAllJSON(s, "pvendor/");
+    // Grow the directory with the supplier registry. Gated on supplier count so
+    // steady-state loads are cheap; a full mirror runs when suppliers were added.
+    try {
+      const supKeys = (await s.list({ prefix: "supplier/" })).blobs;
+      const stg = await s.get("settings", { type: "json" });
+      if (num(stg.dirSyncSupCount) !== supKeys.length) {
+        const sups = await getAllJSON(s, "supplier/");
+        const ctx = { items, stg };
+        for (const sup of sups) { try { await dirUpsertFromSupplier(s, sup, ctx); } catch (e) {} }
+        stg.dirSyncSupCount = supKeys.length;
+        await s.setJSON("settings", stg);
+        items = ctx.items;
+      }
+    } catch (e) {}
     items.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
     return json({ items, trades: PROC_TRADES });
   }
@@ -15092,6 +15146,9 @@ var api_default = async (req, context) => {
       updatedBy: me.name
     };
     await s.setJSON("supplier/" + id, sup);
+    // Keep the procurement directory in step — every registered supplier /
+    // subcontractor is also an inquirable vendor.
+    try { await dirUpsertFromSupplier(s, sup); } catch (e) {}
     if (!b.id) {
       await notify(s, "welcome", { sup });
       await notify(s, "paymentcycle", { sup });
