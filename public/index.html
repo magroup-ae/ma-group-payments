@@ -2824,9 +2824,10 @@ async function procIssue(){
     const sel=IW.vendorIds; const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length;
     if(!confirm(`Send RFQ ${IW.rfqNo} to ${withE} vendor(s) by email now?\n${sel.length-withE} vendor(s) have no email and will appear on a call list.`))return;
     toast("Sending inquiries…"); const r=await api("rfq/"+IW.id+"/send",{method:"POST"});
-    const cl=(r.callList||[]);
-    $("#iw_sendinfo").innerHTML=`<div class="note" style="background:#e7efe9;border-color:#2E7D32">✔ Emailed to <b>${r.emailed}</b> vendor(s).${cl.length?` <b>${cl.length}</b> need calling:<br>`+cl.map(c=>`${esc(c.name)} — ${esc(c.phone||c.whatsapp||"no number")}`).join("<br>"):""}</div>`;
     IW.status="Sent"; const i=RFQS.findIndex(x=>x.id===IW.id); const rec=await api("rfq/"+IW.id); if(i>=0)RFQS[i]=rec; else RFQS.unshift(rec);
+    const noEmail=(IW.vendorIds||[]).map(id=>procVById(id)).filter(v=>v&&!/@/.test(v.email||""));
+    $("#iw_sendinfo").innerHTML=`<div class="note" style="background:#e7efe9;border-color:#2E7D32">✔ Emailed to <b>${r.emailed}</b> vendor(s).</div>`+waSectionHtml(rec, noEmail);
+    wireWa($("#iw_sendinfo"),rec);
     toast("Inquiry sent");
   }catch(e){toast(e.message);} };
   renderVendors(); renderFiles(); selInfo();
@@ -2864,7 +2865,7 @@ async function rfqDetail(){
     <div class="muted" style="margin:4px 0 10px">${esc(r.project||"—")}${r.location?" · "+esc(r.location):""} · ${esc(r.trade||"—")}${r.dueDate?" · reply by "+dmy(r.dueDate):""}${r.sentAt?" · sent "+dmy(r.sentAt)+" to "+r.sentCount+" by email":""}</div>
     ${r.scopeTitle?`<div><b>${esc(r.scopeTitle)}</b></div>`:""}
     ${(r.files||[]).length?`<div style="margin:6px 0">${(r.files||[]).map(f=>`<a href="#" class="rd_file" data-i="${f.idx}" data-n="${esc(f.name)}" class="pill">📎 ${esc(f.name)}</a>`).join(" · ")}</div>`:""}
-    ${callList.length?`<div class="note" style="background:#fff8e6;border-color:#bf9000"><b>Call list</b> (no email): ${callList.map(c=>esc(c.name)+" — "+esc(c.phone||c.whatsapp||"no number")).join(" · ")}</div>`:""}
+    <div id="rd_wa">${waSectionHtml(r, invited.filter(v=>!/@/.test(v.email||"")))}</div>
     <h4 style="margin:14px 0 6px">Quotes &amp; comparison</h4>
     ${invited.length?`<div style="overflow-x:auto"><table><tr><th>Vendor</th><th class="num">Quote (AED)</th><th>VAT</th><th>Lead time</th><th>Validity</th><th>Payment</th><th>Notes</th><th></th></tr>
       ${invited.map(v=>{const q=qOf(v.id);const isLow=num(q.amount)>0&&num(q.amount)===lowest;return `<tr data-vend="${esc(v.id)}">
@@ -2885,6 +2886,7 @@ async function rfqDetail(){
   if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
   if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
   b.querySelectorAll(".rd_file").forEach(a=>a.onclick=e=>{ e.preventDefault(); openRfqFile(r.id,a.dataset.i,a.dataset.n); });
+  wireWa($("#rd_wa"),r);
   b.querySelectorAll("tr[data-vend]").forEach(row=>{ const vid=row.dataset.vend;
     const g=cls=>row.querySelector("."+cls);
     const save=async(extra={})=>{ const body={vendorId:vid,amount:+g("q_amount").value||0,vatIncl:g("q_vat").value==="1",leadTime:g("q_lead").value,validity:g("q_valid").value,paymentTerms:g("q_pay").value,notes:g("q_notes").value,...extra}; RFQ_CUR=await api("rfq/"+r.id+"/quote",{method:"POST",body}); };
@@ -2893,6 +2895,37 @@ async function rfqDetail(){
   });
 }
 async function openRfqFile(rfqId,idx,name){ try{ const res=await fetch("/api/rfqfile/"+rfqId+"/"+idx,{headers:TOKEN?{authorization:"Bearer "+TOKEN}:{}}); if(!res.ok)throw new Error("Download failed"); const blob=await res.blob(); const url=URL.createObjectURL(blob); const w=window.open(url,"_blank"); if(!w){const a=document.createElement("a");a.href=url;a.download=name||"file";a.click();} setTimeout(()=>URL.revokeObjectURL(url),60000); }catch(e){toast(e.message);} }
+function waNorm(n){ let d=String(n||"").replace(/[^0-9]/g,""); if(!d)return ""; if(d.startsWith("00"))d=d.slice(2); if(d.startsWith("971"))return d; if(d.startsWith("0"))return "971"+d.slice(1); if(d.length===9)return "971"+d; return d; }
+function rfqWaText(r){ return `MA Group — Request for Quotation ${r.rfqNo}\n`
+  +`Project: ${r.project||"-"}\n`
+  +`Trade: ${r.trade||"-"}\n`
+  +(r.scopeTitle?`Scope: ${r.scopeTitle}\n`:"")
+  +(r.dueDate?`Kindly send your best quotation by ${dmy(r.dueDate)}.\n`:`Kindly send your best quotation.\n`)
+  +`Please also reply with your EMAIL address so we can send you the full RFQ with the BOQ & drawings.\n`
+  +`— MA Group Procurement · +971 80062244`; }
+function waLink(v,r){ const num=waNorm(v.whatsapp||v.phone); if(!num)return ""; return `https://wa.me/${num}?text=${encodeURIComponent(rfqWaText(r))}`; }
+function waSectionHtml(r,list){
+  if(!list.length) return "";
+  return `<div class="card" style="margin-top:10px;background:#f2fbf4;border:1px solid #cfe8d6">
+    <div class="flex"><h4 style="margin:0">WhatsApp / call — ${list.length} vendor(s) without email</h4>
+      <span class="right muted" style="font-size:11px">the message asks for their quote and their email</span></div>
+    <div class="muted" style="font-size:11px;margin:4px 0 8px">Tap <b>WhatsApp</b> to open a ready-to-send message. When a vendor replies with an email, type it in and <b>Save &amp; email full RFQ</b> — they’ll get the RFQ with attachments and drop off this list.</div>
+    <div style="overflow-x:auto"><table><tr><th>Vendor</th><th>Number</th><th>Inquiry</th><th>Capture email</th></tr>
+    ${list.map(v=>{ const link=waLink(v,r); const num=waNorm(v.whatsapp||v.phone);
+      return `<tr><td><b>${esc(v.name)}</b></td><td>${esc(v.whatsapp||v.phone||"—")}</td>
+      <td>${link?`<a class="btn ghost wa_go" data-id="${esc(v.id)}" target="_blank" rel="noopener" href="${link}" style="padding:3px 9px;font-size:12px;color:#128C7E">WhatsApp</a>`:`<span class="muted">no number</span>`}${(r.waSent||[]).includes(v.id)?` <span class="pill" style="background:#128C7E;font-size:9px">sent</span>`:""}</td>
+      <td style="white-space:nowrap"><input class="wa_em" data-id="${esc(v.id)}" placeholder="email@…" style="width:150px"><button class="btn ghost wa_save" data-id="${esc(v.id)}" style="padding:3px 7px;font-size:11px">Save &amp; email</button></td></tr>`;}).join("")}</table></div></div>`;
+}
+function wireWa(container,r){
+  container.querySelectorAll(".wa_go").forEach(a=>a.addEventListener("click",()=>{ api("rfq/"+r.id+"/wa-mark",{method:"POST",body:{vendorId:a.dataset.id}}).catch(()=>{}); }));
+  container.querySelectorAll(".wa_save").forEach(btn=>btn.onclick=async()=>{ const id=btn.dataset.id; const inp=container.querySelector('.wa_em[data-id="'+id+'"]'); const email=(inp.value||"").trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast("Enter a valid email"); return; }
+    try{ const v=procVById(id); const saved=await api("pvendor",{method:"POST",body:{id,name:v.name,email}}); const i=PROC.vendors.findIndex(x=>x.id===id); if(i>=0)PROC.vendors[i]=saved;
+      if(confirm("Email the full RFQ (with attachments) to "+v.name+" now?")){ await api("rfq/"+r.id+"/send",{method:"POST",body:{only:[id]}}); toast("Emailed "+v.name); }
+      else toast("Email saved");
+      RFQ_CUR=await api("rfq/"+r.id); rfqDetail();
+    }catch(e){ toast(e.message); } });
+}
 
 /* ---------- announcements ---------- */
 const ANN_CATS=["Payment & Certification","General Information","Instruction / Notice","Policy Update"];

@@ -14548,33 +14548,56 @@ var api_default = async (req, context) => {
     if (!rec) return err("Not found", 404);
     if (!rec.scopeTitle && !rec.scope) return err("Add a scope title / requirements before sending");
     if (!(rec.vendorIds || []).length) return err("Select at least one vendor to send the inquiry to");
+    let b = {}; try { b = await req.json(); } catch {}
+    // Optional targeted send: email only these vendor id(s) — used when a vendor
+    // replies with their email after a WhatsApp inquiry, so we don't re-blast everyone.
+    const only = Array.isArray(b.only) ? b.only.map(String) : null;
     const cfg = await getEmailCfg(s);
-    // Load attachments once and reuse for every recipient.
     const attachments = [];
     for (const f of rec.files || []) {
       const blob = await s.get("rfqfile/" + rec.id + "/" + f.idx, { type: "json" });
       if (blob && blob.b64) attachments.push({ filename: f.name, content: blob.b64, encoding: "base64", contentType: f.type || "application/octet-stream" });
     }
-    const vendors = [];
-    for (const vid of rec.vendorIds) { const v = await s.get("pvendor/" + vid, { type: "json" }); if (v) vendors.push(v); }
-    const label = rec.rfqNo + (rec.trade ? " · " + rec.trade : "");
+    // Current vendor records for every vendor on the RFQ (email may have changed).
+    const allVendors = [];
+    for (const vid of rec.vendorIds) { const v = await s.get("pvendor/" + vid, { type: "json" }); if (v) allVendors.push(v); }
+    const targets = only ? allVendors.filter((v) => only.includes(v.id)) : allVendors;
     const subject = `Request for Quotation — ${rec.rfqNo}${rec.project ? " — " + rec.project : ""}${rec.dueDate ? " — reply by " + emDate(rec.dueDate) : ""}`;
-    let sent = 0; const callList = []; let lastStatus = "";
-    for (const v of vendors) {
+    let sent = 0; let lastStatus = "";
+    for (const v of targets) {
       if (validEmail(v.email)) {
         const html = buildRfqHtml(rec, cfg, v);
         const r = await sendMail(s, cfg, { type: "rfq", to: v.email.trim(), toName: v.contactName || v.name, subject, html, attachments });
         if (r.status === "sent" || r.status === "logged") sent++;
         lastStatus = r.status;
-      } else {
-        callList.push({ id: v.id, name: v.name, phone: v.phone || "", whatsapp: v.whatsapp || "", trade: v.trade || "" });
       }
     }
-    // Copy to the CEO/admin for the record.
-    try { const html = buildRfqHtml(rec, cfg, null); await sendMail(s, cfg, { type: "rfq", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) {}
-    rec.status = "Sent"; rec.sentAt = now(); rec.sentBy = me.name; rec.sentCount = sent; rec.callList = callList; rec.lastStatus = lastStatus;
+    // Recompute the call list from ALL vendors' current email status, so anyone
+    // who has since given an email automatically drops off it.
+    const callList = allVendors.filter((v) => !validEmail(v.email)).map((v) => ({ id: v.id, name: v.name, phone: v.phone || "", whatsapp: v.whatsapp || "", trade: v.trade || "" }));
+    // Copy to the CEO/admin for the record (full blast only).
+    if (!only) { try { const html = buildRfqHtml(rec, cfg, null); await sendMail(s, cfg, { type: "rfq", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) {} }
+    rec.sentAt = now(); rec.sentBy = me.name;
+    rec.sentCount = only ? num(rec.sentCount) + sent : sent;
+    rec.callList = callList; rec.lastStatus = lastStatus;
+    if (rec.status === "Draft") rec.status = "Sent";
     await s.setJSON("rfq/" + rec.id, rec);
-    return json({ ok: true, sent, emailed: sent, callList, totalVendors: vendors.length });
+    return json({ ok: true, sent, emailed: sent, callList, totalVendors: allVendors.length });
+  }
+  const rfqWa = path.match(/^rfq\/([^/]+)\/wa-mark$/);
+  if (rfqWa && req.method === "POST") {
+    // Record that a WhatsApp inquiry was issued to a vendor (for tracking only).
+    if (!can("procurement")) return err("Not permitted", 403);
+    const rec = await s.get("rfq/" + rfqWa[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    const b = await req.json();
+    const vid = String(b.vendorId || "");
+    rec.waSent = rec.waSent || [];
+    if (vid && !rec.waSent.includes(vid)) rec.waSent.push(vid);
+    if (rec.status === "Draft") rec.status = "Sent";
+    rec.updatedAt = now();
+    await s.setJSON("rfq/" + rec.id, rec);
+    return json({ ok: true, waSent: rec.waSent });
   }
   const rfqQuote = path.match(/^rfq\/([^/]+)\/quote$/);
   if (rfqQuote && req.method === "POST") {
