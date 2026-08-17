@@ -13310,8 +13310,20 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
     advanceAmount = num(supplier.advanceAmount);
     advanceRate = num(supplier.advanceRecoveryRate);
     if (advanceAmount > 0 && advanceRate > 0) {
-      const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
-      advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
+      if (perInvoice) {
+        // Per-invoice supplier: recover the rate on THIS invoice's gross,
+        // capped at the advance still outstanding.
+        const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
+        advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
+      } else {
+        // Cumulative contract: gross is the value certified to date, so
+        // advanceRate * gross is the CUMULATIVE recovery target. Cap it at the
+        // advance, then take this period's increment over what earlier
+        // certificates already recovered — so each certificate stores a true
+        // per-period recovery, never a cumulative figure that gets re-summed.
+        const cumRecovery = Math.min(r2(advanceRate * gross), advanceAmount);
+        advanceRecovery = Math.max(0, r2(cumRecovery - recoveredSoFar));
+      }
     }
   } else advanceRecovery = num(c.advanceRecovery);
   // Net this certificate = cumulative value net of retention, cumulative advance
@@ -13453,8 +13465,12 @@ function computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra) {
     if (base > 0) advanceRate = advanceAmount / base;
   }
   if (advanceAmount > 0 && advanceRate > 0) {
-    const remaining = Math.max(0, r2(advanceAmount - recoveredSoFar));
-    advanceRecovery = Math.min(r2(advanceRate * gross), remaining);
+    // gross is cumulative (grossCum + MOS), so advanceRate * gross is the
+    // cumulative recovery target. Cap at the advance, then take this period's
+    // increment over prior recovery — each certificate stores a true per-period
+    // figure, so the running Σ advanceRecovery equals the correct cumulative.
+    const cumRecovery = Math.min(r2(advanceRate * gross), advanceAmount);
+    advanceRecovery = Math.max(0, r2(cumRecovery - recoveredSoFar));
   }
   const contra = num(c.contra);
   // Cumulative advance recovered & cumulative contra, minus previously certified —
@@ -13929,6 +13945,12 @@ async function hasAcceptedPolicy(s, userId) {
   return !!(a && a.version >= POLICY_VERSION);
 }
 var AWARD_THRESHOLD_DEFAULT = 1e4;
+function entityTRN(entObj) {
+  if (!entObj) return "";
+  if (entObj.trn) return String(entObj.trn).trim();
+  const m = String(entObj.line3 || "").match(/TRN[:\s]*([0-9]{5,})/i);
+  return m ? m[1] : "";
+}
 function awardThreshold(settings) { return num(settings && settings.loaThreshold) || AWARD_THRESHOLD_DEFAULT; }
 function awardTypeFor(amount, settings) { return num(amount) < awardThreshold(settings) ? "LOA" : "AGREEMENT"; }
 // Full letterhead legal document (LOA for small packages, Subcontract Agreement for larger ones).
@@ -13953,6 +13975,10 @@ function buildAwardDocHtml(rec, cfg, assets) {
   const advRecPct = num(rec.advanceRecoveryPct) || (advAmt > 0 && a > 0 ? r2(advAmt / a * 100) : 0);
   const advPctOfAward = a > 0 ? r2(advAmt / a * 100) : 0;
   const ent = rec.entityName || "MA Group – Marvellous Art LLC";
+  // TRN is taken from the paying entity (stored on the award), never hardcoded,
+  // so each entity/tenant prints its own tax number. Fallback keeps existing
+  // Marvellous Art documents correct for records saved before this field existed.
+  const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
   // Instrument description used by the Performance Security clause.
   const perfInstrument = perfType === "guarantee"
     ? `an <b>unconditional, irrevocable, on-demand bank guarantee for ${money(perfAmt)}</b> (${perfPct}% of the ${priceWord}), issued by a UAE-licensed bank in favour of ${esc(ent)}, ${perfValidity}`
@@ -13976,7 +14002,7 @@ function buildAwardDocHtml(rec, cfg, assets) {
     <tr><td class="k">Reference No.</td><td>${esc(rec.docNo)}</td><td class="k">Date</td><td>${dt(rec.createdAt)}</td></tr>
     <tr><td class="k">Project</td><td colspan="3">${esc(rec.project || "—")}</td></tr>
     <tr><td class="k">Location</td><td>${esc(rec.location || "—")}</td><td class="k">Client / Employer</td><td>${esc(rec.client || "—")}</td></tr>
-    <tr><td class="k">Main Contractor</td><td colspan="3">${esc(ent)} (“First Party”), TRN 104117106500003</td></tr>
+    <tr><td class="k">Main Contractor</td><td colspan="3">${esc(ent)} (“First Party”)${entTrn ? ", TRN " + esc(entTrn) : ""}</td></tr>
     <tr><td class="k">Subcontractor</td><td colspan="3"><b>${esc(rec.supplierName)}</b>${rec.supplierTL ? " · Trade Licence " + esc(rec.supplierTL) : ""}${rec.supplierTRN ? " · TRN " + esc(rec.supplierTRN) : ""} (“Second Party”)</td></tr>
     ${(rec.supplierAttn || rec.supplierEmail) ? `<tr><td class="k">Attention / Email</td><td colspan="3">${esc(rec.supplierAttn || "—")}${rec.supplierEmail ? " · " + esc(rec.supplierEmail) : ""}</td></tr>` : ""}
     ${rec.quotationRef ? `<tr><td class="k">Based on your quotation</td><td colspan="3">Ref. ${esc(rec.quotationRef)}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>` : ""}
@@ -14056,7 +14082,7 @@ function buildAwardDocHtml(rec, cfg, assets) {
   .note{background:#fff8e6;border-left:4px solid #bf9000;padding:9px 13px;border-radius:4px;font-size:11.5px;margin:12px 0}
   @media print{.page{max-width:none;padding:12mm}}
 </style></head><body><div class="page">
-  <div class="lh"><img src="${cfg && cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png"}" alt="" onerror="this.style.display='none'"><div><div class="n1">${esc(ent)}</div><div class="n2">Marvellous Art · MA Building Contracting · MA Building Maintenance — TRN 104117106500003 · +971 80062244 · info@maagroup.ae</div></div></div>
+  <div class="lh"><img src="${cfg && cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png"}" alt="" onerror="this.style.display='none'"><div><div class="n1">${esc(ent)}</div><div class="n2">Marvellous Art · MA Building Contracting · MA Building Maintenance${entTrn ? " — TRN " + esc(entTrn) : ""} · +971 80062244 · info@maagroup.ae</div></div></div>
   <div class="title">${isAgr ? "SUBCONTRACT AGREEMENT" : "LETTER OF AWARD"}</div>
   <div class="sub">${isAgr ? "Subcontract / Supply Package — UAE" : "Subcontract / Supply Package — UAE"}</div>
   ${partyTbl}
@@ -14077,7 +14103,29 @@ var api_default = async (req, context) => {
   if (path === "login" && req.method === "POST") {
     const { userId: userId2, pin } = await req.json();
     const u = users.find((x) => x.id === userId2);
-    if (!u || hashPin(String(pin || ""), u.salt) !== u.pinHash) return err("Wrong PIN", 401);
+    // Brute-force protection: a 4–8 digit PIN is small enough to guess, so
+    // throttle failed attempts per user. Lenient window that auto-expires —
+    // real users are never locked out for long, but an attacker cannot spray.
+    const LK_MAX = 8, LK_WINDOW_MS = 15 * 60 * 1e3, LK_LOCK_MS = 15 * 60 * 1e3;
+    const lkKey = "authlock/" + String(userId2 || "unknown").replace(/[^A-Za-z0-9_-]/g, "_");
+    let lk = null;
+    try { lk = await s.get(lkKey, { type: "json" }); } catch {}
+    const tnow = Date.now();
+    if (lk && lk.lockUntil && lk.lockUntil > tnow) {
+      const mins = Math.ceil((lk.lockUntil - tnow) / 6e4);
+      return err(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`, 429);
+    }
+    if (!u || hashPin(String(pin || ""), u.salt) !== u.pinHash) {
+      try {
+        // Reset the counter if the window has elapsed since the first failure.
+        if (!lk || !lk.firstAt || tnow - lk.firstAt > LK_WINDOW_MS) lk = { fails: 0, firstAt: tnow, lockUntil: 0 };
+        lk.fails = num(lk.fails) + 1;
+        if (lk.fails >= LK_MAX) { lk.lockUntil = tnow + LK_LOCK_MS; lk.fails = 0; lk.firstAt = tnow; }
+        await s.setJSON(lkKey, lk);
+      } catch {}
+      return err("Wrong PIN", 401);
+    }
+    try { if (lk) await s.delete(lkKey); } catch {}
     return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, title: u.title || "", mustChangePin: !!u.mustChangePin } });
   }
   if (path === "userlist") return json(users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
@@ -14226,7 +14274,7 @@ var api_default = async (req, context) => {
     const rec = {
       id, docNo, type, status: "Issued",
       supplierId: sup.id, supplierName: sup.name, supplierTL: sup.licenseNo || "", supplierTRN: sup.trn || "", supplierEmail: sup.email || "", supplierAttn: sup.contactName || "",
-      entity: entObj.short || "", entityName: entObj.name || "MA Group – Marvellous Art LLC",
+      entity: entObj.short || "", entityName: entObj.name || "MA Group – Marvellous Art LLC", entityTRN: entityTRN(entObj),
       project: b.project || "", location: b.location || "", client: b.client || "",
       quotationRef: b.quotationRef || "", quotationDate: b.quotationDate || "",
       scopeTitle: b.scopeTitle || "", scope: b.scope || "", amount,
@@ -14307,7 +14355,7 @@ var api_default = async (req, context) => {
       const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
       if (sup) { rec.supplierId = sup.id; rec.supplierName = sup.name; rec.supplierTL = sup.licenseNo || ""; rec.supplierTRN = sup.trn || ""; rec.supplierEmail = sup.email || ""; rec.supplierAttn = sup.contactName || ""; }
     }
-    if (b.entity !== void 0) { const entObj = (settings.entities || []).find((e) => e.short === b.entity); if (entObj) { rec.entity = entObj.short; rec.entityName = entObj.name; } }
+    if (b.entity !== void 0) { const entObj = (settings.entities || []).find((e) => e.short === b.entity); if (entObj) { rec.entity = entObj.short; rec.entityName = entObj.name; rec.entityTRN = entityTRN(entObj); } }
     rec.amount = amount;
     for (const k of ["project", "location", "client", "quotationRef", "quotationDate", "scopeTitle", "scope", "completion", "commencement", "perfValidity", "perfSecurityType", "advGuaranteeType"]) {
       if (b[k] !== void 0) rec[k] = typeof b[k] === "string" ? b[k] : b[k];
