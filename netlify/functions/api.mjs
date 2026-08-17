@@ -14618,11 +14618,28 @@ var api_default = async (req, context) => {
     const targets = only ? allVendors.filter((v) => only.includes(v.id)) : allVendors;
     const subject = `Request for Quotation — ${rec.rfqNo}${rec.project ? " — " + rec.project : ""}${rec.dueDate ? " — reply by " + emDate(rec.dueDate) : ""}`;
     let sent = 0; let lastStatus = "";
-    for (const v of targets) {
-      if (validEmail(v.email)) {
-        const html = buildRfqHtml(rec, cfg, v);
-        const r = await sendMail(s, cfg, { type: "rfq", to: v.email.trim(), toName: v.contactName || v.name, subject, html, attachments });
-        if (r.status === "sent" || r.status === "logged") sent++;
+    if (only) {
+      // Targeted single-vendor send (e.g. after a WhatsApp email capture):
+      // addressed personally, one recipient, no privacy concern.
+      for (const v of targets) {
+        if (validEmail(v.email)) {
+          const html = buildRfqHtml(rec, cfg, v);
+          const r = await sendMail(s, cfg, { type: "rfq", to: v.email.trim(), toName: v.contactName || v.name, subject, html, attachments });
+          if (r.status === "sent" || r.status === "logged") sent++;
+          lastStatus = r.status;
+        }
+      }
+    } else {
+      // Full inquiry: one email with every selected vendor in BCC, so no vendor
+      // can see another vendor's email address. Batched to respect SMTP limits.
+      const emails = [...new Set(allVendors.filter((v) => validEmail(v.email)).map((v) => v.email.trim()))];
+      if (!emails.length) return err("None of the selected vendors have an email — use the WhatsApp / call list instead", 400);
+      const html = buildRfqHtml(rec, cfg, null);
+      const CHUNK = 50;
+      for (let i = 0; i < emails.length; i += CHUNK) {
+        const grp = emails.slice(i, i + CHUNK);
+        const r = await sendMail(s, cfg, { type: "rfq", to: cfg.from, toName: "MA Group Procurement", subject, html, attachments, bcc: grp });
+        if (r.status === "sent" || r.status === "logged") sent += grp.length;
         lastStatus = r.status;
       }
     }

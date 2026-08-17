@@ -2825,7 +2825,7 @@ async function procIssue(){
   $("#iw_file").onchange=async()=>{ const inp=$("#iw_file"); if(!inp.files.length)return; try{ const sv=await ensureSaved(); if(!sv){inp.value="";return;} for(const f of inp.files){ if(f.size>7*1024*1024){toast(f.name+" exceeds 7 MB — skipped");continue;} toast("Uploading "+f.name+"…"); const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);}); const rr=await api("rfq/"+IW.id+"/attach",{method:"POST",body:{name:f.name,type:f.type,data}}); IW.files=rr.files; } inp.value=""; renderFiles(); toast("Attached"); }catch(e){toast(e.message);} };
   $("#iw_send").onclick=async()=>{ try{ const sv=await ensureSaved(); if(!sv)return; if(!(IW.vendorIds||[]).length){toast("Select at least one vendor");return;}
     const sel=IW.vendorIds; const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length;
-    if(!confirm(`Send RFQ ${IW.rfqNo} to ${withE} vendor(s) by email now?\n${sel.length-withE} vendor(s) have no email and will appear on a call list.`))return;
+    if(!confirm(`Send RFQ ${IW.rfqNo} to ${withE} vendor(s) by email now?\nAll recipients are placed in BCC — no vendor sees another's email address.\n${sel.length-withE} vendor(s) have no email and will appear on the WhatsApp / call list.`))return;
     toast("Sending inquiries…"); const r=await api("rfq/"+IW.id+"/send",{method:"POST"});
     IW.status="Sent"; const i=RFQS.findIndex(x=>x.id===IW.id); const rec=await api("rfq/"+IW.id); if(i>=0)RFQS[i]=rec; else RFQS.unshift(rec);
     const noEmail=(IW.vendorIds||[]).map(id=>procVById(id)).filter(v=>v&&!/@/.test(v.email||""));
@@ -2887,7 +2887,7 @@ async function rfqDetail(){
   $("#rd_back").onclick=()=>{ RFQ_CUR=null; procRfqs(); };
   $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400); }catch(e){toast(e.message);} };
   if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
-  if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
+  if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?\nAll recipients are in BCC — addresses stay private.`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
   b.querySelectorAll(".rd_file").forEach(a=>a.onclick=e=>{ e.preventDefault(); openRfqFile(r.id,a.dataset.i,a.dataset.n); });
   wireWa($("#rd_wa"),r);
   b.querySelectorAll("tr[data-vend]").forEach(row=>{ const vid=row.dataset.vend;
