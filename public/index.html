@@ -677,12 +677,18 @@ function certForm(c){
     const recalc=()=>{ let tot=0; host.querySelectorAll(".boqq").forEach(inp=>{ const amt=num(inp.value)*num(inp.dataset.rate); tot+=amt; const cell=inp.closest("tr").querySelector(".boqamt"); if(cell)cell.textContent=fmt(amt); }); const el=$("#boqTotal"); if(el)el.textContent=fmt(tot); };
     host.querySelectorAll(".boqq").forEach(inp=>inp.oninput=recalc); recalc();
     $("#boqEdit").onclick=(e)=>{ e.preventDefault(); boqEditor(); }; };
-  const boqEditor=()=>{ const host=$("#w_boq"); const items=BOQ.length?BOQ.slice():[{ref:"1",description:"",unit:"",rate:0,qty:0}];
+  const boqEditor=(seed)=>{ const host=$("#w_boq"); const items=(seed&&seed.length)?seed:(BOQ.length?BOQ.slice():[{ref:"1",description:"",unit:"",rate:0,qty:0}]);
     const row=(it,i)=>`<tr><td><input class="be_ref" value="${esc(it.ref||String(i+1))}" style="width:50px"></td><td><input class="be_desc" value="${esc(it.description||"")}" style="width:230px"></td><td><input class="be_unit" value="${esc(it.unit||"")}" style="width:60px"></td><td><input class="be_rate" type="number" step="0.01" value="${it.rate||0}" style="width:90px"></td><td><input class="be_qty" type="number" step="0.01" value="${it.qty||0}" style="width:80px"></td><td><a href="#" class="be_del">✕</a></td></tr>`;
-    host.innerHTML=`<div class="note" style="margin:0 0 6px"><b>Define the rate schedule (BOQ)</b> — one row per item: ref, description, unit, unit rate, contract quantity. Save, then measure quantities done on each certificate.</div>
+    host.innerHTML=`<div class="note" style="margin:0 0 6px"><b>Define the rate schedule (BOQ)</b> — one row per item: ref, description, unit, unit rate, contract quantity. Or <b>import it from the LPO / Purchase Order PDF</b>. Save, then measure quantities done on each certificate.</div>
+      <div class="flex" style="gap:8px;margin-bottom:6px"><button class="btn gold" id="beImport">⭳ Import from LPO (PDF)</button><input type="file" id="beFile" accept="application/pdf,.pdf" style="display:none"><span class="muted" id="beImpInfo"></span></div>
       <div style="overflow-x:auto"><table id="beTbl"><tr><th>Ref</th><th>Description</th><th>Unit</th><th class="num">Rate</th><th class="num">Contract Qty</th><th></th></tr>${items.map(row).join("")}</table></div>
       <div class="flex" style="gap:8px;margin-top:6px"><button class="btn ghost" id="beAdd">+ Add item</button><button class="btn green" id="beSave">Save schedule</button><button class="btn ghost" id="beCancel">Cancel</button></div>`;
     const bind=()=>host.querySelectorAll(".be_del").forEach(a=>a.onclick=(e)=>{ e.preventDefault(); a.closest("tr").remove(); }); bind();
+    $("#beImport").onclick=()=>$("#beFile").click();
+    $("#beFile").onchange=async ()=>{ const f=$("#beFile").files[0]; if(!f) return; $("#beImpInfo").textContent="Reading "+f.name+"…";
+      try{ const lines=await parseLpoPdf(f); if(!lines.length){ $("#beImpInfo").textContent=""; toast("No rate items found in that PDF — check it's the itemised LPO, or enter manually"); return; }
+        $("#beImpInfo").textContent="Imported "+lines.length+" item(s) from "+f.name+" — review & Save"; boqEditor(lines.map(l=>({ref:l.ref,description:l.description,unit:l.unit,rate:l.rate,qty:l.qty||1})));
+      }catch(e){ $("#beImpInfo").textContent=""; toast("Could not read the LPO PDF: "+e.message); } };
     $("#beAdd").onclick=()=>{ const t=$("#beTbl"); const tr=document.createElement("tr"); tr.innerHTML=row({ref:String(t.rows.length),description:"",unit:"",rate:0,qty:0},t.rows.length-1); t.appendChild(tr); bind(); };
     $("#beCancel").onclick=()=>renderBoq();
     $("#beSave").onclick=async ()=>{ const rows=[...$("#beTbl").querySelectorAll("tr")].slice(1);
@@ -2343,6 +2349,36 @@ function renderBudget(){
 /* ---------- asset registry ---------- */
 let ASSET_STATE=null, ASSET_FILTERED=[];
 function loadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector(`script[src="${src}"]`)) return res(); const s=document.createElement("script"); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error("Could not load "+src)); document.head.appendChild(s); }); }
+// Parse an MA Group LPO / Purchase Order PDF into rate-schedule line items
+// (ref, description, unit, rate, contract qty). Columns are read by x-position.
+async function parseLpoPdf(file){
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+  try{ pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }catch(e){}
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const numRe=/^-?[\d,]+(\.\d+)?$/; let colQty=null,colRate=null; const items=[]; let cur=null;
+  const isTotals=(t)=>/sub\s*total|^total|terms|notes|authoriz|signature|thank you|bank details|grand total/i.test(t);
+  for(let p=1;p<=pdf.numPages;p++){ const page=await pdf.getPage(p); const tc=await page.getTextContent();
+    const byY={}; tc.items.forEach(it=>{ const x=it.transform[4], y=Math.round(it.transform[5]); const s=(it.str||"").trim(); if(!s)return; (byY[y]=byY[y]||[]).push({x,s}); });
+    const ys=Object.keys(byY).map(Number).sort((a,b)=>b-a);
+    for(const y of ys){ const cells=byY[y].sort((a,b)=>a.x-b.x); const joined=cells.map(c=>c.s).join(" ");
+      if(/\bQty\b/.test(joined)&&/\bRate\b/.test(joined)&&/\bAmount\b/.test(joined)){ cells.forEach(c=>{ if(c.s==="Qty")colQty=c.x; if(c.s==="Rate")colRate=c.x; }); continue; }
+      const first=cells[0]; const isNumLead=first&&/^\d+$/.test(first.s);
+      const nums=cells.filter(c=>numRe.test(c.s.replace(/,/g,"")));
+      const qcut=(colQty!=null?colQty-20:400);
+      if(isNumLead&&colRate!=null&&nums.length>=2){
+        const descCells=cells.filter(c=>c.x>first.x+2&&c.x<qcut);
+        const near=(cx)=>nums.reduce((b,c)=>Math.abs(c.x-cx)<Math.abs((b?b.x:1e9)-cx)?c:b,null);
+        const rc=near(colRate), qc=colQty!=null?near(colQty):null;
+        cur={ ref:first.s, description:descCells.map(c=>c.s).join(" ").trim(), rate:rc?parseFloat(rc.s.replace(/,/g,"")):0, qty:qc?parseFloat(qc.s.replace(/,/g,"")):1 };
+        items.push(cur);
+      } else if(cur){ const tc2=cells.filter(c=>c.x<qcut); const extra=tc2.map(c=>c.s).join(" ").trim();
+        if(extra&&!isTotals(extra)) cur.description=(cur.description+" "+extra).trim(); }
+    }
+  }
+  items.forEach((it,i)=>{ const m=it.description.match(/\(Per\s+([^)]+)\)/i); it.unit=m?m[1].trim():""; it.ref=String(i+1); });
+  return items.filter(it=>it.description&&it.rate>0);
+}
 async function vAssets(){
   const canAsset=["CEO","PM","Secretary","QS","Clerk"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Asset Registry</h2><span class="muted" id="asCount"></span>
