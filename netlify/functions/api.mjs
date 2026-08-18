@@ -13207,6 +13207,7 @@ async function dirUpsertFromSupplier(s, sup, ctx) {
   if (ctx.items) ctx.items.push(pv);
   return id;
 }
+var TARMAC_BOQ = [{"ref": "1", "description": "Concrete – Sulphate Content of Hardened Concrete / Dust Sample (BS 1881-124:2015+A1:2021)", "unit": "Test", "rate": 40.0, "qty": 1.0}, {"ref": "2", "description": "Ultrasonic Pulse Velocity Test (Min. 5 tests per visit) (BS EN 12504 Part 4)", "unit": "Test", "rate": 225.0, "qty": 1.0}, {"ref": "3", "description": "Water Absorption Test on Hardened Concrete (BS 1881 Part 122:2011+A1:2020)", "unit": "Cube", "rate": 55.0, "qty": 1.0}, {"ref": "4", "description": "Chloride Content of Hardened Concrete / Dust Sample (BS 1881-124:2015+A1:2021)", "unit": "Test", "rate": 40.0, "qty": 1.0}, {"ref": "5", "description": "Compressive Strength of Cubes (BS 1881 Part 116:83 AMD 6097-89 & 6720-91)", "unit": "Cube", "rate": 10.0, "qty": 1.0}, {"ref": "6", "description": "Compressive Strength of Drilled Concrete Cores (Core Test) (BS 1881-120 / BS EN 12504-1)", "unit": "Core", "rate": 125.0, "qty": 1.0}, {"ref": "7", "description": "Concrete Core Sampling & Compressive Strength Test (incl. sample prep) (BS EN 12504-1:2019)", "unit": "Core", "rate": 325.0, "qty": 1.0}, {"ref": "8", "description": "Depth of Penetration of Water Under Pressure (BS EN 12390 Part 8:2019)", "unit": "Cube", "rate": 50.0, "qty": 1.0}, {"ref": "9", "description": "Initial Surface Absorption on Concrete – ISAT (BS 1881 Part 208:1996)", "unit": "Cube", "rate": 50.0, "qty": 1.0}, {"ref": "10", "description": "Rapid Chloride Penetration of Concrete – RCP (ASTM C1202-22)", "unit": "Cube", "rate": 110.0, "qty": 1.0}, {"ref": "11", "description": "Schmidt Hammer / Rebound Hammer Test (Min. 5 tests per visit) (BS EN 12504-2:2012)", "unit": "Test", "rate": 120.0, "qty": 1.0}, {"ref": "12", "description": "In-Situ Density (Min. 4 tests per visit) (BS 1377 Part 9)", "unit": "Test", "rate": 50.0, "qty": 1.0}, {"ref": "13", "description": "Coating Thickness of Paint – Onsite (Min. 5 tests per visit) (ASTM D4138-07a / ISO 2808:2019)", "unit": "Test", "rate": 100.0, "qty": 1.0}, {"ref": "14", "description": "Mobilization Charge for Field Tests / Sample Collection", "unit": "Visit", "rate": 150.0, "qty": 1.0}, {"ref": "15", "description": "Pull Off Test of Paint (Min. 3 tests per visit) (ASTM D4541-17)", "unit": "Test", "rate": 250.0, "qty": 1.0}, {"ref": "16", "description": "Acid Soluble Chloride Content of Soil (BS 1377 Part 3)", "unit": "Test", "rate": 40.0, "qty": 1.0}, {"ref": "17", "description": "Acid Soluble Sulphate Content of Soil (BS 1377 Part 3)", "unit": "Test", "rate": 40.0, "qty": 1.0}, {"ref": "18", "description": "California Bearing Ratio – CBR (BS 1377 Part 2:2022 Cl.15)", "unit": "Test", "rate": 120.0, "qty": 1.0}, {"ref": "19", "description": "Dry Density / Optimum Moisture Content Relationship (BS 1377 Part 4:1990 / BS 1377-2:2022)", "unit": "Test", "rate": 100.0, "qty": 1.0}, {"ref": "20", "description": "Level Confirmation", "unit": "No.", "rate": 200.0, "qty": 1.0}, {"ref": "21", "description": "Liquid Limit, Plastic Limit & Plasticity Index (BS 1377 Part 2 / BS EN ISO 17892-12)", "unit": "Test", "rate": 70.0, "qty": 1.0}, {"ref": "22", "description": "Plate Load Test (reaction load by Client) (BS 1377 Part 9:1990)", "unit": "Test", "rate": 385.0, "qty": 1.0}, {"ref": "23", "description": "Bend Test on Reinforcement Steel Bars (up to 32mm dia) (BS 4449:2005+A3:2016)", "unit": "Specimen", "rate": 30.0, "qty": 1.0}, {"ref": "24", "description": "Chemical Testing of Steel (C,S,P,N & CEV) – Optical Emission (ASTM E415)", "unit": "Specimen", "rate": 275.0, "qty": 1.0}, {"ref": "25", "description": "Pull Out Test of Steel Bar (up to 25mm dia, Min. 3 tests per visit) (BS 5080 Part 1)", "unit": "Test", "rate": 200.0, "qty": 1.0}, {"ref": "26", "description": "Rebend Test on Reinforcement Steel Bars (up to 32mm dia) (BS 4449:2005+A3:2016)", "unit": "Specimen", "rate": 32.0, "qty": 1.0}, {"ref": "27", "description": "Tensile Test on Reinforcement Steel Bars (up to 32mm dia) (BS 4449:2005+A3:2016 / BS EN ISO 15630-1)", "unit": "Specimen", "rate": 48.0, "qty": 1.0}];
 async function ensureInit() {
   const s = store();
   let settings = await s.get("settings", { type: "json" });
@@ -13406,6 +13407,28 @@ async function ensureInit() {
       }
     } catch (e) {}
     settings.contractPerProjectV1 = true;
+    await s.setJSON("settings", settings);
+  }
+  if (!settings.tarmacBoqV1) {
+    try {
+      const sups = await getAllJSON(s, "supplier/");
+      const t = sups.find(x => /tarmac/i.test(x.name || ""));
+      if (t) {
+        let proj = (t.project && /squar/i.test(t.project)) ? t.project : "";
+        if (!proj) { const p = (settings.projects || []).find(p => /squar/i.test(p.name || "")); proj = p ? p.name : (t.project || ""); }
+        if (proj) {
+          const key = supProjKey(t.id, proj);
+          let rec = await s.get(key, { type: "json" }) || { supplierId: t.id, project: proj, contractType: "Rate", contractValue: 0, advanceAmount: 0, advanceRecoveryRate: 0, retentionPct: num(t.retentionPct), dlpMonths: num(t.dlpMonths), vatPct: num(t.vatPct) || 0.05, createdAt: now() };
+          if (!(Array.isArray(rec.boq) && rec.boq.length)) {
+            rec.boq = TARMAC_BOQ.map(l => ({ ref: l.ref, description: l.description, unit: l.unit, rate: num(l.rate), qty: num(l.qty) }));
+            rec.contractType = "Rate"; rec.docNo = rec.docNo || "MAG/PO-00179";
+            rec.boqValue = r2(rec.boq.reduce((a, l) => a + r2(num(l.qty) * num(l.rate)), 0)); rec.updatedAt = now();
+            await s.setJSON(key, rec);
+          }
+        }
+      }
+    } catch (e) {}
+    settings.tarmacBoqV1 = true;
     await s.setJSON("settings", settings);
   }
   return { settings, users };
