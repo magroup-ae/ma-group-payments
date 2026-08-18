@@ -695,12 +695,12 @@ function certForm(c){
     const rate=((t?t.contractType:(sp&&sp.contractType))||"")==="Rate";
     const perInvoice = !BOQMODE && (rate || !(cv>0));
     const retP=t?t.retentionPct:(sp&&sp.retentionPct), vatP=t?t.vatPct:(sp&&sp.vatPct), advA=t?t.advanceAmount:(sp&&sp.advanceAmount), advR=t?t.advanceRecoveryRate:(sp&&sp.advanceRecoveryRate), docNo=(t&&t.docNo)||(sp&&sp.lpoRef);
-    const setupLink = rate ? ` &nbsp;<a href="#" id="boqSetup">${BOQMODE?"Manage rate schedule":"Set up rate schedule (BOQ)"}</a>` : "";
+    const setupLink = ` &nbsp;·&nbsp;<a href="#" id="boqSetup">${BOQMODE?"Manage rate schedule (BOQ)":"Use BOQ / rate schedule"}</a>`;
     $("#supInfo").innerHTML = sp?(BOQMODE
       ?`<b>Rate contract — ${esc(proj)} (BOQ, ${BOQ.length} item${BOQ.length===1?"":"s"})</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}${setupLink}`
       :(perInvoice
         ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract for this project)"}</b> · certify the submitted invoice amount · Retention ${pct(retP)} · VAT ${pct(vatP)} · Ref ${esc(docNo||"—")}${setupLink}`
-        :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}`)):"";
+        :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}${setupLink}`)):"";
     $("#w_workPct").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_variations").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_invoiceAmount").style.display=(perInvoice&&!BOQMODE)?"":"none";
     $("#w_boq").style.display=BOQMODE?"":"none";
     $("#progH").textContent=BOQMODE?"Measurement this certificate (BOQ)":(perInvoice?"This certificate (per invoice)":"Progress this certificate");
