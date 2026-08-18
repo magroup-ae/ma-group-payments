@@ -13431,6 +13431,25 @@ async function ensureInit() {
     settings.tarmacBoqV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Recompute BOQ / rate-schedule certificates under the corrected rule: a rate /
+  // price-list contract (e.g. a testing lab) values each certificate per-invoice and
+  // never deducts another invoice's previously-certified amount. Fixed-value measured
+  // BOQs are unaffected (they stay cumulative), so this is safe and idempotent.
+  if (!settings.boqPerInvoiceV1) {
+    try {
+      const certs = await getAllJSON(s, "cert/");
+      for (const c of certs) {
+        if (!c || c.kind === "advance") continue;
+        if (!(Array.isArray(c.lines) && c.lines.length)) continue;
+        const sp = await s.get("supplier/" + c.supplierId, { type: "json" });
+        await recompute(c, sp);
+        await s.setJSON("cert/" + c.no, c);
+        try { await upsertCertExpense(s, c); } catch (e) {}
+      }
+    } catch (e) {}
+    settings.boqPerInvoiceV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
@@ -13469,9 +13488,13 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   // certificates are deducted), just measured by quantity instead of a % or lump sum.
   const hasLines = Array.isArray(c.lines) && c.lines.length > 0;
   const boqValue = hasLines ? r2(c.lines.reduce((a, l) => a + r2(num(l.qty) * num(l.rate)), 0)) : 0;
-  // Per-invoice certification: rate/services contracts with NO BOQ, and any supplier
-  // with no fixed contract value — each certificate stands alone against the invoice.
-  const perInvoice = !hasLines && (isRate || adjusted <= 0);
+  // Per-invoice certification — each certificate stands ALONE against its own invoice,
+  // nothing previously certified is deducted:
+  //   • rate / price-list contracts (a testing lab, a call-off order) whether or not a
+  //     BOQ price list is attached — every invoice bills its own selected items; and
+  //   • any supplier with no fixed contract value.
+  // A BOQ attached to a FIXED-value contract stays cumulative (measured subcontract).
+  const perInvoice = isRate || adjusted <= 0;
   const cumValue = hasLines ? boqValue : (perInvoice ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct)));
   const gross = r2(cumValue + num(c.materialsOnSite));
   const retention = r2(gross * num(c.retentionPct));
