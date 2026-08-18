@@ -14381,25 +14381,46 @@ ${MAH_CSS}
 function supProjKey(supplierId, project) {
   return "supproj/" + String(supplierId) + "__" + String(project || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
 }
+// A supplier's LPO rate schedule that we pre-load so the IPC only needs quantity
+// selection. Keyed by a matcher on the supplier name + the LPO items + doc ref.
+const LPO_RATE_SCHEDULES = [
+  { match: /tarmac/i, docNo: "MAG/PO-00179", items: TARMAC_BOQ }
+];
+function lpoScheduleFor(sup) {
+  const nm = String((sup && sup.name) || "");
+  return LPO_RATE_SCHEDULES.find((x) => x.match.test(nm)) || null;
+}
 async function getContractTerms(s, supplierId, project) {
   let rec = null;
   try { rec = await s.get(supProjKey(supplierId, project), { type: "json" }); } catch {}
   const sup = await s.get("supplier/" + supplierId, { type: "json" }) || {};
-  if (rec) return {
+  const sched = lpoScheduleFor(sup);
+  const applySched = (out) => {
+    // If this supplier has a known LPO rate schedule and no BOQ is stored yet,
+    // surface the LPO items directly so the IPC shows them for selection —
+    // regardless of which project key the contract was saved under.
+    if (sched && !(Array.isArray(out.boq) && out.boq.length)) {
+      out.boq = sched.items.map((l) => ({ ref: l.ref, description: l.description, unit: l.unit, rate: num(l.rate), qty: num(l.qty) }));
+      out.contractType = "Rate";
+      if (!out.docNo) out.docNo = sched.docNo;
+    }
+    return out;
+  };
+  if (rec) return applySched({
     source: "contract", supplierId, project,
     contractValue: num(rec.contractValue), advanceAmount: num(rec.advanceAmount), advanceRecoveryRate: num(rec.advanceRecoveryRate),
     retentionPct: num(rec.retentionPct), dlpMonths: num(rec.dlpMonths),
     vatPct: rec.vatPct != null ? num(rec.vatPct) : (num(sup.vatPct) || 0.05),
     contractType: rec.contractType || "Fixed", docNo: rec.docNo || "", awardId: rec.awardId || "", signDate: rec.signDate || "",
     boq: Array.isArray(rec.boq) ? rec.boq : []
-  };
-  return {
+  });
+  return applySched({
     source: "supplier", supplierId, project,
     contractValue: num(sup.contractValue), advanceAmount: num(sup.advanceAmount), advanceRecoveryRate: num(sup.advanceRecoveryRate),
     retentionPct: num(sup.retentionPct), dlpMonths: num(sup.dlpMonths), vatPct: num(sup.vatPct) || 0.05,
     contractType: sup.contractType || (num(sup.contractValue) > 0 ? "Fixed" : "Rate"), docNo: sup.lpoRef || "", awardId: "", signDate: sup.signDate || "",
     boq: []
-  };
+  });
 }
 // ---- Contract → Project → Payment Certificate → Expenses automation ----
 // When a subcontract/LOA is signed, copy its commercial terms onto the supplier
