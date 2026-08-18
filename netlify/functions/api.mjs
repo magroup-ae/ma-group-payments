@@ -13441,12 +13441,15 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   prevContra = num(prevContra);
   const isRate = c.basis === "rate";
   const adjusted = isRate ? 0 : num(c.originalValue) + num(c.variations);
-  // Per-invoice certification: rate/services contracts, AND any supplier with no
-  // fixed contract value (equipment rental, one-off services, testing, etc.).
-  // Each certificate stands alone, certified against the submitted invoice amount
-  // — no cumulative % of a contract sum and no deduction of previous certificates.
-  const perInvoice = isRate || adjusted <= 0;
-  const cumValue = perInvoice ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct));
+  // BOQ / rate-schedule measurement: value the certificate from the CUMULATIVE
+  // quantity done × rate per line item. This is a cumulative contract (previous
+  // certificates are deducted), just measured by quantity instead of a % or lump sum.
+  const hasLines = Array.isArray(c.lines) && c.lines.length > 0;
+  const boqValue = hasLines ? r2(c.lines.reduce((a, l) => a + r2(num(l.qty) * num(l.rate)), 0)) : 0;
+  // Per-invoice certification: rate/services contracts with NO BOQ, and any supplier
+  // with no fixed contract value — each certificate stands alone against the invoice.
+  const perInvoice = !hasLines && (isRate || adjusted <= 0);
+  const cumValue = hasLines ? boqValue : (perInvoice ? r2(num(c.invoiceAmount)) : r2(adjusted * num(c.workPct)));
   const gross = r2(cumValue + num(c.materialsOnSite));
   const retention = r2(gross * num(c.retentionPct));
   const afterRet = r2(gross - retention);
@@ -14364,13 +14367,15 @@ async function getContractTerms(s, supplierId, project) {
     contractValue: num(rec.contractValue), advanceAmount: num(rec.advanceAmount), advanceRecoveryRate: num(rec.advanceRecoveryRate),
     retentionPct: num(rec.retentionPct), dlpMonths: num(rec.dlpMonths),
     vatPct: rec.vatPct != null ? num(rec.vatPct) : (num(sup.vatPct) || 0.05),
-    contractType: rec.contractType || "Fixed", docNo: rec.docNo || "", awardId: rec.awardId || "", signDate: rec.signDate || ""
+    contractType: rec.contractType || "Fixed", docNo: rec.docNo || "", awardId: rec.awardId || "", signDate: rec.signDate || "",
+    boq: Array.isArray(rec.boq) ? rec.boq : []
   };
   return {
     source: "supplier", supplierId, project,
     contractValue: num(sup.contractValue), advanceAmount: num(sup.advanceAmount), advanceRecoveryRate: num(sup.advanceRecoveryRate),
     retentionPct: num(sup.retentionPct), dlpMonths: num(sup.dlpMonths), vatPct: num(sup.vatPct) || 0.05,
-    contractType: sup.contractType || (num(sup.contractValue) > 0 ? "Fixed" : "Rate"), docNo: sup.lpoRef || "", awardId: "", signDate: sup.signDate || ""
+    contractType: sup.contractType || (num(sup.contractValue) > 0 ? "Fixed" : "Rate"), docNo: sup.lpoRef || "", awardId: "", signDate: sup.signDate || "",
+    boq: []
   };
 }
 // ---- Contract → Project → Payment Certificate → Expenses automation ----
@@ -15421,6 +15426,28 @@ var api_default = async (req, context) => {
     if (!supplierId) return err("supplier required");
     return json(await getContractTerms(s, supplierId, project));
   }
+  if (path === "contract-boq" && req.method === "POST") {
+    // Save the rate schedule (BOQ) for a (supplier, project) contract.
+    if (!can("create") && !can("contracts")) return err("Not permitted", 403);
+    const b = await req.json();
+    const supplierId = String(b.supplierId || "");
+    const project = String(b.project || "");
+    if (!supplierId || !project) return err("Supplier and project are required");
+    const key = supProjKey(supplierId, project);
+    let rec = await s.get(key, { type: "json" });
+    const sup = await s.get("supplier/" + supplierId, { type: "json" }) || {};
+    if (!rec) rec = { supplierId, project, contractType: "Rate", contractValue: 0, advanceAmount: 0, advanceRecoveryRate: 0, retentionPct: num(sup.retentionPct), dlpMonths: num(sup.dlpMonths), vatPct: num(sup.vatPct) || 0.05, createdAt: now() };
+    const items = Array.isArray(b.boq) ? b.boq.map((l, i) => ({
+      ref: String(l.ref || (i + 1)), description: String(l.description || ""), unit: String(l.unit || ""),
+      rate: num(l.rate), qty: num(l.qty)
+    })).filter((l) => l.description || l.rate > 0) : [];
+    rec.boq = items;
+    rec.contractType = "Rate";
+    rec.boqValue = r2(items.reduce((a, l) => a + r2(num(l.qty) * num(l.rate)), 0));
+    rec.updatedAt = now();
+    await s.setJSON(key, rec);
+    return json({ ok: true, boq: items, boqValue: rec.boqValue });
+  }
   if (path === "cert" && req.method === "POST") {
     if (!can("create")) return err("Only QS or CEO can create certificates", 403);
     const b = await req.json();
@@ -15474,6 +15501,7 @@ var api_default = async (req, context) => {
       invoiceAmount: num(b.invoiceAmount),
       variations: num(b.variations),
       workPct: num(b.workPct),
+      lines: Array.isArray(b.lines) ? b.lines.map((l, i) => ({ ref: String(l.ref || (i + 1)), description: String(l.description || ""), unit: String(l.unit || ""), rate: num(l.rate), contractQty: num(l.contractQty), qty: num(l.qty) })) : [],
       materialsOnSite: num(b.materialsOnSite),
       retentionPct: num(terms.retentionPct),
       advanceAmount: num(terms.advanceAmount),
@@ -15502,6 +15530,7 @@ var api_default = async (req, context) => {
     const b = await req.json();
     for (const f of ["date", "invoiceNo", "periodFrom", "periodTo", "notes", "project", "entity"]) if (b[f] !== void 0) c[f] = b[f];
     for (const f of ["variations", "workPct", "materialsOnSite", "contra", "invoiceAmount"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    if (b.lines !== void 0) c.lines = Array.isArray(b.lines) ? b.lines.map((l, i) => ({ ref: String(l.ref || (i + 1)), description: String(l.description || ""), unit: String(l.unit || ""), rate: num(l.rate), contractQty: num(l.contractQty), qty: num(l.qty) })) : [];
     const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
     if (sup && c.kind !== "advance") {
       // Refresh from the per-project contract, not the global supplier record.

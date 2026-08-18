@@ -658,30 +658,66 @@ function certForm(c){
     <div><label>Materials on site (AED)</label><input id="f_materialsOnSite" type="number" step="0.01" value="${c.materialsOnSite??0}"></div>
     <div><label>Contra / back-charges (AED)</label><input id="f_contra" type="number" step="0.01" value="${c.contra??0}"></div>
   </div>
+  <div id="w_boq" style="display:none;margin-top:6px"></div>
   <div class="note" id="calcNote" style="margin-top:8px">Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance.</div>
   <div style="height:14px"></div><div class="flex">
     <button class="btn green" id="saveBtn">${isNew?"Create draft":"Save changes"}</button>
     <button class="btn ghost" id="backBtn">Back</button></div></div>`;
+  let TERMS=null, BOQMODE=false, BOQ=[];
+  const priorLinesMap=()=>{ const supId=$("#f_supplierId").value, proj=$("#f_project").value;
+    const priors=(CERTS||[]).filter(x=>x&&x.supplierId===supId&&String(x.project||"")===String(proj)&&x.no!==(c&&c.no)&&x.status!=="Cancelled"&&Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
+    const m={}; if(priors[0]) priors[0].lines.forEach(l=>{ m[l.ref]=num(l.qty); }); return m; };
+  const gatherLines=()=>{ const out=[]; $("#w_boq").querySelectorAll(".boqq").forEach(inp=>{ out.push({ ref:inp.dataset.ref, description:inp.dataset.desc, unit:inp.dataset.unit, rate:num(inp.dataset.rate), contractQty:num(inp.dataset.cqty), qty:num(inp.value)||0 }); }); return out; };
+  const renderBoq=()=>{ const host=$("#w_boq"); if(!host) return; const prior=priorLinesMap();
+    const cur={}; if(Array.isArray(c.lines)) c.lines.forEach(l=>cur[l.ref]=num(l.qty));
+    const rows=BOQ.map((it,i)=>{ const ref=it.ref||String(i+1); const done=(cur[ref]!=null?cur[ref]:(prior[ref]!=null?prior[ref]:0));
+      return `<tr><td>${esc(ref)}</td><td>${esc(it.description||"")}</td><td>${esc(it.unit||"")}</td><td class="num">${fmt(it.rate)}</td><td class="num">${fmt(it.qty)}</td><td class="num" style="color:#7a8494">${fmt(prior[ref]||0)}</td><td><input class="boqq" data-ref="${esc(ref)}" data-rate="${it.rate}" data-desc="${esc(it.description||"")}" data-unit="${esc(it.unit||"")}" data-cqty="${it.qty}" type="number" step="0.01" value="${done}" style="width:90px;text-align:right"></td><td class="num boqamt">${fmt(num(done)*num(it.rate))}</td></tr>`;}).join("");
+    host.innerHTML=`<div class="note" style="margin:0 0 6px"><b>Rate schedule (BOQ)</b> — enter the <b>cumulative quantity done to date</b> for each item. Value = Σ(qty × rate); previous certificates are deducted automatically. &nbsp;<a href="#" id="boqEdit">Manage rate schedule</a></div>
+      <div style="overflow-x:auto"><table><tr><th>Ref</th><th>Description</th><th>Unit</th><th class="num">Rate</th><th class="num">Contract Qty</th><th class="num">Prev Qty</th><th>Cum Qty Done</th><th class="num">Amount</th></tr>${rows}<tr class="tot"><td colspan="7" style="text-align:right"><b>Cumulative measured value (this cert, gross)</b></td><td class="num"><b id="boqTotal">0</b></td></tr></table></div>`;
+    const recalc=()=>{ let tot=0; host.querySelectorAll(".boqq").forEach(inp=>{ const amt=num(inp.value)*num(inp.dataset.rate); tot+=amt; const cell=inp.closest("tr").querySelector(".boqamt"); if(cell)cell.textContent=fmt(amt); }); const el=$("#boqTotal"); if(el)el.textContent=fmt(tot); };
+    host.querySelectorAll(".boqq").forEach(inp=>inp.oninput=recalc); recalc();
+    $("#boqEdit").onclick=(e)=>{ e.preventDefault(); boqEditor(); }; };
+  const boqEditor=()=>{ const host=$("#w_boq"); const items=BOQ.length?BOQ.slice():[{ref:"1",description:"",unit:"",rate:0,qty:0}];
+    const row=(it,i)=>`<tr><td><input class="be_ref" value="${esc(it.ref||String(i+1))}" style="width:50px"></td><td><input class="be_desc" value="${esc(it.description||"")}" style="width:230px"></td><td><input class="be_unit" value="${esc(it.unit||"")}" style="width:60px"></td><td><input class="be_rate" type="number" step="0.01" value="${it.rate||0}" style="width:90px"></td><td><input class="be_qty" type="number" step="0.01" value="${it.qty||0}" style="width:80px"></td><td><a href="#" class="be_del">✕</a></td></tr>`;
+    host.innerHTML=`<div class="note" style="margin:0 0 6px"><b>Define the rate schedule (BOQ)</b> — one row per item: ref, description, unit, unit rate, contract quantity. Save, then measure quantities done on each certificate.</div>
+      <div style="overflow-x:auto"><table id="beTbl"><tr><th>Ref</th><th>Description</th><th>Unit</th><th class="num">Rate</th><th class="num">Contract Qty</th><th></th></tr>${items.map(row).join("")}</table></div>
+      <div class="flex" style="gap:8px;margin-top:6px"><button class="btn ghost" id="beAdd">+ Add item</button><button class="btn green" id="beSave">Save schedule</button><button class="btn ghost" id="beCancel">Cancel</button></div>`;
+    const bind=()=>host.querySelectorAll(".be_del").forEach(a=>a.onclick=(e)=>{ e.preventDefault(); a.closest("tr").remove(); }); bind();
+    $("#beAdd").onclick=()=>{ const t=$("#beTbl"); const tr=document.createElement("tr"); tr.innerHTML=row({ref:String(t.rows.length),description:"",unit:"",rate:0,qty:0},t.rows.length-1); t.appendChild(tr); bind(); };
+    $("#beCancel").onclick=()=>renderBoq();
+    $("#beSave").onclick=async ()=>{ const rows=[...$("#beTbl").querySelectorAll("tr")].slice(1);
+      const boq=rows.map(r=>({ ref:r.querySelector(".be_ref").value, description:r.querySelector(".be_desc").value, unit:r.querySelector(".be_unit").value, rate:+r.querySelector(".be_rate").value||0, qty:+r.querySelector(".be_qty").value||0 })).filter(x=>x.description||x.rate>0);
+      try{ await api("contract-boq",{method:"POST",body:{supplierId:$("#f_supplierId").value, project:$("#f_project").value, boq}}); toast("Rate schedule saved"); await showSup(); }catch(e){ toast(e.message); } }; };
   const showSup=async ()=>{ const supId=$("#f_supplierId").value, proj=$("#f_project").value; const sp=supById(supId)||sup;
     let t=null; try{ t=await api("contract-terms?supplier="+encodeURIComponent(supId)+"&project="+encodeURIComponent(proj)); }catch(e){}
+    TERMS=t; BOQ=(t&&Array.isArray(t.boq))?t.boq:[]; BOQMODE=BOQ.length>0;
     const cv=t?num(t.contractValue):num(sp&&sp.contractValue);
     const rate=((t?t.contractType:(sp&&sp.contractType))||"")==="Rate";
-    const perInvoice = rate || !(cv>0); // no fixed contract for THIS project → certify per invoice
+    const perInvoice = !BOQMODE && (rate || !(cv>0));
     const retP=t?t.retentionPct:(sp&&sp.retentionPct), vatP=t?t.vatPct:(sp&&sp.vatPct), advA=t?t.advanceAmount:(sp&&sp.advanceAmount), advR=t?t.advanceRecoveryRate:(sp&&sp.advanceRecoveryRate), docNo=(t&&t.docNo)||(sp&&sp.lpoRef);
-    $("#supInfo").innerHTML = sp?(perInvoice
-      ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract for this project)"}</b> · certify the submitted invoice amount · Retention ${pct(retP)} · VAT ${pct(vatP)} · Ref ${esc(docNo||"—")}`
-      :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)} · Advance AED ${fmt(advA)} @ ${pct(advR)} · Ref ${esc(docNo||"—")}`):"";
-    $("#w_workPct").style.display=perInvoice?"none":""; $("#w_variations").style.display=perInvoice?"none":""; $("#w_invoiceAmount").style.display=perInvoice?"":"none";
-    $("#progH").textContent=perInvoice?"This certificate (per invoice)":"Progress this certificate";
-    $("#calcNote").innerHTML=perInvoice
-      ?"<b>Per-invoice certification:</b> enter the <b>Invoice amount</b> — the certificate is valued at that amount (plus any materials, less retention/VAT). Use <b>Contra / back-charges only to deduct</b> money the supplier owes you; leave it 0 for a normal payment."
-      :"Contract value, retention %, VAT % and <b>advance recovery</b> come from <b>this project's contract</b>. Advance recovery = the contract's rate × this certificate's gross, capped at the remaining advance — scoped to this project only."; };
+    const setupLink = rate ? ` &nbsp;<a href="#" id="boqSetup">${BOQMODE?"Manage rate schedule":"Set up rate schedule (BOQ)"}</a>` : "";
+    $("#supInfo").innerHTML = sp?(BOQMODE
+      ?`<b>Rate contract — ${esc(proj)} (BOQ, ${BOQ.length} item${BOQ.length===1?"":"s"})</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}${setupLink}`
+      :(perInvoice
+        ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract for this project)"}</b> · certify the submitted invoice amount · Retention ${pct(retP)} · VAT ${pct(vatP)} · Ref ${esc(docNo||"—")}${setupLink}`
+        :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}`)):"";
+    $("#w_workPct").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_variations").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_invoiceAmount").style.display=(perInvoice&&!BOQMODE)?"":"none";
+    $("#w_boq").style.display=BOQMODE?"":"none";
+    $("#progH").textContent=BOQMODE?"Measurement this certificate (BOQ)":(perInvoice?"This certificate (per invoice)":"Progress this certificate");
+    $("#calcNote").innerHTML=BOQMODE
+      ?"<b>BOQ measurement:</b> enter the <b>cumulative quantity done</b> per item; the certificate values at Σ(qty × rate), less retention, advance recovery and previously-certified — all scoped to this project."
+      :(perInvoice
+        ?"<b>Per-invoice certification:</b> enter the <b>Invoice amount</b> — the certificate is valued at that amount (plus any materials, less retention/VAT). Use <b>Contra / back-charges only to deduct</b> money the supplier owes you; leave it 0 for a normal payment."
+        :"Contract value, retention %, VAT % and <b>advance recovery</b> come from <b>this project's contract</b>, scoped to this project only.");
+    if(BOQMODE) renderBoq();
+    if($("#boqSetup")) $("#boqSetup").onclick=(e)=>{ e.preventDefault(); $("#w_boq").style.display=""; boqEditor(); }; };
   showSup(); $("#f_supplierId").onchange=showSup; $("#f_project").onchange=showSup;
   $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
   $("#saveBtn").onclick=async ()=>{ const g=id=>$("#f_"+id).value;
     const body={ supplierId:g("supplierId"), project:g("project"), entity:g("entity"), invoiceNo:g("invoiceNo"),
       date:g("date"), periodFrom:g("periodFrom"), periodTo:g("periodTo"),
       variations:+g("variations")||0, workPct:(+g("workPct")||0)/100, invoiceAmount:+g("invoiceAmount")||0, materialsOnSite:+g("materialsOnSite")||0, contra:+g("contra")||0 };
+    if(BOQMODE) body.lines=gatherLines();
     try{ const d = isNew ? await api("cert",{method:"POST",body}) : await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body});
       toast(isNew?("Created "+d.no):"Saved"); await load(); openCert(d.no);
     }catch(e){ toast(e.message); } };
