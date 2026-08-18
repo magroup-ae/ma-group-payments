@@ -2619,6 +2619,7 @@ async function vAwards(){
           <button class="btn ghost aw_send" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">${a.status==="Issued"?"Send by email":"Re-send"}</button>
           ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark signed →</button>`:""}
           ${(a.status==="Countersigned"&&+a.advanceAmount>0&&!a.advanceCertNo)?`<button class="btn gold aw_adv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Process down payment</button>`:""}
+          ${(a.status==="Countersigned"&&!(+a.advanceAmount>0&&!a.advanceCertNo))?`<button class="btn ghost aw_sync" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Sync to supplier</button>`:""}
           ${a.advanceCertNo?`<button class="btn ghost aw_openipc" style="padding:4px 9px;font-size:12px">Open IPCs →</button>`:""}
           ${ME.role==="CEO"?`<button class="btn ghost aw_del" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px;color:var(--red)">Delete</button>`:""}
         </td></tr>`).join("")}</table></div>`;
@@ -2636,6 +2637,9 @@ async function vAwards(){
     h.querySelectorAll(".aw_adv").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id);
       if(!confirm(`Create the down-payment certificate for ${a.docNo} — AED ${fmt(a.advanceAmount)} + 5% VAT?`)) return;
       try{ toast("Processing…"); const r=await api("award/"+b.dataset.id+"/process-advance",{method:"POST"}); toast(r.advanceCreated?("Down payment "+r.advanceCertNo+" created"):(r.already?"Already created":"Terms synced")); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_sync").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id);
+      if(!confirm(`Apply ${a.docNo}'s terms (contract value, retention, advance recovery, DLP) to ${esc(a.supplierName)} so IPCs treat it as a fixed contract?`)) return;
+      try{ toast("Syncing…"); const r=await api("award/"+b.dataset.id+"/process-advance",{method:"POST"}); await load().catch(()=>{}); toast(r.advanceCreated?("Synced · down payment "+r.advanceCertNo+" created"):"Supplier synced — raise IPCs now"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_openipc").forEach(b=>b.onclick=()=>{ VIEW="certs"; CUR=null; render(); });
     h.querySelectorAll(".aw_del").forEach(b=>b.onclick=async ()=>{ if(!confirm("Delete this award document? This cannot be undone.")) return;
       try{ await api("award/"+b.dataset.id,{method:"DELETE"}); toast("Deleted"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });

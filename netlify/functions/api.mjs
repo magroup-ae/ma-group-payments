@@ -13375,6 +13375,25 @@ async function ensureInit() {
     settings.procSeedV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Retro-activate contracts that were countersigned before the automation existed:
+  // push their terms onto the supplier (so IPCs treat them as fixed contracts with
+  // retention/advance recovery) and create the down-payment certificate if an advance
+  // is due and none exists yet.
+  if (!settings.contractActivateV1) {
+    try {
+      const awards = await getAllJSON(s, "award/");
+      const sysMe = { id: "system", name: "system" };
+      for (const aw of awards) {
+        if (!aw || aw.status !== "Countersigned") continue;
+        const sup = await syncSupplierFromAward(s, aw);
+        if (sup && num(aw.advanceAmount) > 0 && !aw.advanceCertNo) {
+          try { await createAdvanceCertFromAward(s, aw, sup, sysMe); await s.setJSON("award/" + aw.id, aw); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    settings.contractActivateV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
