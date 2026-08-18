@@ -13394,6 +13394,20 @@ async function ensureInit() {
     settings.contractActivateV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Write per-project contract records for existing signed contracts, so each
+  // project's IPCs read ITS OWN contract (value, retention, advance) instead of the
+  // supplier's global fields.
+  if (!settings.contractPerProjectV1) {
+    try {
+      const awards = await getAllJSON(s, "award/");
+      for (const aw of awards) {
+        if (!aw || aw.status !== "Countersigned" || !aw.project) continue;
+        try { await syncSupplierFromAward(s, aw); } catch (e) {}
+      }
+    } catch (e) {}
+    settings.contractPerProjectV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
@@ -13436,10 +13450,13 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   const gross = r2(cumValue + num(c.materialsOnSite));
   const retention = r2(gross * num(c.retentionPct));
   const afterRet = r2(gross - retention);
-  let advanceRecovery = 0, advanceAmount = 0, advanceRate = 0;
-  if (supplier) {
-    advanceAmount = num(supplier.advanceAmount);
-    advanceRate = num(supplier.advanceRecoveryRate);
+  let advanceRecovery = 0;
+  // Advance terms are snapshotted onto the certificate at creation (per project), so
+  // they never read another project's contract. Fall back to the supplier only for
+  // legacy certs created before per-project snapshotting.
+  let advanceAmount = c.advanceAmount != null ? num(c.advanceAmount) : (supplier ? num(supplier.advanceAmount) : 0);
+  let advanceRate = c.advanceRate != null ? num(c.advanceRate) : (supplier ? num(supplier.advanceRecoveryRate) : 0);
+  {
     if (advanceAmount > 0 && advanceRate > 0) {
       if (perInvoice) {
         // Per-invoice supplier: recover the rate on THIS invoice's gross,
@@ -13456,7 +13473,7 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
         advanceRecovery = Math.max(0, r2(cumRecovery - recoveredSoFar));
       }
     }
-  } else advanceRecovery = num(c.advanceRecovery);
+  }
   // Net this certificate = cumulative value net of retention, cumulative advance
   // recovered and cumulative contra, minus what was previously certified. Using
   // cumulative advance/contra (not just this period's) prevents prior-period
@@ -13495,7 +13512,9 @@ async function recompute(c, supplier) {
     return c;
   }
   const priors = await certsBySupplier(c.supplierId, c.no);
-  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0) && p.kind !== "advance");
+  // Scope the cumulative running totals to the SAME PROJECT — a subcontractor's
+  // certificates on other projects must never affect this project's certificate.
+  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0) && p.kind !== "advance" && String(p.project || "") === String(c.project || ""));
   const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
   const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
   const prevContra = r2(before.reduce((a, p) => a + num(p.contra), 0));
@@ -14329,6 +14348,31 @@ ${MAH_CSS}
   ${mahFooter(ent)}
 </div></body></html>`;
 }
+// ---- Per-project contract terms ----
+// A subcontractor can hold DIFFERENT contracts on DIFFERENT projects. Terms and the
+// cumulative payment history must therefore be scoped per (supplier, project), never
+// pooled on the supplier record. This key stores each contract's terms.
+function supProjKey(supplierId, project) {
+  return "supproj/" + String(supplierId) + "__" + String(project || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+}
+async function getContractTerms(s, supplierId, project) {
+  let rec = null;
+  try { rec = await s.get(supProjKey(supplierId, project), { type: "json" }); } catch {}
+  const sup = await s.get("supplier/" + supplierId, { type: "json" }) || {};
+  if (rec) return {
+    source: "contract", supplierId, project,
+    contractValue: num(rec.contractValue), advanceAmount: num(rec.advanceAmount), advanceRecoveryRate: num(rec.advanceRecoveryRate),
+    retentionPct: num(rec.retentionPct), dlpMonths: num(rec.dlpMonths),
+    vatPct: rec.vatPct != null ? num(rec.vatPct) : (num(sup.vatPct) || 0.05),
+    contractType: rec.contractType || "Fixed", docNo: rec.docNo || "", awardId: rec.awardId || "", signDate: rec.signDate || ""
+  };
+  return {
+    source: "supplier", supplierId, project,
+    contractValue: num(sup.contractValue), advanceAmount: num(sup.advanceAmount), advanceRecoveryRate: num(sup.advanceRecoveryRate),
+    retentionPct: num(sup.retentionPct), dlpMonths: num(sup.dlpMonths), vatPct: num(sup.vatPct) || 0.05,
+    contractType: sup.contractType || (num(sup.contractValue) > 0 ? "Fixed" : "Rate"), docNo: sup.lpoRef || "", awardId: "", signDate: sup.signDate || ""
+  };
+}
 // ---- Contract → Project → Payment Certificate → Expenses automation ----
 // When a subcontract/LOA is signed, copy its commercial terms onto the supplier
 // so every progress IPC applies advance recovery + retention automatically.
@@ -14351,6 +14395,17 @@ async function syncSupplierFromAward(s, award) {
   sup.incomplete = !(String(sup.licenseNo || "").trim() && String(sup.trn || "").trim());
   sup.updatedAt = now();
   await s.setJSON("supplier/" + sup.id, sup);
+  // Authoritative per-project contract terms — this is what the IPC engine reads, so
+  // each project's payments use ITS OWN contract and never another project's.
+  if (award.project) {
+    await s.setJSON(supProjKey(sup.id, award.project), {
+      supplierId: sup.id, project: award.project, awardId: award.id, docNo: award.docNo,
+      contractType: "Fixed", contractValue: num(award.amount), advanceAmount: num(award.advanceAmount),
+      advanceRecoveryRate: sup.advanceRecoveryRate, retentionPct: sup.retentionPct, dlpMonths: sup.dlpMonths,
+      vatPct: num(sup.vatPct) || 0.05, entity: award.entity || sup.entity || "", signDate: sup.signDate,
+      createdAt: now(), updatedAt: now()
+    });
+  }
   return sup;
 }
 // Create the down-payment (advance) certificate against a signed contract. It is a
@@ -15360,6 +15415,12 @@ var api_default = async (req, context) => {
     const c = await s.get("cert/" + decodeURIComponent(certGet[1]), { type: "json" });
     return c ? json(c) : err("Not found", 404);
   }
+  if (path === "contract-terms" && req.method === "GET") {
+    const supplierId = url.searchParams.get("supplier") || "";
+    const project = url.searchParams.get("project") || "";
+    if (!supplierId) return err("supplier required");
+    return json(await getContractTerms(s, supplierId, project));
+  }
   if (path === "cert" && req.method === "POST") {
     if (!can("create")) return err("Only QS or CEO can create certificates", 403);
     const b = await req.json();
@@ -15376,6 +15437,7 @@ var api_default = async (req, context) => {
     const st = await s.get("settings", { type: "json" });
     const project = b.project || sup.project || "";
     const entity = b.entity || sup.entity || settings.entities[0].short;
+    const terms = await getContractTerms(s, sup.id, project);
     let maxSeq = st.seq || 0;
     {
       const { blobs } = await s.list({ prefix: "cert/" });
@@ -15407,15 +15469,18 @@ var api_default = async (req, context) => {
       trade: sup.trade || sup.category || b.trade || "",
       periodFrom: b.periodFrom || "",
       periodTo: b.periodTo || "",
-      originalValue: num(sup.contractValue),
-      basis: sup.contractType === "Rate" ? "rate" : "fixed",
+      originalValue: num(terms.contractValue),
+      basis: terms.contractType === "Rate" ? "rate" : "fixed",
       invoiceAmount: num(b.invoiceAmount),
       variations: num(b.variations),
       workPct: num(b.workPct),
       materialsOnSite: num(b.materialsOnSite),
-      retentionPct: num(sup.retentionPct),
+      retentionPct: num(terms.retentionPct),
+      advanceAmount: num(terms.advanceAmount),
+      advanceRate: num(terms.advanceRecoveryRate),
+      contractDocNo: terms.docNo || "",
       contra: num(b.contra),
-      vatPct: num(sup.vatPct),
+      vatPct: num(terms.vatPct),
       notes: b.notes || "",
       status: "Draft",
       payment: null,
@@ -15438,12 +15503,17 @@ var api_default = async (req, context) => {
     for (const f of ["date", "invoiceNo", "periodFrom", "periodTo", "notes", "project", "entity"]) if (b[f] !== void 0) c[f] = b[f];
     for (const f of ["variations", "workPct", "materialsOnSite", "contra", "invoiceAmount"]) if (b[f] !== void 0) c[f] = num(b[f]);
     const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
-    if (sup) {
-      c.originalValue = num(sup.contractValue);
-      c.basis = sup.contractType === "Rate" ? "rate" : "fixed";
-      c.retentionPct = num(sup.retentionPct);
-      c.vatPct = num(sup.vatPct);
-      c.lpoRef = sup.lpoRef;
+    if (sup && c.kind !== "advance") {
+      // Refresh from the per-project contract, not the global supplier record.
+      const terms = await getContractTerms(s, c.supplierId, c.project);
+      c.originalValue = num(terms.contractValue);
+      c.basis = terms.contractType === "Rate" ? "rate" : "fixed";
+      c.retentionPct = num(terms.retentionPct);
+      c.vatPct = num(terms.vatPct);
+      c.advanceAmount = num(terms.advanceAmount);
+      c.advanceRate = num(terms.advanceRecoveryRate);
+      c.contractDocNo = terms.docNo || c.contractDocNo || "";
+      c.lpoRef = terms.docNo || sup.lpoRef;
       c.supplier = sup.name;
     }
     await recompute(c, sup);

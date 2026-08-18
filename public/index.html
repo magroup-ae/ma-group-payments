@@ -662,18 +662,21 @@ function certForm(c){
   <div style="height:14px"></div><div class="flex">
     <button class="btn green" id="saveBtn">${isNew?"Create draft":"Save changes"}</button>
     <button class="btn ghost" id="backBtn">Back</button></div></div>`;
-  const showSup=()=>{ const sp=supById($("#f_supplierId").value)||sup;
-    const rate=sp&&sp.contractType==="Rate";
-    const perInvoice = rate || !(num(sp&&sp.contractValue)>0); // no fixed contract → certify per invoice
+  const showSup=async ()=>{ const supId=$("#f_supplierId").value, proj=$("#f_project").value; const sp=supById(supId)||sup;
+    let t=null; try{ t=await api("contract-terms?supplier="+encodeURIComponent(supId)+"&project="+encodeURIComponent(proj)); }catch(e){}
+    const cv=t?num(t.contractValue):num(sp&&sp.contractValue);
+    const rate=((t?t.contractType:(sp&&sp.contractType))||"")==="Rate";
+    const perInvoice = rate || !(cv>0); // no fixed contract for THIS project → certify per invoice
+    const retP=t?t.retentionPct:(sp&&sp.retentionPct), vatP=t?t.vatPct:(sp&&sp.vatPct), advA=t?t.advanceAmount:(sp&&sp.advanceAmount), advR=t?t.advanceRecoveryRate:(sp&&sp.advanceRecoveryRate), docNo=(t&&t.docNo)||(sp&&sp.lpoRef);
     $("#supInfo").innerHTML = sp?(perInvoice
-      ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract)"}</b> · certify the submitted invoice amount · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · LPO ${esc(sp.lpoRef||"—")}`
-      :`Contract: <b>AED ${fmt(sp.contractValue)}</b> · Retention ${pct(sp.retentionPct)} · VAT ${pct(sp.vatPct)} · Advance AED ${fmt(sp.advanceAmount)} @ ${pct(sp.advanceRecoveryRate)} · LPO ${esc(sp.lpoRef||"—")} (signed ${dmy(sp.signDate)})`):"";
+      ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract for this project)"}</b> · certify the submitted invoice amount · Retention ${pct(retP)} · VAT ${pct(vatP)} · Ref ${esc(docNo||"—")}`
+      :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)} · Advance AED ${fmt(advA)} @ ${pct(advR)} · Ref ${esc(docNo||"—")}`):"";
     $("#w_workPct").style.display=perInvoice?"none":""; $("#w_variations").style.display=perInvoice?"none":""; $("#w_invoiceAmount").style.display=perInvoice?"":"none";
     $("#progH").textContent=perInvoice?"This certificate (per invoice)":"Progress this certificate";
     $("#calcNote").innerHTML=perInvoice
       ?"<b>Per-invoice certification:</b> enter the <b>Invoice amount</b> — the certificate is valued at that amount (plus any materials, less retention/VAT). Use <b>Contra / back-charges only to deduct</b> money the supplier owes you; leave it 0 for a normal payment."
-      :"Contract value, retention %, VAT % and <b>advance recovery</b> come automatically from the supplier record. Advance recovery = the supplier's rate × this certificate's gross, capped at the remaining advance."; };
-  showSup(); $("#f_supplierId").onchange=showSup;
+      :"Contract value, retention %, VAT % and <b>advance recovery</b> come from <b>this project's contract</b>. Advance recovery = the contract's rate × this certificate's gross, capped at the remaining advance — scoped to this project only."; };
+  showSup(); $("#f_supplierId").onchange=showSup; $("#f_project").onchange=showSup;
   $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
   $("#saveBtn").onclick=async ()=>{ const g=id=>$("#f_"+id).value;
     const body={ supplierId:g("supplierId"), project:g("project"), entity:g("entity"), invoiceNo:g("invoiceNo"),
