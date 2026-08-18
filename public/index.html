@@ -618,8 +618,8 @@ function advTable(){
 function certTable(list){
   if(!list.length) return `<div class="muted">Nothing here yet.</div>`;
   return `<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Supplier</th><th>Invoice</th><th class="num">Payable (AED)</th><th>Status</th></tr>
-  ${list.map(c=>`<tr class="click" data-no="${esc(c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(c.project)}</td>
-   <td>${esc(c.supplier)}</td><td>${esc(c.invoiceNo||"—")}</td><td class="num">${fmt(c.payable)}</td>
+  ${list.map(c=>`<tr class="click" data-no="${esc(c.no)}"><td><b>${esc(c.no)}</b>${c.kind==="advance"?` <span class="pill" style="background:#7A5C00;font-size:9px">DOWN PAYMENT</span>`:""}</td><td>${dmy(c.date)}</td><td>${esc(c.project)}</td>
+   <td>${esc(c.supplier)}</td><td>${c.kind==="advance"?"—":esc(c.invoiceNo||"—")}</td><td class="num">${fmt(c.payable)}</td>
    <td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
 }
 function bindRows(){ document.querySelectorAll("tr.click[data-no]").forEach(r=>r.onclick=()=>openCert(r.dataset.no)); }
@@ -914,7 +914,7 @@ function printCert(c){
   const approvedTag=(approved&&c.approvedBy)?`<br><span style="font-weight:400;font-size:8px;color:#555">${esc(c.approvedBy)} · ${dmy(c.approvedAt)}</span>`:"";
   $("#printArea").innerHTML=`<div class="cert">
    ${certLetterhead(ent)}
-   <div class="title">Supplier / Subcontractor Payment Certificate</div>
+   <div class="title">${c.kind==="advance"?"Advance / Down Payment Certificate":"Supplier / Subcontractor Payment Certificate"}</div>
    <div class="subtitle">${esc(c.project||"")}</div>
    <table class="meta"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup>
    <tr><td class="lab">Certificate No.</td><td><b>${esc(c.no)}</b></td><td class="lab">Certificate Date</td><td>${dmy(c.date)}</td></tr>
@@ -2203,6 +2203,7 @@ function renderPnl(d){
         <tr><td colspan="2" style="height:4px;border:0"></td></tr>
         <tr style="font-weight:600"><td>Cash paid</td><td class="num"></td></tr>
         <tr><td class="lab" style="padding-left:18px">To suppliers &amp; subcontractors</td><td class="num">(${fmt(d.paidOut)})</td></tr>
+        ${num(d.subAdvancePaid)>0?`<tr><td class="lab" style="padding-left:34px;color:#7a8494;font-size:12px">of which down payments to subs (recoverable)</td><td class="num" style="color:#7a8494;font-size:12px">(${fmt(d.subAdvancePaid)})</td></tr>`:""}
         <tr style="background:${num(d.netCash)>=0?'#e7efe9':'#fdecec'};font-weight:800"><td>NET CASH POSITION</td><td class="num" style="color:${ncColor}">${fmt(d.netCash)}</td></tr>
        </table>
        <div class="muted" style="font-size:11px;margin-top:6px">Cash is separate from profit. A project can be <b>cash-positive</b> (advance received up-front) while accrual profit is still building — and can be profitable yet cash-negative. Manage both.</div></div>
@@ -2611,20 +2612,31 @@ async function vAwards(){
     if(!items||!items.length){ h.innerHTML=`<div class="muted">No awards issued yet.</div>`; return; }
     h.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Ref</th><th>Type</th><th>Supplier</th><th>Project</th><th class="num">Amount</th><th>Status</th><th>Actions</th></tr>
       ${items.map(a=>`<tr><td>${esc(a.docNo)}</td><td>${a.type==="LOA"?'<span class="pill" style="background:#2E75B6">LOA</span>':'<span class="pill" style="background:#375623">Agreement</span>'}</td><td>${esc(a.supplierName)}</td><td>${esc(a.project||"—")}</td><td class="num">${fmt(a.amount)}</td>
-        <td><span class="pill" style="background:${stColors[a.status]||'#5B6B85'}">${esc(a.status)}</span>${a.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(a.sentAt)}</span>`:""}</td>
+        <td><span class="pill" style="background:${stColors[a.status]||'#5B6B85'}">${esc(a.status)}</span>${a.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(a.sentAt)}</span>`:""}${a.advanceCertNo?`<br><span class="pill" style="background:#7A5C00;font-size:9px" title="Down payment certificate">DP ${esc(a.advanceCertNo)}</span>`:((+a.advanceAmount>0&&a.status==="Countersigned")?`<br><span class="muted" style="font-size:9px;color:var(--red)">down payment pending</span>`:"")}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost aw_view" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">View / Print</button>
           ${a.status!=="Countersigned"?`<button class="btn ghost aw_edit" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Edit / amend</button>`:""}
           <button class="btn ghost aw_send" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">${a.status==="Issued"?"Send by email":"Re-send"}</button>
-          ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark received</button>`:""}
+          ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark signed →</button>`:""}
+          ${(a.status==="Countersigned"&&+a.advanceAmount>0&&!a.advanceCertNo)?`<button class="btn gold aw_adv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Process down payment</button>`:""}
+          ${a.advanceCertNo?`<button class="btn ghost aw_openipc" style="padding:4px 9px;font-size:12px">Open IPCs →</button>`:""}
           ${ME.role==="CEO"?`<button class="btn ghost aw_del" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px;color:var(--red)">Delete</button>`:""}
         </td></tr>`).join("")}</table></div>`;
     h.querySelectorAll(".aw_view").forEach(b=>b.onclick=()=>openAwardDoc(b.dataset.id,true));
     h.querySelectorAll(".aw_edit").forEach(b=>b.onclick=async ()=>{ try{ const rec=await api("award/"+b.dataset.id); AW_EDIT=rec; await vAwards(); window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_send").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); if(!confirm(`Email this ${a.type==="LOA"?"Letter of Award":"Subcontract Agreement"} to ${esc(a.supplierName)} for signature within ${a.signBackHours||24} hours?`)) return;
       try{ toast("Sending…"); const r=await api("award/"+b.dataset.id+"/send",{method:"POST"}); toast("Sent to "+r.to); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
-    h.querySelectorAll(".aw_recv").forEach(b=>b.onclick=async ()=>{ if(!confirm("Mark this award as signed & returned by the subcontractor?")) return;
-      try{ await api("award/"+b.dataset.id+"/received",{method:"POST"}); toast("Marked as countersigned"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_recv").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); const hasAdv=+a.advanceAmount>0;
+      if(!confirm(`Mark ${a.docNo} as signed & returned?\n\nThis will:\n• copy the contract terms (value, advance recovery, retention, DLP) onto the supplier\n${hasAdv?`• create the down-payment certificate for AED ${fmt(a.advanceAmount)} + 5% VAT (draft, ready to approve & pay)`:"• (no advance on this contract)"}\n• progress IPCs will then auto-apply advance recovery & retention`)) return;
+      try{ toast("Processing…"); const r=await api("award/"+b.dataset.id+"/received",{method:"POST"});
+        toast(r.advanceCreated?("Signed · down payment "+r.advanceCertNo+" created"):"Signed · supplier terms synced");
+        const d=await api("award/list"); renderList(d.items);
+        if(r.advanceCreated) setTimeout(()=>alert("Down payment certificate "+r.advanceCertNo+" created as a draft.\nGo to Supplier IPCs to approve & pay it. Progress IPCs you raise afterwards will recover the advance automatically."),100);
+      }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_adv").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id);
+      if(!confirm(`Create the down-payment certificate for ${a.docNo} — AED ${fmt(a.advanceAmount)} + 5% VAT?`)) return;
+      try{ toast("Processing…"); const r=await api("award/"+b.dataset.id+"/process-advance",{method:"POST"}); toast(r.advanceCreated?("Down payment "+r.advanceCertNo+" created"):(r.already?"Already created":"Terms synced")); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+    h.querySelectorAll(".aw_openipc").forEach(b=>b.onclick=()=>{ VIEW="certs"; CUR=null; render(); });
     h.querySelectorAll(".aw_del").forEach(b=>b.onclick=async ()=>{ if(!confirm("Delete this award document? This cannot be undone.")) return;
       try{ await api("award/"+b.dataset.id,{method:"DELETE"}); toast("Deleted"); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
   };

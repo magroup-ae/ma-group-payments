@@ -13466,8 +13466,17 @@ function computeCert(c, supplier, prevNet, recoveredSoFar, prevContra) {
   };
 }
 async function recompute(c, supplier) {
+  // Advance / down-payment certificate: stands alone — the advance value + VAT,
+  // no retention, no advance recovery (it IS the advance, recovered later by
+  // progress IPCs). Excluded from the progress-cert running totals below.
+  if (c.kind === "advance") {
+    const adv = r2(num(c.invoiceAmount));
+    const vat = r2(adv * num(c.vatPct));
+    c.calc = { perInvoice: true, kind: "advance", cumValue: adv, gross: adv, retention: 0, afterRet: adv, advanceRecovery: 0, advanceAmount: 0, advanceRate: 0, advanceRecoveredToDate: 0, advanceOutstanding: 0, prevCertified: 0, net: adv, vat, payable: r2(adv + vat) };
+    return c;
+  }
   const priors = await certsBySupplier(c.supplierId, c.no);
-  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0));
+  const before = priors.filter((p) => (p.seq || 0) < (c.seq || 0) && p.kind !== "advance");
   const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
   const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
   const prevContra = r2(before.reduce((a, p) => a + num(p.contra), 0));
@@ -13779,19 +13788,25 @@ async function ensureSupplierStub(s, name) {
 async function upsertCertExpense(s, c) {
   // Auto-post an approved/paid supplier IPC as a cost line (idempotent by cert no).
   if (!c || !c.project) return;
+  const isAdvance = c.kind === "advance";
   const id = "XPC-" + c.no.replace(/[^A-Za-z0-9]+/g, "_");
   const existing = await s.get("expense/" + id, { type: "json" });
-  const amount = num(c.calc?.net);
+  // Advance / down payment is a recoverable prepayment — carried at amount 0 so it
+  // never inflates project cost; the cash paid is still tracked (bank out) and it is
+  // recovered by progress IPCs. Progress IPCs post their net certified value as cost.
+  const amount = isAdvance ? 0 : num(c.calc?.net);
   const paid = c.status === "Paid" ? num(c.payment?.amount || c.calc?.payable) : num(existing?.paid);
   const exp = {
     id, seq: existing?.seq || 0, project: c.project,
     date: (c.payment?.date || c.date || now().slice(0, 10)).slice(0, 10),
     area: existing?.area || "General / All", category: existing?.category || (c.trade || "Subcontractor"),
     costType: existing?.costType || "Subcontractor",
-    supplier: c.supplier || "", supplierId: c.supplierId || existing?.supplierId || null, invoiceNo: c.invoiceNo || "", description: `Supplier IPC ${c.no}${c.invoiceNo ? " — inv " + c.invoiceNo : ""}`,
+    supplier: c.supplier || "", supplierId: c.supplierId || existing?.supplierId || null, invoiceNo: c.invoiceNo || "",
+    description: isAdvance ? `Advance / down payment${c.awardDocNo ? " — " + c.awardDocNo : ""} (${c.no})` : `Supplier IPC ${c.no}${c.invoiceNo ? " — inv " + c.invoiceNo : ""}`,
     poRef: c.lpoRef || "", boqRef: existing?.boqRef || "",
     budgeted: num(existing?.budgeted), amount, status: c.status === "Paid" ? "Paid" : "Pending", paid,
-    notes: existing?.notes || "", supplierCertNo: c.no, source: "supplier-ipc",
+    advanceValue: isAdvance ? r2(num(c.invoiceAmount)) : 0,
+    notes: existing?.notes || "", supplierCertNo: c.no, source: isAdvance ? "supplier-advance" : "supplier-ipc",
     createdBy: existing?.createdBy || "system", createdAt: existing?.createdAt || now(), updatedAt: now()
   };
   await s.setJSON("expense/" + id, exp);
@@ -13843,13 +13858,14 @@ async function computeTreasury(s) {
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
-  let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0;
+  let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0, subAdvancePaid = 0;
   const byType = {}, byCat = {}, byGroup = { Direct: 0, Indirect: 0, Overhead: 0 }, byDate = {}, byProject = {};
   let hqCost = 0;
   for (const e of expenses) {
     const a = num(e.amount), p = num(e.paid);
     const isHQ = e.project === HQ_PROJECT;
     if (e.source === "supplier-ipc") ipcCost += a; // subcontract cost certified via IPCs
+    if (e.source === "supplier-advance") subAdvancePaid += p; // down payment paid to subs (prepayment, not cost)
     // Payments funded out of the client's down payment (advance) — a memo of how
     // much of the advance has been consumed. Uses cash paid if any, else the cost.
     if (e.fromAdvance) advanceUtilised += (p > 0 ? p : a);
@@ -13946,7 +13962,7 @@ async function computePnl(s, project) {
     collected: r2(collected), outstandingReceivable: r2(netDue + vatDue - collected),
     materialsOnSite: r2(materialsOnSite), workExecuted: r2(workExecuted),
     advanceReceived, progressCollected, totalCashIn, netCash,
-    advanceUtilised, advanceBalanceRemaining,
+    advanceUtilised, advanceBalanceRemaining, subAdvancePaid: r2(subAdvancePaid),
     byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
@@ -14293,6 +14309,68 @@ ${MAH_CSS}
   ${sigBlock}
   ${mahFooter(ent)}
 </div></body></html>`;
+}
+// ---- Contract → Project → Payment Certificate → Expenses automation ----
+// When a subcontract/LOA is signed, copy its commercial terms onto the supplier
+// so every progress IPC applies advance recovery + retention automatically.
+async function syncSupplierFromAward(s, award) {
+  if (!award || !award.supplierId) return null;
+  const sup = await s.get("supplier/" + award.supplierId, { type: "json" });
+  if (!sup) return null;
+  sup.contractType = "Fixed";
+  sup.contractValue = num(award.amount);
+  sup.advanceAmount = num(award.advanceAmount);
+  sup.advanceRecoveryRate = num(award.advanceRecoveryPct) > 0 ? r2(num(award.advanceRecoveryPct) / 100) : (num(award.advanceAmount) > 0 && num(award.amount) > 0 ? r2(num(award.advanceAmount) / num(award.amount)) : 0);
+  sup.retentionPct = num(award.retentionPct) > 0 ? r2(num(award.retentionPct) / 100) : num(sup.retentionPct);
+  sup.dlpMonths = num(award.dlpDays) > 0 ? Math.round(num(award.dlpDays) / 30.44) : num(sup.dlpMonths);
+  if (award.project) sup.project = award.project;
+  if (award.entity) sup.entity = award.entity;
+  sup.lpoRef = award.docNo || sup.lpoRef || "";
+  sup.subcontractRef = award.docNo || sup.subcontractRef || "";
+  sup.signDate = sup.signDate || now().slice(0, 10);
+  if (sup.status !== "Active") sup.status = "Active";
+  sup.incomplete = !(String(sup.licenseNo || "").trim() && String(sup.trn || "").trim());
+  sup.updatedAt = now();
+  await s.setJSON("supplier/" + sup.id, sup);
+  return sup;
+}
+// Create the down-payment (advance) certificate against a signed contract. It is a
+// recoverable prepayment: paid to the sub via the normal approve→pay→cheque→bank
+// flow, posted to the project at cost 0 (prepayment), recovered by progress IPCs.
+async function createAdvanceCertFromAward(s, award, sup, me) {
+  if (num(award.advanceAmount) <= 0) return { skipped: "no-advance" };
+  if (award.advanceCertNo) {
+    const ex = await s.get("cert/" + award.advanceCertNo, { type: "json" });
+    if (ex) return { existing: ex };
+  }
+  const st = await s.get("settings", { type: "json" });
+  const project = award.project || sup.project || "";
+  const entity = award.entity || sup.entity || (st.entities[0] && st.entities[0].short) || "";
+  let maxSeq = st.seq || 0;
+  const { blobs } = await s.list({ prefix: "cert/" });
+  for (const bl of blobs) { const ec = await s.get(bl.key, { type: "json" }); if (ec && (ec.seq || 0) > maxSeq) maxSeq = ec.seq; }
+  let seq = maxSeq + 1;
+  let no = certNo(project, sup.name, seq, st.projects) + "-ADV";
+  let guard = 0;
+  while (await s.get("cert/" + no) && guard++ < 50) { seq++; no = certNo(project, sup.name, seq, st.projects) + "-ADV"; }
+  st.seq = seq;
+  const cert = {
+    no, seq, kind: "advance", createdBy: me.id, createdAt: now(), date: now().slice(0, 10),
+    entity, project, supplierId: sup.id, supplier: sup.name, lpoRef: award.docNo || sup.lpoRef || "",
+    awardId: award.id, awardDocNo: award.docNo, invoiceNo: "",
+    trade: sup.trade || sup.category || "", periodFrom: "", periodTo: "",
+    originalValue: num(award.amount), basis: "advance",
+    invoiceAmount: num(award.advanceAmount), variations: 0, workPct: 0, materialsOnSite: 0,
+    retentionPct: 0, contra: 0, vatPct: num(sup.vatPct) || 0.05,
+    notes: `Down payment / advance against ${award.docNo}`, status: "Draft", payment: null,
+    audit: [{ at: now(), by: me.name, action: "Advance / down payment created from signed contract " + award.docNo }]
+  };
+  await recompute(cert, sup);
+  await s.setJSON("cert/" + no, cert);
+  await s.setJSON("settings", st);
+  try { await upsertCertExpense(s, cert); } catch (e) {}
+  award.advanceCertNo = no;
+  return { created: cert };
 }
 var api_default = async (req, context) => {
   const url = new URL(req.url);
@@ -14882,8 +14960,27 @@ var api_default = async (req, context) => {
     const rec = await s.get("award/" + awdRecv[1], { type: "json" });
     if (!rec) return err("Not found", 404);
     rec.status = "Countersigned"; rec.receivedAt = now(); rec.receivedBy = me.name;
+    // Automation: signed contract → sync terms to supplier → create the down-payment
+    // certificate (draft) ready to approve & pay. Progress IPCs then flow from the
+    // supplier's synced terms and recover the advance automatically.
+    let synced = null, advance = null;
+    try { synced = await syncSupplierFromAward(s, rec); } catch (e) {}
+    try { if (synced && num(rec.advanceAmount) > 0 && !rec.advanceCertNo) { const r = await createAdvanceCertFromAward(s, rec, synced, me); if (r && r.created) advance = r.created; } } catch (e) {}
     await s.setJSON("award/" + rec.id, rec);
-    return json({ ok: true });
+    return json({ ok: true, supplierSynced: !!synced, advanceCertNo: rec.advanceCertNo || null, advanceAmount: num(rec.advanceAmount), advanceCreated: !!advance });
+  }
+  const awdAdv = path.match(/^award\/([^/]+)\/process-advance$/);
+  if (awdAdv && req.method === "POST") {
+    // Manual fallback: (re-)sync terms and create the down-payment certificate.
+    if (!can("contracts")) return err("Not permitted", 403);
+    const rec = await s.get("award/" + awdAdv[1], { type: "json" });
+    if (!rec) return err("Not found", 404);
+    const sup = await syncSupplierFromAward(s, rec);
+    if (!sup) return err("Linked supplier not found — award cannot be processed", 404);
+    if (num(rec.advanceAmount) <= 0) { await s.setJSON("award/" + rec.id, rec); return json({ ok: true, supplierSynced: true, advanceCertNo: null, note: "No advance on this contract — terms synced to supplier." }); }
+    const r = await createAdvanceCertFromAward(s, rec, sup, me);
+    await s.setJSON("award/" + rec.id, rec);
+    return json({ ok: true, supplierSynced: true, advanceCertNo: rec.advanceCertNo || null, advanceCreated: !!(r && r.created), already: !!(r && r.existing) });
   }
   const awdDel = path.match(/^award\/([^/]+)$/);
   if (awdDel && req.method === "DELETE") {
