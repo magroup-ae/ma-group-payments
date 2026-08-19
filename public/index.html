@@ -806,7 +806,7 @@ async function openCert(no){
         ${row("Materials on site",fmt(c.materialsOnSite))}
         ${row("Total gross to date",fmt(K.gross),"tot")}
         ${row("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}
-        ${row("Less: advance recovery (auto)","("+fmt(K.advanceRecovery)+")")}
+        ${row("Less: advance recovered to date","("+fmt(K.advanceRecoveredToDate!=null?K.advanceRecoveredToDate:K.advanceRecovery)+")")}
         ${row("Less: previously certified","("+fmt(K.prevCertified)+")")}
         ${row("Less: contra / back-charges","("+fmt(c.contra)+")")}`}
         ${row("NET this certificate (excl VAT)",fmt(K.net),"tot")}
@@ -996,7 +996,7 @@ function printCert(c){
    ${r2r("Cumulative value of work executed",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
    <tr class="tot"><td>TOTAL GROSS VALUE TO DATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
    <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>
-   ${r2r("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}${r2r("Less: advance / mobilisation recovery","("+fmt(K.advanceRecovery)+")")}
+   ${r2r("Less: retention @ "+pct(c.retentionPct),"("+fmt(K.retention)+")")}${r2r("Less: advance / mobilisation recovered to date","("+fmt(K.advanceRecoveredToDate!=null?K.advanceRecoveredToDate:K.advanceRecovery)+")")}
    ${r2r("Less: previously certified (excl VAT)","("+fmt(K.prevCertified)+")")}${r2r("Less: contra / back-charges","("+fmt(c.contra)+")")}`}
    <tr class="tot"><td>NET CERTIFIED THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.net)}</td></tr>
    ${r2r("Add: VAT @ "+pct(c.vatPct),fmt(K.vat))}
@@ -1584,16 +1584,23 @@ function sectionB(calc,ct){
   // Accept either the client-side calc (ccCalc → advRec) or the backend calc (computeClientCert → advanceRecovery/cumValue/mos).
   const mos=num(calc.mos);
   const line1=(calc.cumValue!==undefined&&calc.cumValue!==null)?num(calc.cumValue):r2(num(calc.gross)-mos);
-  const advRec=(calc.advanceRecovery!==undefined)?num(calc.advanceRecovery):num(calc.advRec);
-  const netCum=r2(num(calc.afterRet)-advRec);
   const contra=num(calc.contra);
+  // Section B is a CUMULATIVE certificate: rows 1–5 are cumulative-to-date, then we
+  // deduct what was previously certified to get this period's net. Row 4 must therefore
+  // be the advance recovered TO DATE (cumulative), not just this period's increment —
+  // otherwise rows 5, 6 and 7 do not reconcile. advanceRecoveredToDate is the true
+  // cumulative figure; fall back to deriving it so the table always foots to net.
+  const advRecCum=(calc.advanceRecoveredToDate!==undefined&&calc.advanceRecoveredToDate!==null)
+    ?num(calc.advanceRecoveredToDate)
+    :((calc.afterRet!==undefined)?r2(num(calc.afterRet)-(r2(num(calc.net)+num(calc.prevCertified)+contra))):((calc.advanceRecovery!==undefined)?num(calc.advanceRecovery):num(calc.advRec)));
+  const netCum=(calc.afterRet!==undefined&&calc.afterRet!==null)?r2(num(calc.afterRet)-advRecCum):r2(num(calc.net)+num(calc.prevCertified)+contra);
   return `<table>
    <tr><td class="sec navy" colspan="2">B. CERTIFICATION SUMMARY (AED)</td></tr>
    ${R("1. Gross value of work executed (cumulative)",line1)}
    ${R("2. Materials on site",mos)}
    ${R("Gross value certified (cumulative)",calc.gross)}
    ${R("3. Less: retention @ "+pct(ct.retentionPct),calc.retention,true)}
-   ${R("4. Less: advance (down payment) recovery",advRec,true)}
+   ${R("4. Less: advance (down payment) recovered to date",advRecCum,true)}
    ${R("5. Net cumulative certified",netCum)}
    ${R("6. Less: previously certified",calc.prevCertified,true)}
    ${contra?R("&nbsp;&nbsp;&nbsp;Less: other deductions / contra",contra,true):""}
