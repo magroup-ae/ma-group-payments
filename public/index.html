@@ -206,7 +206,7 @@
 const $ = (s, el=document) => el.querySelector(s);
 const root = $("#root");
 let TOKEN = sessionStorage.getItem("tok") || "";
-let ME=null, S=null, CERTS=[], REG=[], USERS=[], SUPS=[], ASSETS={sign:"",stamp:""}, ASSETC=0;
+let ME=null, S=null, CERTS=[], REG=[], USERS=[], SUPS=[], ASSETS={sign:"",stamp:""}, ASSETC=0, PVEND=null;
 let VIEW="dash", CUR=null, settingsUnlocked=false;
 let POLICY_TEXT="", POLICY_VER=1;
 
@@ -1158,7 +1158,12 @@ function vSups(){
     <input id="sq" placeholder="Filter by name…" style="max-width:220px;margin-left:14px">
     <button class="btn ghost right" id="blankReg">Print blank form</button>${canEdit?`<button class="btn ghost" id="syncSup" title="Register any supplier names used in the cost log so you can complete their details">Sync from cost log</button>`:""}${canEdit?`<button class="btn gold" id="newSup">+ Register Supplier</button>`:""}</div><div style="height:10px"></div>
     <div class="muted" style="margin-bottom:6px">Click a supplier to open their statement (payments, accumulation, pending to pay). Names picked up from the cost log show <span style="color:#b06a00">⚠ to complete</span> until you add their TRN / contact / bank.</div>
-    <div id="supList"></div></div>`;
+    <div id="supList"></div>
+    <div style="height:18px"></div>
+    <div class="flex"><h3 style="margin:0">Vendor directory <span class="muted" id="dirCount" style="font-weight:400;font-size:12px"></span></h3>
+      <label class="muted" style="margin-left:14px;font-size:12px"><input type="checkbox" id="dirShow" checked> Show vendors not yet engaged</label></div>
+    <div class="muted" style="margin:4px 0 6px">Your full supplier &amp; subcontractor directory. When a quotation is approved and you sign a vendor, click <b>Register / sign</b> — their data is imported into the registry so you can complete any missing TL / TRN / bank later.</div>
+    <div id="dirList" class="muted">Loading directory…</div></div>`;
   const draw=(q="")=>{
     const rows=SUPS.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())).map(s=>{ const a=supAgg(s.id);
       return `<tr class="click" data-sid="${s.id}"><td><b>${esc(s.name)}</b>${(s.source==="cost-log"||s.incomplete)?` <span style="color:#b06a00;font-size:10px;font-weight:700">⚠ to complete</span>`:""}<br><span class="muted" style="font-size:11px">${esc(s.type||"Subcontractor")}</span></td><td>${esc(s.trn||"—")}</td>
@@ -1169,12 +1174,35 @@ function vSups(){
       ${rows||`<tr><td colspan="6" class="muted">No suppliers.</td></tr>`}</table>`;
     document.querySelectorAll("tr[data-sid]").forEach(r=>r.onclick=()=>supStatement(r.dataset.sid));
   };
-  draw();
-  $("#sq").oninput=e=>draw(e.target.value);
+  const drawDir=(q="")=>{
+    const host=$("#dirList"); if(!host) return;
+    if(!$("#dirShow")||!$("#dirShow").checked){ host.style.display="none"; return; } host.style.display="";
+    if(!PVEND){ host.innerHTML="Loading directory…"; return; }
+    // Directory vendors not yet linked to a registered supplier.
+    const linked=new Set(SUPS.map(s=>String(s.name||"").trim().toLowerCase()));
+    const pending=PVEND.filter(v=>!v.supplierId && !linked.has(String(v.name||"").trim().toLowerCase()));
+    const ql=q.toLowerCase();
+    const list=pending.filter(v=>!ql||(`${v.name} ${v.trade||""} ${v.specialty||""} ${v.email||""} ${v.phone||""}`.toLowerCase().includes(ql)));
+    const cnt=$("#dirCount"); if(cnt) cnt.textContent=`— ${pending.length} not yet engaged · ${SUPS.length} registered`;
+    const rows=list.slice(0,400).map(v=>`<tr data-vid="${esc(v.id)}"><td><b>${esc(v.name)}</b>${v.email?` <span class="muted" style="font-size:10px">✉</span>`:""}${v.phone?` <span class="muted" style="font-size:10px">☎</span>`:""}<br><span class="muted" style="font-size:11px">${esc(v.trade||"—")}${v.specialty?" · "+esc(v.specialty):""}</span></td>
+      <td>${esc(v.contactName||"—")}<br><span class="muted" style="font-size:11px">${esc(v.email||v.phone||"")}</span></td>
+      <td>${esc(v.emirate||"—")}</td>
+      <td class="num">${canEdit?`<button class="btn gold reg1" data-vid="${esc(v.id)}">Register / sign</button>`:"—"}</td></tr>`).join("");
+    host.innerHTML=`<table><tr><th>Vendor / trade</th><th>Contact</th><th>Emirate</th><th class="num"></th></tr>
+      ${rows||`<tr><td colspan="4" class="muted">No un-engaged vendors match.</td></tr>`}</table>${list.length>400?`<div class="muted" style="margin-top:6px">Showing first 400 of ${list.length}. Use the filter to narrow.</div>`:""}`;
+    host.querySelectorAll(".reg1").forEach(b=>b.onclick=async ()=>{ const vid=b.dataset.vid; b.disabled=true; b.textContent="Registering…";
+      try{ const r=await api("pvendor/"+encodeURIComponent(vid)+"/register",{method:"POST",body:{}}); await load(); toast(`${r.supplierName} registered — complete TL / TRN / bank, then you can award & pay`); const s2=supById(r.supplierId); if(s2){ supForm(s2); } else { PVEND=null; vSups(); } }
+      catch(e){ b.disabled=false; b.textContent="Register / sign"; toast(e.message); } });
+  };
+  draw(); drawDir();
+  const runFilter=e=>{ draw(e.target.value); drawDir(e.target.value); };
+  $("#sq").oninput=runFilter;
+  $("#dirShow").onchange=()=>drawDir($("#sq").value||"");
   $("#blankReg").onclick=()=>printSupplierReg(null);
   if(canEdit) $("#newSup").onclick=()=>supForm(null);
   if(canEdit&&$("#syncSup")) $("#syncSup").onclick=async ()=>{ toast("Syncing suppliers from the cost log…");
     try{ const r=await api("suppliers/sync-costlog",{method:"POST"}); await load(); toast(`Done — ${r.distinctSuppliers} supplier name(s) registered`); vSups(); }catch(e){ toast(e.message); } };
+  if(!PVEND){ api("pvendors").then(r=>{ PVEND=(r&&r.items)||[]; drawDir($("#sq")?$("#sq").value:""); }).catch(()=>{ PVEND=[]; const h=$("#dirList"); if(h)h.innerHTML=`<span class="muted">Directory unavailable.</span>`; }); }
 }
 function supStatement(id){
   const s=supById(id); if(!s){ toast("Not found"); return; }

@@ -13872,6 +13872,51 @@ async function ensureSupplierStub(s, name) {
   });
   return id;
 }
+// Promote a procurement directory vendor into the finance supplier registry, importing
+// all data we hold so missing fields (TL, TRN, bank) can be completed later. Idempotent:
+// if the vendor is already linked to a supplier, or a supplier with the same name exists,
+// that supplier is returned/refreshed instead of creating a duplicate. Returns supplierId.
+async function promoteVendorToSupplier(s, pv, opts) {
+  opts = opts || {};
+  const stg = await s.get("settings", { type: "json" });
+  let supplierId = pv.supplierId;
+  let sup = supplierId ? await s.get("supplier/" + supplierId, { type: "json" }) : null;
+  if (!sup) {
+    const sups = await getAllJSON(s, "supplier/");
+    sup = sups.find((x) => String(x.name || "").trim().toLowerCase() === String(pv.name || "").trim().toLowerCase());
+  }
+  const ent = stg.entities && stg.entities[0] && stg.entities[0].short || "Marvellous Art";
+  if (!sup) {
+    supplierId = await nextId(s, stg, "supplierSeq", "S", "supplier/", 3);
+    await s.setJSON("settings", stg);
+    sup = {
+      id: supplierId, type: pv.type === "Supplier" ? "Supplier" : "Subcontractor", name: pv.name, tradeName: "",
+      licenseNo: pv.licenseNo || "", licenseExpiry: "", establishmentCard: "", address: pv.address || pv.emirate || "", poBox: "", emirate: pv.emirate || "", website: pv.website || "",
+      category: pv.trade || "", trade: pv.specialty || "", contactName: pv.contactName || "", contactDesignation: "", mobile: pv.phone || "", tel: pv.phone || "", contact: pv.phone || "",
+      email: pv.email || "", trn: pv.trn || "", vatRegistered: !!pv.trn,
+      bank: "", accountName: "", accountNo: "", iban: "", swift: "", entity: ent, project: opts.project || "", lpoRef: "",
+      contractValue: 0, vatPct: 0.05, retentionPct: 0.1, dlpMonths: 0, retentionRelease: "", advanceAmount: 0, advanceRecoveryRate: 0, advanceDate: "", advanceRef: "",
+      notes: opts.note || ("Registered from procurement directory (" + (pv.id || "") + "). Complete TL, TRN and bank details before payment."),
+      status: opts.status || "Prospect", source: "procurement", incomplete: !(String(pv.licenseNo || "").trim() && String(pv.trn || "").trim()), docs: {}, regNo: "MA-SUP-" + supplierId,
+      createdAt: now(), createdBy: opts.by || "system", updatedAt: now()
+    };
+    await s.setJSON("supplier/" + supplierId, sup);
+  } else {
+    // Existing supplier — backfill only the fields that are still blank, never overwrite.
+    supplierId = sup.id; let ch = false;
+    const fill = (k, v) => { if (v && !String(sup[k] || "").trim()) { sup[k] = v; ch = true; } };
+    fill("email", pv.email); fill("mobile", pv.phone); fill("tel", pv.phone); fill("contact", pv.phone);
+    fill("contactName", pv.contactName); fill("category", pv.trade); fill("trade", pv.specialty);
+    fill("emirate", pv.emirate); fill("website", pv.website); fill("licenseNo", pv.licenseNo); fill("trn", pv.trn);
+    if (opts.project && !String(sup.project || "").trim()) { sup.project = opts.project; ch = true; }
+    if (opts.status && sup.status !== opts.status) { sup.status = opts.status; ch = true; }
+    sup.incomplete = !(String(sup.licenseNo || "").trim() && String(sup.trn || "").trim());
+    if (ch) { sup.updatedAt = now(); await s.setJSON("supplier/" + supplierId, sup); }
+  }
+  // Link the directory record back to the supplier so the two never duplicate.
+  if (pv.supplierId !== supplierId) { pv.supplierId = supplierId; pv.updatedAt = now(); await s.setJSON("pvendor/" + pv.id, pv); }
+  return { supplierId, supplier: sup };
+}
 async function upsertCertExpense(s, c) {
   // Auto-post an approved/paid supplier IPC as a cost line (idempotent by cert no).
   if (!c || !c.project) return;
@@ -14711,6 +14756,17 @@ var api_default = async (req, context) => {
     const trades = PROC_TRADES.map((t) => byTrade[t] || { trade: t, total: 0, withEmail: 0 }).filter((x) => x.total > 0);
     return json({ trades, total: items.length, withEmail: items.filter((v) => validEmail(v.email)).length });
   }
+  {
+    const m = path.match(/^pvendor\/([^/]+)\/register$/);
+    if (m && req.method === "POST") {
+      if (!can("create") && !can("contracts") && !can("procurement")) return err("Not permitted", 403);
+      const pv = await s.get("pvendor/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!pv) return err("Vendor not found", 404);
+      let project = ""; try { const b = await req.json(); project = String(b.project || ""); } catch (e) {}
+      const prom = await promoteVendorToSupplier(s, pv, { project, by: me.name, note: "Registered from procurement directory. Complete TL, TRN and bank details before payment." });
+      return json({ ok: true, supplierId: prom.supplierId, supplierName: prom.supplier.name });
+    }
+  }
   if (path === "pvendor" && req.method === "POST") {
     if (!can("procurement")) return err("Not permitted", 403);
     const b = await req.json();
@@ -14949,34 +15005,11 @@ var api_default = async (req, context) => {
     if (!q) return err("Record the winning vendor's quote first");
     const pv = await s.get("pvendor/" + vid, { type: "json" });
     if (!pv) return err("Vendor not found", 404);
-    // Promote the directory vendor into the finance supplier registry (for LOA/PC).
-    const stg = await s.get("settings", { type: "json" });
-    let supplierId = pv.supplierId;
-    let sup = supplierId ? await s.get("supplier/" + supplierId, { type: "json" }) : null;
-    if (!sup) {
-      const sups = await getAllJSON(s, "supplier/");
-      sup = sups.find((x) => String(x.name || "").trim().toLowerCase() === String(pv.name).trim().toLowerCase());
-    }
-    if (!sup) {
-      supplierId = await nextId(s, stg, "supplierSeq", "S", "supplier/", 3);
-      await s.setJSON("settings", stg);
-      const ent = stg.entities && stg.entities[0] && stg.entities[0].short || "Marvellous Art";
-      sup = {
-        id: supplierId, type: pv.type === "Supplier" ? "Supplier" : "Subcontractor", name: pv.name, tradeName: "",
-        licenseNo: "", licenseExpiry: "", establishmentCard: "", address: pv.emirate || "", poBox: "", emirate: pv.emirate || "", website: pv.website || "",
-        category: pv.trade || "", trade: pv.specialty || "", contactName: pv.contactName || "", contactDesignation: "", mobile: pv.phone || "", tel: pv.phone || "", contact: pv.phone || "",
-        email: pv.email || "", trn: "", vatRegistered: false,
-        bank: "", accountName: "", accountNo: "", iban: "", swift: "", entity: ent, project: rec.project || "", lpoRef: "",
-        contractValue: 0, vatPct: 0.05, retentionPct: 0.1, dlpMonths: 0, retentionRelease: "", advanceAmount: 0, advanceRecoveryRate: 0, advanceDate: "", advanceRef: "",
-        notes: "Awarded via procurement RFQ " + rec.rfqNo + ". Complete TL, TRN and bank details before payment.",
-        status: "Active", source: "procurement", incomplete: true, docs: {}, regNo: "MA-SUP-" + supplierId,
-        createdAt: now(), createdBy: me.name, updatedAt: now()
-      };
-      await s.setJSON("supplier/" + supplierId, sup);
-    } else { supplierId = sup.id; }
-    pv.supplierId = supplierId; pv.updatedAt = now();
-    if (num(q.rating)) pv.rating = num(q.rating);
-    await s.setJSON("pvendor/" + pv.id, pv);
+    // Promote the directory vendor into the finance supplier registry (for LOA/PC),
+    // importing all held data so missing fields can be completed before payment.
+    const prom = await promoteVendorToSupplier(s, pv, { project: rec.project || "", status: "Active", by: me.name, note: "Awarded via procurement RFQ " + rec.rfqNo + ". Complete TL, TRN and bank details before payment." });
+    const supplierId = prom.supplierId, sup = prom.supplier;
+    if (num(q.rating)) { pv.rating = num(q.rating); pv.updatedAt = now(); await s.setJSON("pvendor/" + pv.id, pv); }
     for (const x of rec.quotes) x.status = x.vendorId === vid ? "Accepted" : (x.status === "Accepted" ? "Received" : x.status);
     rec.status = "Awarded"; rec.awardedVendorId = vid; rec.awardedSupplierId = supplierId; rec.awardedAmount = num(q.amount);
     rec.updatedAt = now(); rec.awardedAt = now(); rec.awardedBy = me.name;
