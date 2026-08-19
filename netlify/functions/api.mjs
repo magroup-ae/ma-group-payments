@@ -13450,6 +13450,33 @@ async function ensureInit() {
     settings.boqPerInvoiceV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Pre-load The Square 2.0 client contract's work-breakdown (by-building BOQ) so the
+  // client IPC only needs the cumulative % done per building each period.
+  if (!settings.squareClientBoqV1) {
+    try {
+      const contracts = await getAllJSON(s, "contract/");
+      const k = contracts.find((c) => /squar/i.test(c.project || ""));
+      if (k && !(Array.isArray(k.boq) && k.boq.length)) {
+        k.boq = [
+          { ref: "1", name: "Operation Building", value: 1202483, isVariation: false, remarks: "" },
+          { ref: "2", name: "Male & Female Toilet – With Prayer", value: 877050, isVariation: false, remarks: "" },
+          { ref: "3", name: "Male & Female Toilet – Without Prayer", value: 814280, isVariation: false, remarks: "" },
+          { ref: "4", name: "Staff Toilet – With Prayer", value: 418257, isVariation: false, remarks: "" },
+          { ref: "5", name: "Staff Toilet – Without Prayer", value: 268785, isVariation: false, remarks: "" },
+          { ref: "6", name: "Substation", value: 829367, isVariation: false, remarks: "" },
+          { ref: "7", name: "Pump Room", value: 267601, isVariation: false, remarks: "" },
+          { ref: "8", name: "Kids Play Area – Toilet", value: 814280, isVariation: false, remarks: "" },
+          { ref: "9", name: "Firefighting (All Buildings)", value: 500000, isVariation: false, remarks: "" },
+          { ref: "10", name: "F&P Foundations – Type A/B/C", value: 961536, isVariation: false, remarks: "" },
+          { ref: "11", name: "Approved Variations (General / All VOs)", value: 280179, isVariation: true, remarks: "" }
+        ];
+        k.updatedAt = now();
+        await s.setJSON("contract/" + k.id, k);
+      }
+    } catch (e) {}
+    settings.squareClientBoqV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
@@ -13674,11 +13701,13 @@ function computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra) {
     if (base > 0) advanceRate = advanceAmount / base;
   }
   if (advanceAmount > 0 && advanceRate > 0) {
-    // gross is cumulative (grossCum + MOS), so advanceRate * gross is the
-    // cumulative recovery target. Cap at the advance, then take this period's
-    // increment over prior recovery — each certificate stores a true per-period
-    // figure, so the running Σ advanceRecovery equals the correct cumulative.
-    const cumRecovery = Math.min(r2(advanceRate * gross), advanceAmount);
+    // Advance is recovered on the BASE works value only (excluding approved
+    // variations, per UAE practice and the client's own IPC format). advanceRate *
+    // baseCum is the cumulative recovery target — cap at the advance, then take this
+    // period's increment over prior recovery so each certificate stores a true
+    // per-period figure and Σ advanceRecovery equals the correct cumulative.
+    const baseCum = Math.max(0, r2(cumValue - num(c.variationsCum)));
+    const cumRecovery = Math.min(r2(advanceRate * baseCum), advanceAmount);
     advanceRecovery = Math.max(0, r2(cumRecovery - recoveredSoFar));
   }
   const contra = num(c.contra);
@@ -13688,14 +13717,32 @@ function computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra) {
   const net = r2(afterRet - advRecToDate - r2(prevContra + contra) - prevNet);
   const vatPct = num(contract?.vatPct);
   const vat = r2(net * vatPct);
+  // This-period gross increment = cumulative gross − previously-certified gross.
+  const grossThis = r2(gross - num(c.prevGross));
+  const variationsCum = num(c.variationsCum);
+  const variationsThis = r2(variationsCum - num(c.prevVariations));
   return {
     cumValue, mos, gross, retentionPct, retention, afterRet,
     advanceAmount, advanceRate, advanceRecovery,
     advanceRecoveredToDate: r2(recoveredSoFar + advanceRecovery),
     advanceOutstanding: Math.max(0, r2(advanceAmount - recoveredSoFar - advanceRecovery)),
     retentionHeld: retention,
+    grossThis, variationsCum, variationsThis,
+    grossCertifiedToDate: gross, retentionHeldToDate: retention,
+    netToDate: r2(afterRet - advRecToDate - r2(prevContra + contra)),
     prevCertified: prevNet, contra, net, vatPct, vat, payable: r2(net + vat)
   };
+}
+// From the per-building lines on a client cert (each {value, pct, isVariation}),
+// compute the cumulative gross certified and the cumulative variations portion.
+function ccGrossFromLines(lines) {
+  let grossCum = 0, variationsCum = 0;
+  for (const l of (lines || [])) {
+    const v = r2(num(l.value) * num(l.pct));
+    grossCum = r2(grossCum + v);
+    if (l.isVariation) variationsCum = r2(variationsCum + v);
+  }
+  return { grossCum, variationsCum };
 }
 async function recomputeClientCert(c, contract) {
   const priors = await clientCertsByContract(c.contractId, c.no);
@@ -13703,6 +13750,11 @@ async function recomputeClientCert(c, contract) {
   const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
   const recoveredSoFar = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
   const prevContra = r2(before.reduce((a, p) => a + num(p.contra), 0));
+  // Previous cumulative gross & variations (highest prior cert) so this cert can show
+  // the per-period increment for the certificate-calculation section.
+  const prior = before.slice().sort((a, b) => (b.seq || 0) - (a.seq || 0))[0];
+  c.prevGross = prior ? num(prior.calc?.gross) : 0;
+  c.prevVariations = prior ? num(prior.calc?.variationsCum) : 0;
   c.calc = computeClientCert(c, contract, prevNet, recoveredSoFar, prevContra);
   return c;
 }
@@ -16134,6 +16186,9 @@ var api_default = async (req, context) => {
       recoveryRate: b.recoveryRate === void 0 || b.recoveryRate === "" ? (ex?.recoveryRate ?? 0.2) : num(b.recoveryRate),
       vatPct: b.vatPct === void 0 || b.vatPct === "" ? (ex?.vatPct ?? 0.05) : num(b.vatPct),
       retentionRelease: str("retentionRelease"), dlpMonths: b.dlpMonths === void 0 ? num(ex?.dlpMonths) : num(b.dlpMonths),
+      // Work-breakdown by building / scope (the BOQ for the by-building IPC). Each
+      // line: {ref, name, value, isVariation, remarks}. % done is entered per IPC.
+      boq: Array.isArray(b.boq) ? b.boq.map((l, i) => ({ ref: String(l.ref || (i + 1)), name: String(l.name || ""), value: num(l.value), isVariation: !!l.isVariation, remarks: String(l.remarks || "") })) : (ex?.boq || []),
       startDate: str("startDate"), notes: str("notes"),
       status: b.status || ex?.status || "Active",
       createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
@@ -16147,16 +16202,23 @@ var api_default = async (req, context) => {
     const v = await s.get("contract/" + decodeURIComponent(ctGet[1]), { type: "json" });
     if (!v) return err("Not found", 404);
     const certs = await clientCertsByContract(v.id);
-    const certifiedNet = r2(certs.reduce((a, c) => a + (c.calc?.net || 0), 0));
-    const recovered = r2(certs.reduce((a, c) => a + (c.calc?.advanceRecovery || 0), 0));
-    const retentionHeld = r2(certs.reduce((a, c) => Math.max(a, c.calc?.retention || 0), 0));
-    const contraToDate = r2(certs.reduce((a, c) => a + num(c.contra), 0));
+    const live = certs.filter((c) => c && c.status !== "Cancelled");
+    const certifiedNet = r2(live.reduce((a, c) => a + (c.calc?.net || 0), 0));
+    const recovered = r2(live.reduce((a, c) => a + (c.calc?.advanceRecovery || 0), 0));
+    const retentionHeld = r2(live.reduce((a, c) => Math.max(a, c.calc?.retention || 0), 0));
+    const contraToDate = r2(live.reduce((a, c) => a + num(c.contra), 0));
+    // Latest cumulative gross / variations already certified (highest-seq live cert),
+    // so a new IPC can show this-period increments.
+    const latest = live.slice().sort((a, b) => (b.seq || 0) - (a.seq || 0))[0];
+    const grossToDate = latest ? num(latest.calc?.gross) : 0;
+    const variationsToDate = latest ? num(latest.calc?.variationsCum) : 0;
     v.summary = {
       certCount: certs.length,
       certifiedNet,
       advanceRecovered: recovered,
       advanceOutstanding: Math.max(0, r2(num(v.advanceAmount) - recovered)),
-      retentionHeld, contraToDate
+      retentionHeld, contraToDate, grossToDate, variationsToDate,
+      pctToDate: (num(v.contractSum) + num(v.variations)) > 0 ? grossToDate / (num(v.contractSum) + num(v.variations)) : 0
     };
     const client = await s.get("client/" + v.clientId, { type: "json" });
     v.clientName = client?.name || "";
@@ -16267,12 +16329,17 @@ var api_default = async (req, context) => {
     let seq = maxSeq + 1, key = clientCertKey(contract.id, seq), guard = 0;
     while (await s.get("clientcert/" + key) && guard++ < 200) { seq++; key = clientCertKey(contract.id, seq); }
     const no = clientCertNo(contract, client, seq, date);
+    // By-building IPC: when per-building lines are supplied, cumulative gross and the
+    // variations portion are derived from Σ(BOQ value × cumulative % done).
+    const hasLines = Array.isArray(b.lines) && b.lines.length > 0;
+    const lines = hasLines ? b.lines.map((l) => ({ ref: String(l.ref || ""), name: String(l.name || ""), value: num(l.value), pct: num(l.pct), isVariation: !!l.isVariation, remarks: String(l.remarks || "") })) : [];
+    const g = hasLines ? ccGrossFromLines(lines) : { grossCum: num(b.grossCum), variationsCum: num(b.variationsCum) };
     const cert = {
       no, key, seq, contractId: contract.id, clientId: contract.clientId,
       createdBy: me.id, createdAt: now(),
       date,
       periodFrom: b.periodFrom || "", periodTo: b.periodTo || "",
-      grossCum: num(b.grossCum), mos: num(b.mos), contra: num(b.contra),
+      lines, grossCum: g.grossCum, variationsCum: g.variationsCum, mos: num(b.mos), contra: num(b.contra),
       notes: b.notes || "", status: "Draft",
       audit: [{ at: now(), by: me.name, action: "Created (Draft)" }]
     };
@@ -16298,7 +16365,15 @@ var api_default = async (req, context) => {
     if (!can("clientcert")) return err("No edit rights", 403);
     const b = await req.json();
     for (const f of ["date", "periodFrom", "periodTo", "notes"]) if (b[f] !== void 0) c[f] = b[f];
-    for (const f of ["grossCum", "mos", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    if (Array.isArray(b.lines)) {
+      c.lines = b.lines.map((l) => ({ ref: String(l.ref || ""), name: String(l.name || ""), value: num(l.value), pct: num(l.pct), isVariation: !!l.isVariation, remarks: String(l.remarks || "") }));
+      const g = ccGrossFromLines(c.lines);
+      c.grossCum = g.grossCum; c.variationsCum = g.variationsCum;
+    } else {
+      for (const f of ["grossCum", "variationsCum", "mos", "contra"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    }
+    if (b.mos !== void 0) c.mos = num(b.mos);
+    if (b.contra !== void 0) c.contra = num(b.contra);
     const contract = await s.get("contract/" + c.contractId, { type: "json" });
     await recomputeClientCert(c, contract);
     c.audit.push({ at: now(), by: me.name, action: "Edited" });
