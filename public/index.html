@@ -2791,15 +2791,24 @@ async function vAwards(){
        <div><label>Performance security</label><select id="aw_perftype">
          <option value="guarantee">Bank guarantee (unconditional, on-demand)</option>
          <option value="cheque">Undated performance cheque</option>
-         <option value="none">None — retention only</option></select></div>
+         <option value="none">None — retention only</option>
+         <option value="na">Not applicable</option></select></div>
        <div><label>Performance security %</label><input id="aw_perf" type="number" value="10" step="0.5"></div>
        <div><label>Security delivery within (days)</label><input id="aw_secdays" type="number" value="7"></div>
        <div style="grid-column:1/-1"><label>Performance security validity</label><input id="aw_perfval" value="valid until 28 days after the end of the Defects Liability Period"></div>
+       <div><label>Performance bond</label><select id="aw_bondtype">
+         <option value="none">None</option>
+         <option value="guarantee">Bank guarantee (unconditional, on-demand)</option>
+         <option value="cheque">Undated performance cheque</option>
+         <option value="na">Not applicable</option></select></div>
+       <div><label>Performance bond %</label><input id="aw_bondpct" type="number" value="0" step="0.5" placeholder="0 = none"></div>
+       <div></div>
        <div><label>Advance / down payment (AED)</label><input id="aw_adv" type="number" step="0.01" value="0" placeholder="0 = none"></div>
        <div><label>Advance recovery % (of each cert)</label><input id="aw_advrec" type="number" step="0.1" value="0" placeholder="auto = advance %"><div class="muted" style="font-size:10px;margin-top:2px">UAE norm 10–20% · left blank = same % as the advance (clears by completion); raise it to recover faster</div></div>
-       <div><label>Advance security</label><select id="aw_advguar">
+       <div><label>Advance security / deposit</label><select id="aw_advguar">
          <option value="guarantee">Advance-payment guarantee (bank)</option>
-         <option value="cheque">Undated cheque of equal value</option></select></div>
+         <option value="cheque">Undated cheque of equal value</option>
+         <option value="na">Not applicable — no security deposit</option></select></div>
      </div>
      <div class="muted" style="font-size:11px;margin-top:4px">UAE standard: performance security <b>10%</b> (bank guarantee for agreements, undated cheque for small LOAs); retention <b>10% per certificate capped at 5%</b> of the contract, released 50% at taking-over &amp; 50% after the DLP; advance secured by a guarantee equal to the advance. Name, Trade Licence, TRN and email fill automatically from the supplier record. Everything here is editable — you can also amend an issued document before sending it.</div>
      <div class="flex" style="margin-top:14px;gap:10px"><span class="right"></span>
@@ -2883,6 +2892,7 @@ async function vAwards(){
     setv("aw_dlp",r.dlpDays); setv("aw_pay",r.paymentDays); setv("aw_hrs",r.signBackHours);
     setv("aw_perftype",r.perfSecurityType||"guarantee"); setv("aw_perf",r.performancePct!=null?r.performancePct:10);
     setv("aw_secdays",r.securityDeliveryDays!=null?r.securityDeliveryDays:7); setv("aw_perfval",r.perfValidity||"");
+    setv("aw_bondtype",r.perfBondType||"none"); setv("aw_bondpct",r.performanceBondPct!=null?r.performanceBondPct:0);
     setv("aw_adv",r.advanceAmount||0); setv("aw_advrec",r.advanceRecoveryPct||0); setv("aw_advguar",r.advGuaranteeType||"guarantee");
     typeBadge();
     const btn=$("#aw_gen"); if(btn) btn.textContent="Save amendment";
@@ -2898,6 +2908,7 @@ async function vAwards(){
       commenceDays:+$("#aw_cdays").value||7, completion:$("#aw_comp").value, retentionPct:+$("#aw_ret").value||10, delayPctPerDay:+$("#aw_dd").value||0.5, delayCapPct:+$("#aw_dc").value||10,
       retentionCapPct:+$("#aw_retcap").value||0, performancePct:+$("#aw_perf").value||10, perfSecurityType:$("#aw_perftype").value, perfValidity:$("#aw_perfval").value.trim(),
       securityDeliveryDays:+$("#aw_secdays").value||7, advGuaranteeType:$("#aw_advguar").value,
+      perfBondType:$("#aw_bondtype").value, performanceBondPct:+$("#aw_bondpct").value||0,
       dlpDays:+$("#aw_dlp").value||365, paymentDays:+$("#aw_pay").value||30, signBackHours:+$("#aw_hrs").value||24,
       advanceAmount:+$("#aw_adv").value||0, advanceRecoveryPct:+$("#aw_advrec").value||0 };
     const editing=AW_EDIT;

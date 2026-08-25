@@ -14390,9 +14390,23 @@ function buildAwardDocHtml(rec, cfg, assets) {
     ? "The cheque is returned within 30 days after the end of the DLP and rectification of defects, provided nothing is outstanding."
     : "";
   const retentionText = `retention of <b>${retPct}%</b> of each certificate, capped at <b>${retCapPct}% of the ${priceWord}</b> (released 50% on taking-over and 50% after the ${dlp}-day defects liability period)`;
-  const perfClauseText = perfType === "none"
+  const perfCore = perfType === "na"
+    ? `A separate performance security is <b>not applicable</b> to this ${isAgr ? "Agreement" : "award"}.`
+    : perfType === "none"
     ? `No separate performance security is required for this ${isAgr ? "Agreement" : "award"}; your performance is secured by the retention held under the Payment clause and by our rights of set-off and back-charge.`
     : `Within ${secDays} days of ${isAgr ? "signing" : "accepting this award"} and before mobilisation, deliver ${perfInstrument}. Delivery of the performance security is a <b>condition precedent to mobilisation and to any payment</b>. We may call, date or present it — in whole or in part — to recover any amount due from you, including delay damages, back-charges, unrecovered advance, or the cost of completion by others. ${perfReturn}`;
+  // Optional performance bond — same instrument choices as the performance security.
+  const bondType = rec.perfBondType || "none";
+  const bondPct = num(rec.performanceBondPct) || 0;
+  const bondAmt = r2(a * bondPct / 100);
+  const perfBondText = bondType === "guarantee"
+    ? ` In addition, provide a <b>performance bond by way of an unconditional, irrevocable, on-demand bank guarantee for ${money(bondAmt)}</b> (${bondPct}% of the ${priceWord}), issued by a UAE-licensed bank in favour of ${esc(ent)}, ${perfValidity}.`
+    : bondType === "cheque"
+    ? ` In addition, provide a <b>performance bond by way of an undated cheque for ${money(bondAmt)}</b> (${bondPct}% of the ${priceWord}), drawn on a UAE-licensed bank in favour of ${esc(ent)}.`
+    : bondType === "na"
+    ? ` A performance bond is <b>not applicable</b> to this ${isAgr ? "Agreement" : "award"}.`
+    : "";
+  const perfClauseText = perfCore + perfBondText;
   const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:52px;max-width:170px;object-fit:contain;display:block">` : `<div style="height:52px"></div>`;
   const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:96px;opacity:.85;object-fit:contain">` : "";
   const scopeHtml = String(rec.scope || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => `<p style="margin:0 0 6px">${esc(x)}</p>`).join("") || "<p>As per the quotation and drawings/specifications issued.</p>";
@@ -14408,6 +14422,8 @@ function buildAwardDocHtml(rec, cfg, assets) {
   </table>`;
   const advSecurity = advGuarType === "guarantee"
     ? `an <b>advance-payment guarantee equal to 100% of the advance (${money(advAmt)})</b> issued by a UAE-licensed bank, which reduces pro-rata as the advance is recovered`
+    : advGuarType === "na"
+    ? `<b>no separate advance security or deposit</b> (the advance is secured by the recovery mechanism and our rights of set-off below)`
     : `an <b>additional undated cheque of equal value (${money(advAmt)})</b>`;
   const advClauseText = advAmt > 0
     ? `An advance / down payment of <b>${money(advAmt)}</b> (${advPctOfAward}% of the ${priceWord}) will be paid to you against your valid tax invoice and ${advSecurity}. The advance is a <b>loan against the works</b>, not additional value, and is <b>recovered by deduction from every interim certificate at ${advRecPct}% of the certified gross</b> until fully repaid. Any unrecovered balance becomes immediately due on completion or termination, and may be recovered from sums due, retention, or the performance security.`
@@ -15102,6 +15118,8 @@ var api_default = async (req, context) => {
       perfSecurityType: b.perfSecurityType || (type === "AGREEMENT" ? "guarantee" : "cheque"),
       perfValidity: b.perfValidity || "valid until 28 days after the end of the Defects Liability Period",
       securityDeliveryDays: num(b.securityDeliveryDays) || 7,
+      perfBondType: b.perfBondType || "none",
+      performanceBondPct: num(b.performanceBondPct) || 0,
       advGuaranteeType: b.advGuaranteeType || "guarantee",
       securityDepPct: num(b.securityDepPct) || 0,
       dlpDays: num(b.dlpDays) || 365, paymentDays: num(b.paymentDays) || 30, signBackHours: num(b.signBackHours) || 24,
@@ -15174,10 +15192,10 @@ var api_default = async (req, context) => {
     }
     if (b.entity !== void 0) { const entObj = (settings.entities || []).find((e) => e.short === b.entity); if (entObj) { rec.entity = entObj.short; rec.entityName = entObj.name; rec.entityTRN = entityTRN(entObj); } }
     rec.amount = amount;
-    for (const k of ["project", "location", "client", "quotationRef", "quotationDate", "scopeTitle", "scope", "completion", "commencement", "perfValidity", "perfSecurityType", "advGuaranteeType"]) {
+    for (const k of ["project", "location", "client", "quotationRef", "quotationDate", "scopeTitle", "scope", "completion", "commencement", "perfValidity", "perfSecurityType", "advGuaranteeType", "perfBondType"]) {
       if (b[k] !== void 0) rec[k] = typeof b[k] === "string" ? b[k] : b[k];
     }
-    for (const k of ["commenceDays", "retentionPct", "delayPctPerDay", "delayCapPct", "performancePct", "retentionCapPct", "securityDeliveryDays", "dlpDays", "paymentDays", "signBackHours", "advanceAmount", "advanceRecoveryPct"]) {
+    for (const k of ["commenceDays", "retentionPct", "delayPctPerDay", "delayCapPct", "performancePct", "performanceBondPct", "retentionCapPct", "securityDeliveryDays", "dlpDays", "paymentDays", "signBackHours", "advanceAmount", "advanceRecoveryPct"]) {
       if (b[k] !== void 0 && b[k] !== "") rec[k] = num(b[k]);
     }
     rec.updatedAt = now(); rec.updatedBy = me.name;
