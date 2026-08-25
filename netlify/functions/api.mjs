@@ -12509,8 +12509,8 @@ var EMAIL_TYPES = {
   client_issued: "Client payment certificate issued",
   client_approved: "Client payment certificate approved"
 };
-var COLLECT_WINDOW = "Tuesdays only, between 2:00 PM and 5:00 PM";
-var collectNoteHtml = `<strong>Collection policy:</strong> Cash and cheques are handed over <strong>on ${COLLECT_WINDOW}</strong> at our office. Collection must be made by an <strong>authorised representative</strong> presenting their <strong>original Emirates ID</strong> (the EID number is recorded at handover). A <strong>signed &amp; stamped receipt copy is mandatory</strong> and must be provided at the time of collection.`;
+var COLLECT_WINDOW = "Tuesdays only, between 1:00 PM and 4:00 PM";
+var collectNoteHtml = `<strong>Collection policy:</strong> Cash and cheques are handed over <strong>on ${COLLECT_WINDOW}</strong> at our office. Collection must be made by an <strong>authorised representative of your company whose Emirates ID is registered under the company name</strong>, presenting their <strong>original Emirates ID</strong> (the EID number is recorded at handover). The <strong>original TAX invoice</strong> and a <strong>signed &amp; stamped receipt voucher</strong> are <strong>mandatory</strong> and must be submitted at the time of collection.`;
 var receiptNoteHtml = `<strong>Receipt required:</strong> a signed &amp; stamped receipt copy is <strong>mandatory for every payment</strong>. Kindly return your acknowledgement so we can close our records.`;
 function getEnv(k) {
   try {

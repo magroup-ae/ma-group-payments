@@ -885,8 +885,8 @@ function receiptHtml(c){
       <div class="flex" style="margin-top:6px"><a href="#" id="rcView">view receipt copy</a>${canPay?`<a href="#" id="rcAdd" style="color:#2E75B6">replace</a>`:""}</div></div>`;
   }
   return `<div class="note" style="margin-top:8px;border-left:4px solid #C0392B;background:#fdecea">
-    <b style="color:#C0392B">● Receipt pending</b> — a signed receipt copy + collector Emirates ID is mandatory for every payment.
-    ${(c.payment.mode==="Cash"||c.payment.mode==="Cheque")?'<div class="muted" style="font-size:11px;margin-top:3px">Collection: Tuesdays 2:00–5:00 PM, by an authorised representative with original Emirates ID.</div>':""}
+    <b style="color:#C0392B">● Receipt pending</b> — the original TAX invoice, a signed &amp; stamped receipt voucher and the collector's Emirates ID (under the company name) are mandatory for every payment.
+    ${(c.payment.mode==="Cash"||c.payment.mode==="Cheque")?'<div class="muted" style="font-size:11px;margin-top:3px">Collection: Tuesdays 1:00–4:00 PM, by an authorised representative whose Emirates ID is under the company name (original EID). Bring the original TAX invoice &amp; signed/stamped receipt voucher.</div>':""}
     ${canPay?`<div style="margin-top:6px"><button class="btn gold" id="rcRecord">Record receipt</button></div>`:""}</div>`;
 }
 function bindReceipt(c){
@@ -900,7 +900,7 @@ function openReceiptDialog(c){
   const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(480px,92vw)";
   const rc=(c.payment&&c.payment.receipt)||{};
   dlg.innerHTML=`<h2 style="margin-top:0">Record receipt — ${esc(c.no)}</h2>
-    <div class="note" style="margin-bottom:10px">Signed &amp; stamped receipt copy is mandatory for all payments. Cash &amp; cheque collection: <b>Tuesdays 2:00–5:00 PM</b>, authorised staff only, original Emirates ID recorded.</div>
+    <div class="note" style="margin-bottom:10px">Original TAX invoice &amp; signed/stamped receipt voucher are mandatory for all payments. Cash &amp; cheque collection: <b>Tuesdays 1:00–4:00 PM</b>, by an authorised representative whose Emirates ID is under the company name (original EID recorded).</div>
     <div class="grid">
       <div style="grid-column:1/-1"><label>Collector full name (authorised staff)</label><input id="r_name"></div>
       <div><label>Emirates ID no. (784-...)</label><input id="r_eid" placeholder="784-1990-1234567-8" inputmode="numeric"></div>
@@ -1068,7 +1068,7 @@ function voucherHtml(c){
     <table><tr><td class="sec" colspan="4">COLLECTION &amp; RECEIPT</td></tr>
     <tr><td class="lab">Collected by</td><td>${esc((p.receipt&&p.receipt.collectorName)||"")||"&nbsp;"}</td><td class="lab">Emirates ID no.</td><td>${esc((p.receipt&&p.receipt.collectorEID)||"")||"&nbsp;"}</td></tr>
     <tr><td class="lab">Collection date</td><td>${p.receipt&&p.receipt.received?dmy(p.receipt.collectionDate):"&nbsp;"}</td><td class="lab">Receipt copy</td><td>${p.receipt&&p.receipt.received?"On file ✓":"Attached ☐"}</td></tr></table>
-    <div class="muted" style="font-size:8.5px;margin:4px 0">Collection is on Tuesdays only, 2:00–5:00 PM, by an authorised representative presenting original Emirates ID. A signed &amp; stamped receipt copy is mandatory.</div>
+    <div class="muted" style="font-size:8.5px;margin:4px 0">Collection is on Tuesdays only, 1:00–4:00 PM, by an authorised representative whose Emirates ID is registered under the company name (original EID presented). The original TAX invoice and a signed &amp; stamped receipt voucher are mandatory at collection.</div>
     <table class="sig" style="margin-top:12px"><tr><td class="nm">&nbsp;</td><td class="nm"></td><td class="nm"></td></tr>
     <tr><td>Received by (Payee) — sign, stamp &amp; EID</td><td>Paid by (Cash Custodian)</td><td>Approved by</td></tr></table>
     <div class="foot">MA Group Finance — petty cash voucher — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
@@ -1094,7 +1094,7 @@ function receiptVoucherHtml(c){
     <table><tr><td class="sec navy" colspan="4">COLLECTED BY (AUTHORISED REPRESENTATIVE)</td></tr>
     <tr><td class="lab">Full name</td><td>${esc(rc.collectorName||"")||"&nbsp;"}</td><td class="lab">Emirates ID no.</td><td>${esc(rc.collectorEID||"")||"784-____-_______-_"}</td></tr>
     <tr><td class="lab">Collection date</td><td>${rc.received?dmy(rc.collectionDate):"&nbsp;"}</td><td class="lab">Contact no.</td><td>&nbsp;</td></tr></table>
-    <div class="note" style="font-size:9px;border-left:3px solid var(--gold);padding:6px 10px;background:#fff8e6;margin:6px 0">Collection of cash &amp; cheques is on <b>Tuesdays only, 2:00–5:00 PM</b>, by an authorised representative presenting their <b>original Emirates ID</b>. A signed &amp; stamped receipt copy is mandatory for every payment.</div>
+    <div class="note" style="font-size:9px;border-left:3px solid var(--gold);padding:6px 10px;background:#fff8e6;margin:6px 0">Collection of cash &amp; cheques is on <b>Tuesdays only, 1:00–4:00 PM</b>, by an authorised representative whose <b>Emirates ID is registered under the company name</b> (original EID presented). The <b>original TAX invoice</b> and a <b>signed &amp; stamped receipt voucher</b> are mandatory for every payment.</div>
     <table class="sig" style="margin-top:16px"><tr><td class="nm">&nbsp;</td><td class="nm">&nbsp;</td></tr>
     <tr><td>Receiver’s signature &amp; company stamp</td><td>Released by (MA Group Accounts)</td></tr></table>
     <div class="foot">MA Group Finance — payment receipt &amp; acknowledgement — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
