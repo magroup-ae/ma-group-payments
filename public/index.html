@@ -237,6 +237,36 @@ async function openAwardDoc(id, doPrint){
     if(doPrint){ setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 400); }
   }catch(e){ toast(e.message); }
 }
+// Render a full HTML document to a multi-page A4 PDF in the browser and return its
+// base64 (no data-URI prefix). Used to attach the LOA/Contract PDF to the email.
+async function htmlToPdfBase64(html){
+  await loadScript("jspdf.umd.min.js"); await loadScript("html2canvas.min.js");
+  const RW=820; // render width (~A4 @ 96dpi with margin)
+  const ifr=document.createElement("iframe");
+  ifr.style.cssText="position:fixed;left:-10000px;top:0;width:"+RW+"px;height:1160px;border:0;background:#fff";
+  document.body.appendChild(ifr);
+  const idoc=ifr.contentDocument||ifr.contentWindow.document;
+  idoc.open(); idoc.write(html); idoc.close();
+  await new Promise(r=>setTimeout(r,350));
+  try{ await Promise.all([...idoc.images].map(im=>im.complete?1:new Promise(res=>{im.onload=im.onerror=res; setTimeout(res,1500);}))); }catch(e){}
+  const target=idoc.querySelector(".cert")||idoc.querySelector(".page")||idoc.body;
+  const canvas=await html2canvas(target,{scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:RW,scrollX:0,scrollY:0});
+  try{ document.body.removeChild(ifr); }catch(e){}
+  const { jsPDF }=window.jspdf; const pdf=new jsPDF({unit:"pt",format:"a4",compress:true});
+  const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+  const M=24, cw=pw-M*2; const ratio=cw/canvas.width; const pageCanvasPx=(ph-M*2)/ratio;
+  let pos=0, first=true;
+  while(pos<canvas.height){
+    const sh=Math.min(pageCanvasPx, canvas.height-pos);
+    const slice=document.createElement("canvas"); slice.width=canvas.width; slice.height=Math.ceil(sh);
+    const ctx=slice.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,slice.width,slice.height);
+    ctx.drawImage(canvas,0,pos,canvas.width,sh,0,0,canvas.width,sh);
+    if(!first) pdf.addPage(); first=false;
+    pdf.addImage(slice.toDataURL("image/jpeg",0.9),"JPEG",M,M,cw,sh*ratio);
+    pos+=sh;
+  }
+  return pdf.output("datauristring").split(",")[1];
+}
 
 const ONES=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
 const TENS=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
@@ -2833,7 +2863,12 @@ async function vAwards(){
     h.querySelectorAll(".aw_view").forEach(b=>b.onclick=()=>openAwardDoc(b.dataset.id,true));
     h.querySelectorAll(".aw_edit").forEach(b=>b.onclick=async ()=>{ try{ const rec=await api("award/"+b.dataset.id); AW_EDIT=rec; await vAwards(); window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_send").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); if(!confirm(`Email this ${a.type==="LOA"?"Letter of Award":"Subcontract Agreement"} to ${esc(a.supplierName)} for signature within ${a.signBackHours||24} hours?`)) return;
-      try{ toast("Sending…"); const r=await api("award/"+b.dataset.id+"/send",{method:"POST"}); toast("Sent to "+r.to); const d=await api("award/list"); renderList(d.items); }catch(e){ toast(e.message); } });
+      try{
+        toast("Preparing PDF…"); let pdfBase64="", pdfName="";
+        try{ const html=await apiText("award/"+b.dataset.id+"/html"); pdfBase64=await htmlToPdfBase64(html); pdfName=((a.docNo||"Award").replace(/[^A-Za-z0-9._-]+/g,"_"))+".pdf"; }
+        catch(e){ if(!confirm("Could not build the PDF attachment ("+e.message+"). Send the email without the PDF attached?")) return; }
+        toast("Sending…"); const r=await api("award/"+b.dataset.id+"/send",{method:"POST",body:{pdfBase64,pdfName}}); toast("Sent to "+r.to+(r.attached?" (PDF attached)":"")); const d=await api("award/list"); renderList(d.items);
+      }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_recv").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); const hasAdv=+a.advanceAmount>0;
       if(!confirm(`Mark ${a.docNo} as signed & returned?\n\nThis will:\n• copy the contract terms (value, advance recovery, retention, DLP) onto the supplier\n${hasAdv?`• create the down-payment certificate for AED ${fmt(a.advanceAmount)} + 5% VAT (draft, ready to approve & pay)`:"• (no advance on this contract)"}\n• progress IPCs will then auto-apply advance recovery & retention`)) return;
       try{ toast("Processing…"); const r=await api("award/"+b.dataset.id+"/received",{method:"POST"});

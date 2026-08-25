@@ -15164,12 +15164,21 @@ var api_default = async (req, context) => {
     const html = buildAwardDocHtml(rec, cfg, { sign, stamp });
     const label = rec.type === "LOA" ? "Letter of Award" : "Subcontract Agreement";
     const subject = `${label} ${rec.docNo} — ${rec.project || "Works Package"} — Signature required within ${rec.signBackHours || 24}h`;
-    const r = await sendMail(s, cfg, { type: "awarddoc", to: rec.supplierEmail, toName: rec.supplierName, subject, html, supplierId: rec.supplierId });
+    // Optional PDF of the document, rendered in the browser and attached to the email.
+    let attachments;
+    try {
+      const b = await req.json();
+      if (b && b.pdfBase64) {
+        const fn = String(b.pdfName || ((rec.docNo || "Award").replace(/[^A-Za-z0-9._-]+/g, "_") + ".pdf"));
+        attachments = [{ filename: fn, content: Buffer.from(String(b.pdfBase64), "base64"), contentType: "application/pdf" }];
+      }
+    } catch (e) {}
+    const r = await sendMail(s, cfg, { type: "awarddoc", to: rec.supplierEmail, toName: rec.supplierName, subject, html, supplierId: rec.supplierId, attachments });
     rec.status = "Sent"; rec.sentAt = now(); rec.sendStatus = r.status;
     await s.setJSON("award/" + rec.id, rec);
     // Copy to the CEO/CFO for the record.
-    try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html }); } catch (e) { }
-    return json({ ok: true, status: r.status, to: rec.supplierEmail });
+    try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) { }
+    return json({ ok: true, status: r.status, to: rec.supplierEmail, attached: !!attachments });
   }
   const awdUpd = path.match(/^award\/([^/]+)\/update$/);
   if (awdUpd && req.method === "POST") {
