@@ -12916,6 +12916,12 @@ async function sendMail(s, cfg, msg) {
   const msgBcc = Array.isArray(msg.bcc) ? msg.bcc.filter(Boolean) : split(msg.bcc);
   const allBcc = [...split(cfg.bcc), ...msgBcc];
   rec.bccCount = msgBcc.length;
+  // CC: settings-level cc + per-message cc (e.g. a supplier's additional contact
+  // emails), deduped and never duplicating the primary To recipient.
+  const msgCc = Array.isArray(msg.cc) ? msg.cc.filter(Boolean) : split(msg.cc);
+  const toLc = String(msg.to || "").trim().toLowerCase();
+  const allCc = [...new Set([...split(cfg.cc), ...msgCc].map((a) => a.trim()).filter((a) => a && a.toLowerCase() !== toLc))];
+  rec.ccCount = allCc.length;
   const useSmtp = cfg.provider === "smtp" && cfg.smtpUser && cfg.smtpPass;
   const useZepto = cfg.provider === "zeptomail" && cfg.token;
   try {
@@ -12942,7 +12948,7 @@ async function sendMail(s, cfg, msg) {
         from: `"${cfg.fromName}" <${cfg.from}>`,
         to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to,
         replyTo: cfg.replyTo,
-        cc: split(cfg.cc).join(", ") || void 0,
+        cc: allCc.join(", ") || void 0,
         bcc: allBcc.join(", ") || void 0,
         subject: msg.subject,
         html: msg.html,
@@ -12958,8 +12964,7 @@ async function sendMail(s, cfg, msg) {
         subject: msg.subject,
         htmlbody: msg.html
       };
-      const cc = split(cfg.cc);
-      if (cc.length) body.cc = cc.map((a) => ({ email_address: { address: a } }));
+      if (allCc.length) body.cc = allCc.map((a) => ({ email_address: { address: a } }));
       if (allBcc.length) body.bcc = allBcc.map((a) => ({ email_address: { address: a } }));
       const resp = await fetch(`https://${cfg.host}/v1.1/email`, {
         method: "POST",
@@ -12985,7 +12990,10 @@ async function notify(s, type, ctx) {
     const cfg = await getEmailCfg(s);
     const t = buildEmail(type, ctx, cfg);
     if (!t) return null;
-    return await sendMail(s, cfg, { type, to: t.to, toName: t.toName, subject: t.subject, html: t.html, certNo: ctx.cert?.no, supplierId: ctx.sup?.id });
+    // Copy every additional supplier contact email so all their contacts receive it.
+    const sup = ctx.sup || {};
+    const cc = Array.isArray(sup.emails) ? sup.emails : [];
+    return await sendMail(s, cfg, { type, to: t.to, toName: t.toName, subject: t.subject, html: t.html, cc, certNo: ctx.cert?.no, supplierId: ctx.sup?.id });
   } catch (e) {
     return null;
   }
@@ -15525,6 +15533,16 @@ var api_default = async (req, context) => {
       tel: str("tel"),
       contact: str("contact"),
       email: str("email"),
+      // All contact emails (primary first). Every system email is sent to the primary
+      // and CC's the rest, so the vendor never misses a notification.
+      emails: (() => {
+        const rx = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+        const src = Array.isArray(b.emails) ? b.emails : (b.emails === void 0 ? (existing?.emails || []) : []);
+        const list = [str("email"), ...src].map((e) => String(e || "").trim()).filter((e) => e && rx.test(e));
+        const seen = new Set(), out = [];
+        for (const e of list) { const k = e.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(e); } }
+        return out;
+      })(),
       // tax & bank
       trn: str("trn"),
       vatRegistered: b.vatRegistered === void 0 ? existing?.vatRegistered || false : !!b.vatRegistered,

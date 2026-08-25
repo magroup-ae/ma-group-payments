@@ -1335,8 +1335,12 @@ function supForm(s){
     <div><label>Designation</label><input id="s_contactDesignation" value="${esc(s.contactDesignation||"")}"></div>
     <div><label>Mobile</label><input id="s_mobile" value="${esc(s.mobile||"")}"></div>
     <div><label>Telephone</label><input id="s_tel" value="${esc(s.tel||"")}"></div>
-    <div><label>Email <span style="color:#c0392b">*</span> <span class="muted" style="font-size:10px">(mandatory — used for all notifications)</span></label><input id="s_email" type="email" required value="${esc(s.email||"")}"></div>
+    <div><label>Email 1 — primary <span style="color:#c0392b">*</span> <span class="muted" style="font-size:10px">(mandatory)</span></label><input id="s_email" type="email" required value="${esc(s.email||"")}"></div>
+    <div><label>Email 2</label><input id="s_email2" type="email" value="${esc(supAddlEmail(s,0))}"></div>
+    <div><label>Email 3</label><input id="s_email3" type="email" value="${esc(supAddlEmail(s,1))}"></div>
+    <div><label>Email 4</label><input id="s_email4" type="email" value="${esc(supAddlEmail(s,2))}"></div>
   </div>
+  <div class="note" style="font-size:11px;margin:2px 0 0">Please add <b>at least 4 contact emails</b> — every system email (certificates, cheque-ready, SOA, reminders) is sent to <b>all</b> of them so the vendor never misses a notification.</div>
   <h3>Tax &amp; Bank</h3><div class="grid">
     <div><label>TRN</label><input id="s_trn" value="${esc(s.trn||"")}"></div>
     <div><label>VAT registered</label><select id="s_vatRegistered"><option value="yes" ${s.vatRegistered?"selected":""}>Yes</option><option value="no" ${!s.vatRegistered?"selected":""}>No</option></select></div>
@@ -1396,17 +1400,30 @@ function supForm(s){
       inp.onchange=()=>{ const f=inp.files[0]; if(!f)return; if(f.size>8000000){toast("Under ~8 MB");return;} fileToDataUrl(f,async d=>{ try{ await api("supplier/"+encodeURIComponent(s.id)+"/doc",{method:"POST",body:{kind:b.dataset.docadd,dataUrl:d,name:f.name}}); toast("Uploaded"); await load(); supForm(SUPS.find(x=>x.id===s.id)); }catch(e){toast(e.message);} }); }; inp.click(); });
   }
   $("#saveSup").onclick=async ()=>{ if(!$("#s_name").value){ toast("Legal name required"); return; }
+    const rx=/^[^@\s]+@[^@\s]+\.[^@\s]+$/;
     const em=($("#s_email").value||"").trim();
-    if(!em||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ toast("A valid email is required (mandatory for notifications)"); $("#s_email").focus(); return; }
+    if(!em||!rx.test(em)){ toast("A valid primary email is required (mandatory for notifications)"); $("#s_email").focus(); return; }
+    const emails=collectSupEmails();
+    const bad=emails.find(e=>!rx.test(e));
+    if(bad){ toast("This email is not valid: "+bad); return; }
+    if(emails.length<4 && !confirm(`Only ${emails.length} contact email${emails.length===1?"":"s"} entered. We recommend at least 4 so the vendor receives all system emails. Save anyway?`)) return;
     const body=collectSup(s);
     try{ const saved=await api("supplier",{method:"POST",body}); toast("Registered"); await load(); supForm(SUPS.find(x=>x.id===saved.id)||saved); }catch(e){ toast(e.message); } };
 }
 function DOC_KINDS_LIST(){ return ["license","trn","bank","establishment","other"]; }
+// Additional (non-primary) email at index i, from the stored emails[] list.
+function supAddlEmail(s,i){ const prim=String((s&&s.email)||"").trim().toLowerCase();
+  const extra=((s&&s.emails)||[]).map(e=>String(e||"").trim()).filter(e=>e&&e.toLowerCase()!==prim);
+  return extra[i]||""; }
+function collectSupEmails(){ const ids=["s_email","s_email2","s_email3","s_email4"];
+  const seen=new Set(), out=[]; for(const id of ids){ const el=$("#"+id); const v=el?String(el.value||"").trim():"";
+    if(v && !seen.has(v.toLowerCase())){ seen.add(v.toLowerCase()); out.push(v); } } return out; }
 function collectSup(s){ const g=id=>{const el=$("#s_"+id); return el?el.value:"";};
+  const emails=collectSupEmails();
   return { id:s.id, type:g("type")||"Subcontractor", name:g("name"), tradeName:g("tradeName"), licenseNo:g("licenseNo"), licenseExpiry:g("licenseExpiry"),
     establishmentCard:g("establishmentCard"), trade:g("trade"), category:g("trade"), emirate:g("emirate"), poBox:g("poBox"),
     address:g("address"), website:g("website"), contactName:g("contactName"), contactDesignation:g("contactDesignation"),
-    mobile:g("mobile"), tel:g("tel"), email:g("email"), trn:g("trn"), vatRegistered:g("vatRegistered")==="yes",
+    mobile:g("mobile"), tel:g("tel"), email:emails[0]||g("email"), emails, trn:g("trn"), vatRegistered:g("vatRegistered")==="yes",
     bank:g("bank"), accountName:g("accountName"), accountNo:g("accountNo"), iban:g("iban"), swift:g("swift"),
     entity:g("entity"), project:g("project"), lpoRef:g("lpoRef"), signDate:g("signDate"), contractType:g("contractType")||"Fixed",
     contractValue:+g("contractValue")||0, vatPct:(+g("vatPct")||0)/100, retentionPct:(+g("retentionPct")||0)/100,

@@ -12570,6 +12570,9 @@ async function sendMail(s, cfg, msg) {
   const id = "E" + Date.now().toString(36) + "-" + randomBytes(3).toString("hex");
   const rec = { id, at: now(), type: msg.type || "", to: msg.to || "", toName: msg.toName || "", subject: msg.subject || "", certNo: msg.certNo || "", supplierId: msg.supplierId || "", status: "", detail: "" };
   const split = (v) => String(v || "").split(/[;,]/).map((a) => a.trim()).filter(Boolean);
+  const msgCc = Array.isArray(msg.cc) ? msg.cc.filter(Boolean) : split(msg.cc);
+  const toLc = String(msg.to || "").trim().toLowerCase();
+  const allCc = [...new Set([...split(cfg.cc), ...msgCc].map((a) => a.trim()).filter((a) => a && a.toLowerCase() !== toLc))];
   const useSmtp = cfg.provider === "smtp" && cfg.smtpUser && cfg.smtpPass;
   const useZepto = cfg.provider === "zeptomail" && cfg.token;
   try {
@@ -12587,13 +12590,12 @@ async function sendMail(s, cfg, msg) {
       rec.detail = cfg.provider === "smtp" ? "Zoho Mail app password not set \u2014 composed but not sent" : "no provider token configured \u2014 composed but not sent";
     } else if (useSmtp) {
       const transport = import_nodemailer.default.createTransport({ host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpPort === 465, auth: { user: cfg.smtpUser, pass: cfg.smtpPass } });
-      await transport.sendMail({ from: `"${cfg.fromName}" <${cfg.from}>`, to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to, replyTo: cfg.replyTo, cc: split(cfg.cc).join(", ") || void 0, bcc: split(cfg.bcc).join(", ") || void 0, subject: msg.subject, html: msg.html, attachments: msg.attachments || void 0 });
+      await transport.sendMail({ from: `"${cfg.fromName}" <${cfg.from}>`, to: msg.toName ? `"${msg.toName}" <${msg.to}>` : msg.to, replyTo: cfg.replyTo, cc: allCc.join(", ") || void 0, bcc: split(cfg.bcc).join(", ") || void 0, subject: msg.subject, html: msg.html, attachments: msg.attachments || void 0 });
       rec.status = "sent";
     } else {
       const body = { from: { address: cfg.from, name: cfg.fromName }, to: [{ email_address: { address: msg.to, name: msg.toName || msg.to } }], reply_to: [{ address: cfg.replyTo, name: cfg.fromName }], subject: msg.subject, htmlbody: msg.html };
       if (msg.attachments && msg.attachments.length) body.attachments = msg.attachments.map((a) => ({ content: Buffer.from(String(a.content), "utf8").toString("base64"), mime_type: a.contentType || "application/octet-stream", name: a.filename || "attachment" }));
-      const cc = split(cfg.cc);
-      if (cc.length) body.cc = cc.map((a) => ({ email_address: { address: a } }));
+      if (allCc.length) body.cc = allCc.map((a) => ({ email_address: { address: a } }));
       const bcc = split(cfg.bcc);
       if (bcc.length) body.bcc = bcc.map((a) => ({ email_address: { address: a } }));
       const resp = await fetch(`https://${cfg.host}/v1.1/email`, { method: "POST", headers: { "Authorization": `Zoho-enczapikey ${cfg.token}`, "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) });
@@ -12616,7 +12618,8 @@ async function notify(s, type, ctx) {
     const cfg = await getEmailCfg(s);
     const t = buildEmail(type, ctx, cfg);
     if (!t) return null;
-    return await sendMail(s, cfg, { type, to: t.to, toName: t.toName, subject: t.subject, html: t.html, supplierId: ctx.sup?.id });
+    const cc = Array.isArray(ctx.sup?.emails) ? ctx.sup.emails : [];
+    return await sendMail(s, cfg, { type, to: t.to, toName: t.toName, subject: t.subject, html: t.html, cc, supplierId: ctx.sup?.id });
   } catch {
     return null;
   }
