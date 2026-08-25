@@ -14110,16 +14110,18 @@ async function computePnl(s, project) {
   const committedCertified = r2(ipcCost);
   const committedRemaining = r2(Math.max(0, committed - committedCertified));
   // ---- cash position ----
-  // Advance received = logged advance receipts if any, else the agreed down payment
-  // (received upfront against the advance guarantee before works commence).
-  const advanceReceived = r2(advanceReceiptSum > 0 ? advanceReceiptSum : advanceAgreed);
-  const progressCollected = r2(collectedAll - advanceReceiptSum);
-  const totalCashIn = r2(advanceReceived + progressCollected);
+  // "Received" / "collected" reflect ONLY actual logged client receipts — never the
+  // agreed down payment or the contract value. The agreed advance is a contract TERM
+  // (advanceAgreed), separate from cash actually received (advanceReceived).
+  const advanceReceived = r2(advanceReceiptSum);            // logged advance receipts only
+  const progressCollected = r2(collectedAll - advanceReceiptSum); // logged progress receipts
+  const totalCashIn = r2(collectedAll);                     // all logged receipts (advance + progress)
   const netCash = r2(totalCashIn - paidOut);
   const collected = progressCollected;
   // ---- down-payment (advance) utilisation ----
+  // Balance of the agreed advance FACILITY after payments already drawn from it.
   advanceUtilised = r2(advanceUtilised);
-  const advanceBalanceRemaining = r2(advanceReceived - advanceUtilised);
+  const advanceBalanceRemaining = r2(advanceAgreed - advanceUtilised);
   // ---- CFO income-statement waterfall ----
   const directCost = r2(byGroup.Direct || 0);
   const indirectCost = r2(byGroup.Indirect || 0);

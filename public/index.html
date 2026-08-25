@@ -474,7 +474,7 @@ async function vDash(){
      ${kpi("AED "+fmt(pnl?num(pnl.grossBilledInclVat):0),"Billed incl VAT (payable)")}
      ${kpi("AED "+fmt(pnl?num(pnl.collected):0),"Collected from clients")}
      ${kpi(`<span style="color:${pnl&&num(pnl.outstandingReceivable)>0?'var(--gold)':'var(--green)'}">AED ${fmt(pnl?num(pnl.outstandingReceivable):0)}</span>`,"Outstanding receivable")}
-     ${kpi("AED "+fmt(totalDown),"Down payments received")}
+     ${kpi("AED "+fmt(pnl?num(pnl.advanceReceived):0),"Down payments received (logged)")}
      ${kpi("AED "+fmt(totalRet),"Retention held by clients")}
      ${kpi(ccerts.length,"Client IPCs")}
    </div>
@@ -586,7 +586,7 @@ async function projectDash(p,ctx){
      ${kpi(live.length,"Client IPCs issued/approved")}
    </div>
    <div class="kpis" style="margin-top:10px">
-     ${kpi("AED "+fmt(sDown.down),"Down payment received")}
+     ${kpi("AED "+fmt(sDown.down),"Down payment (agreed)")}
      ${kpi("AED "+fmt(certified*sDown.retPct),`Retention held @ ${fmt(sDown.retPct*100)}%`)}
      ${kpi("AED "+fmt((cval||sDown.cv)-certified),"Balance to certify")}
      ${kpi("AED "+fmt(certified*sDown.retPct/2),"Retention due at completion (½)")}
@@ -2376,14 +2376,15 @@ function renderPnl(d){
        <div class="muted" style="font-size:11px;margin-top:6px">Cash is separate from profit. A project can be <b>cash-positive</b> (advance received up-front) while accrual profit is still building — and can be profitable yet cash-negative. Manage both.</div></div>
      <div class="card" style="margin:0"><h3>D · Advance &amp; retention ledger</h3>
        <table>
-        <tr><td class="lab">Advance / down payment received</td><td class="num">${fmt(d.advanceReceived)}</td></tr>
+        <tr><td class="lab">Advance / down payment — agreed (contract)</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>
+        <tr><td class="lab">Advance / down payment — received (logged)</td><td class="num" style="color:${num(d.advanceReceived)>0?'#2E7D32':'#7a8494'}">${fmt(d.advanceReceived)}</td></tr>
         <tr><td class="lab">Less: recovered to date (from IPCs)</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
-        <tr style="background:#eef2f8;font-weight:700"><td>Advance outstanding (liability)</td><td class="num" style="color:var(--gold)">${fmt(d.advanceOutstanding)}</td></tr>
-        ${(num(d.advanceUtilised)>0||num(d.advanceReceived)>0)?`<tr><td colspan="2" style="height:8px;border:0"></td></tr>
-        <tr style="font-weight:600"><td colspan="2">Down-payment cash utilisation</td></tr>
-        <tr><td class="lab" style="padding-left:18px">Advance / down payment received</td><td class="num">${fmt(d.advanceReceived)}</td></tr>
+        <tr style="background:#eef2f8;font-weight:700"><td>Advance outstanding to recover (liability)</td><td class="num" style="color:var(--gold)">${fmt(d.advanceOutstanding)}</td></tr>
+        ${(num(d.advanceUtilised)>0||num(d.advanceAgreed)>0)?`<tr><td colspan="2" style="height:8px;border:0"></td></tr>
+        <tr style="font-weight:600"><td colspan="2">Down-payment facility utilisation</td></tr>
+        <tr><td class="lab" style="padding-left:18px">Advance / down payment — agreed facility</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>
         <tr><td class="lab" style="padding-left:18px">Less: payments made from down payment</td><td class="num">(${fmt(d.advanceUtilised)})</td></tr>
-        <tr style="background:${num(d.advanceBalanceRemaining)>=0?'#eef2f8':'#fdecec'};font-weight:700"><td>Down-payment balance remaining</td><td class="num" style="color:${num(d.advanceBalanceRemaining)>=0?'#2E7D32':'var(--red)'}">${fmt(d.advanceBalanceRemaining)}</td></tr>`:""}
+        <tr style="background:${num(d.advanceBalanceRemaining)>=0?'#eef2f8':'#fdecec'};font-weight:700"><td>Down-payment facility remaining</td><td class="num" style="color:${num(d.advanceBalanceRemaining)>=0?'#2E7D32':'var(--red)'}">${fmt(d.advanceBalanceRemaining)}</td></tr>`:""}
         <tr><td colspan="2" style="height:8px;border:0"></td></tr>
         <tr><td class="lab">Retention held by client (asset)</td><td class="num">${fmt(d.retentionHeld)}</td></tr>
         <tr><td class="lab" style="color:#7a8494;font-size:12px">Release: 5% on completion · 5% after 12-month DLP</td><td class="num"></td></tr>
