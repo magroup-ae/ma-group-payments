@@ -12632,17 +12632,29 @@ async function listSuppliers(s) {
 }
 async function runSoaJob(s) {
   const suppliers = await listSuppliers(s);
+  // Only request an SOA from suppliers/subcontractors we actually transact with —
+  // i.e. a payment was made or initiated (a supplier IPC exists, or a cost-log/expense
+  // is booked against them). Directory-only / never-paid vendors are excluded.
+  const loadAll = async (prefix) => { const { blobs } = await s.list({ prefix }); const out = []; for (const b of blobs) { const v = await s.get(b.key, { type: "json" }); if (v) out.push(v); } return out; };
+  const [certs, expenses] = await Promise.all([loadAll("cert/"), loadAll("expense/")]);
+  const txnIds = /* @__PURE__ */ new Set(), txnNames = /* @__PURE__ */ new Set();
+  for (const c of certs) { if (c && c.status !== "Cancelled" && c.supplierId) txnIds.add(String(c.supplierId)); }
+  for (const e of expenses) { if (e) { if (e.supplierId) txnIds.add(String(e.supplierId)); if (e.supplier) txnNames.add(String(e.supplier).trim().toLowerCase()); } }
+  const hasTxn = (sup) => txnIds.has(String(sup.id)) || txnNames.has(String(sup.name || "").trim().toLowerCase());
   const t = /* @__PURE__ */ new Date();
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const period = `${months[t.getUTCMonth()]} ${t.getUTCFullYear()}`;
   const asOf = t.toISOString().slice(0, 10);
   const sent = [];
+  let eligible = 0;
   for (const sup of suppliers) {
     if (sup.status && sup.status !== "Active" || !sup.email) continue;
+    if (!hasTxn(sup)) continue;
+    eligible++;
     const rec = await notify(s, "soa", { sup, period, asOf });
     sent.push({ supplier: sup.name, status: rec?.status });
   }
-  return { job: "soa", period, notified: sent.length, sent };
+  return { job: "soa", period, eligible, notified: sent.length, sent };
 }
 
 // _src/cron-soa.mjs
