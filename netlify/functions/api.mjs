@@ -13075,9 +13075,9 @@ async function verifyToken(tok) {
   }
 }
 var CHEQUE_LAYOUT = {
-  // v6: force-restore the ORIGINAL calibrated layout (identical values to v5) —
-  // wipes any offsets/positions saved during the printer-alignment attempts.
-  layoutVersion: 6,
+  // v7: payee + amount-in-words moved 100 mm LEFT (x 132 → 32) per CEO's print check;
+  // date and figures unchanged. v6 had force-restored the pre-adjustment layout.
+  layoutVersion: 7,
   widthMm: 297,
   heightMm: 210,
   fontPt: 11,
@@ -13087,9 +13087,9 @@ var CHEQUE_LAYOUT = {
   paper: "A4",
   fields: {
     date: { x: 227, y: 87, label: "Date" },
-    payee: { x: 132, y: 94, label: "Payee" },
-    words1: { x: 132, y: 107, label: "Amount in words (line 1)" },
-    words2: { x: 132, y: 114, label: "Amount in words (line 2)" },
+    payee: { x: 32, y: 94, label: "Payee" },
+    words1: { x: 32, y: 107, label: "Amount in words (line 1)" },
+    words2: { x: 32, y: 114, label: "Amount in words (line 2)" },
     figures: { x: 240, y: 115, label: "Amount in figures" }
   }
 };
