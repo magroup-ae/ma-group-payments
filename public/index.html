@@ -1043,10 +1043,10 @@ function printCert(c){
    <tr><td colspan="2" style="font-style:italic;font-size:9.5px">We certify that the value of work properly executed / goods supplied by the above party to the date of valuation, after deduction of retention, advance recovery, previous certificates and contra-charges, amounts to the net sum stated above, recommended for payment under the terms of the Subcontract / LPO.</td></tr></table>
    <div style="position:relative">
    <table class="sig"><tr>
-     <td class="nm">&nbsp;</td><td class="nm"></td>
-     <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td>
+     <td class="nm" style="vertical-align:bottom"><span style="font-weight:700;letter-spacing:.5px">MA-QS</span></td><td class="nm"></td>
+     <td class="nm" style="vertical-align:bottom;padding-top:6px">${approved?`<div style="color:#c00;font-weight:800;letter-spacing:.5px">MA-CFO approved</div>`:""}${signImg}</td>
      <td class="nm"></td></tr>
-   <tr><td>Prepared by (QS / Site)</td><td>Checked by (PM / Commercial)</td><td>Approved by (CEO)${approvedTag}</td><td>Received by (Supplier)</td></tr></table>
+   <tr><td>Initiated by (MA-QS)</td><td>Checked by (PM / Commercial)</td><td>Approved by (MA-CFO)${approvedTag}</td><td>Received by (Supplier)</td></tr></table>
    ${stampImg}
    </div>
    ${certCredits()}
@@ -1155,15 +1155,8 @@ function chequePDF(c){
   if(wparts[0]) put("words1", wparts[0]);
   if(wparts[1]) put("words2", wparts.slice(1).join(" "));
   put("figures", "*"+fmt(amt)+"/-*");
-  // Internal control signatures: initiator (MA-QS) in black, CFO approval in red.
-  const putSig=(k,txt,red)=>{ const p=(f&&f[k])||CHQ_SIG_DEFAULTS[k]; if(!p) return;
-    if(red) doc.setTextColor(200,0,0); doc.text(String(txt), p.x+ox, p.y+oy); if(red) doc.setTextColor(0,0,0); };
-  putSig("initSig","MA-QS",false);
-  putSig("cfoSig","MA-CFO approved",true);
   return doc;
 }
-// Fallback positions for the two control-signature marks (used if not in stored layout).
-const CHQ_SIG_DEFAULTS={ initSig:{x:20,y:150,label:"Initiating signature — MA-QS"}, cfoSig:{x:20,y:158,label:"CFO approval — MA-CFO approved (red)"} };
 function printCheque(c){
   try{
     const doc=chequePDF(c);
@@ -3474,8 +3467,6 @@ function bindSignature(){
 }
 function chequeLayoutCard(){
   const ch=S.cheque, f=ch.fields;
-  // Ensure the two control-signature marks exist so they can be positioned & saved.
-  Object.keys(CHQ_SIG_DEFAULTS).forEach(k=>{ if(!f[k]) f[k]={...CHQ_SIG_DEFAULTS[k]}; });
   const fr=(k)=>`<tr><td>${esc(f[k].label)}</td>
     <td><input data-fx="${k}" type="number" step="0.5" value="${f[k].x}" style="width:90px"></td>
     <td><input data-fy="${k}" type="number" step="0.5" value="${f[k].y}" style="width:90px"></td></tr>`;
@@ -3492,8 +3483,7 @@ function chequeLayoutCard(){
      <div><label>Words wrap width (mm)</label><input id="ch_wrap" type="number" step="1" value="${ch.wordsWrapMm||120}"></div>
    </div>
    <h3>Field positions (mm from top-left)</h3>
-   <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures","initSig","cfoSig"].map(fr).join("")}</table>
-   <div class="muted" style="font-size:11px;margin-top:4px">The last two rows are the internal control marks printed on every cheque: <b>MA-QS</b> (initiating signature, black) and <b>MA-CFO approved</b> (CFO approval, <span style="color:#c00">red</span>). Position them on the counterfoil/stub area.</div>
+   <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save layout</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
 }
 function bindChequeLayout(saveS){
