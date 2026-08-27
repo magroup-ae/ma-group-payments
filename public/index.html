@@ -1141,12 +1141,7 @@ function chequeWords(amount){
 }
 /* ---------- cheque PDF (exact size, single page, prints at 100%) ---------- */
 function chequePDF(c){
-  const ch=S.cheque, f=ch.fields;
-  // Per-user printer adjustment: applied ONLY for the signed-in user's account
-  // (e.g. the CFO on Windows). Users with no entry (e.g. the CEO) print with the
-  // original shared calibration, completely unchanged.
-  const uo=((ch.userOffsets||{})[ME&&ME.id])||{x:0,y:0};
-  const ox=(+ch.offsetXmm||0)+(+uo.x||0), oy=(+ch.offsetYmm||0)+(+uo.y||0);
+  const ch=S.cheque, f=ch.fields, ox=+ch.offsetXmm||0, oy=+ch.offsetYmm||0;
   const W=+ch.widthMm||205, H=+ch.heightMm||95, fs=+ch.fontPt||11, wrap=+ch.wordsWrapMm||120;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: W>=H?"landscape":"portrait", unit:"mm", format:[W,H] });
@@ -3489,13 +3484,6 @@ function chequeLayoutCard(){
    </div>
    <h3>Field positions (mm from top-left)</h3>
    <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
-   <h3 style="margin-top:14px">Per-user printer adjustment</h3>
-   <div class="note" style="font-size:11.5px">Extra nudge applied <b>only when that user prints a cheque</b> — e.g. the CFO's Windows printer feeds ~1.5–2&nbsp;cm lower, so set his <b>Y = −18</b> (negative = up). Leave a user at <b>0 / 0</b> to keep the original calibration untouched (keep the CEO at 0).</div>
-   <table><tr><th>User</th><th>X → right (mm)</th><th>Y → down (mm)</th></tr>
-   ${(USERS||[]).map(u=>{ const uo=((ch.userOffsets||{})[u.id])||{x:0,y:0};
-     return `<tr><td>${esc(u.name)} <span class="muted" style="font-size:10px">(${esc(u.role)})</span></td>
-       <td><input data-ux="${esc(u.id)}" type="number" step="0.5" value="${+uo.x||0}" style="width:90px"></td>
-       <td><input data-uy="${esc(u.id)}" type="number" step="0.5" value="${+uo.y||0}" style="width:90px"></td></tr>`; }).join("")}</table>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save layout</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
 }
 function bindChequeLayout(saveS){
@@ -3504,11 +3492,7 @@ function bindChequeLayout(saveS){
     ch.widthMm=+$("#ch_w").value||205; ch.heightMm=+$("#ch_h").value||95; ch.fontPt=+$("#ch_font").value||11;
     ch.offsetXmm=+$("#ch_ox").value||0; ch.offsetYmm=+$("#ch_oy").value||0; ch.wordsWrapMm=+$("#ch_wrap").value||120;
     document.querySelectorAll("[data-fx]").forEach(i=>ch.fields[i.dataset.fx].x=+i.value||0);
-    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0);
-    ch.userOffsets=ch.userOffsets||{};
-    document.querySelectorAll("[data-ux]").forEach(i=>{ const id=i.dataset.ux; ch.userOffsets[id]=ch.userOffsets[id]||{x:0,y:0}; ch.userOffsets[id].x=+i.value||0; });
-    document.querySelectorAll("[data-uy]").forEach(i=>{ const id=i.dataset.uy; ch.userOffsets[id]=ch.userOffsets[id]||{x:0,y:0}; ch.userOffsets[id].y=+i.value||0; });
-    Object.keys(ch.userOffsets).forEach(id=>{ const o=ch.userOffsets[id]; if(!(+o.x)&&!(+o.y)) delete ch.userOffsets[id]; }); };
+    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0); };
   btn.onclick=async ()=>{ pull(); await saveS(); };
   const a4=$("#ch_a4"), lt=$("#ch_letter");
   if(a4) a4.onclick=()=>{ $("#ch_w").value=297; $("#ch_h").value=210; };
