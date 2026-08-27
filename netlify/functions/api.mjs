@@ -13075,7 +13075,9 @@ async function verifyToken(tok) {
   }
 }
 var CHEQUE_LAYOUT = {
-  layoutVersion: 5,
+  // v6: force-restore the ORIGINAL calibrated layout (identical values to v5) —
+  // wipes any offsets/positions saved during the printer-alignment attempts.
+  layoutVersion: 6,
   widthMm: 297,
   heightMm: 210,
   fontPt: 11,
