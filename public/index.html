@@ -1557,9 +1557,29 @@ function vCheques(){
    <table><tr><th>Cert No.</th><th>Cheque No.</th><th>Date</th><th>Payee / Supplier</th><th>Bank</th><th class="num">Amount (AED)</th><th>Print</th></tr>
    ${rows||`<tr><td colspan="7" class="muted">No cheques yet. Record a payment with mode = Cheque on an approved certificate.</td></tr>`}</table>
    ${approvedNoPay?`<div class="note" style="margin-top:12px">${approvedNoPay} approved certificate(s) awaiting payment — record a cheque payment from the Certificates tab to add it here.</div>`:""}
-   <div class="note" style="margin-top:12px"><b>To print:</b> click Print — an A4 <b>landscape</b> cheque PDF opens. In the print dialog set <b>Paper = A4</b>, <b>Orientation = Landscape</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>, then feed your ENBD cheque. Adjust alignment in Settings → Cheque Layout if ever needed.
-   <br><b>Printer prints it as 2 pages / won't accept it?</b> The printer is set to <b>Portrait</b> — switch that printer's orientation to <b>Landscape</b> (or set its default paper to A4 Landscape). The cheque page is A4 landscape; a printer left on Portrait splits it across two sheets.</div>
+   <div class="note" style="margin-top:12px"><b>To print:</b> click Print — an A4 <b>landscape</b> cheque PDF opens. In the print dialog set <b>Paper = A4</b>, <b>Orientation = Landscape</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>, then feed your ENBD cheque.
+   <br><b>Printer prints it as 2 pages / won't accept it?</b> The printer is set to <b>Portrait</b> — switch that printer's orientation to <b>Landscape</b> (or set its default paper to A4 Landscape).</div>
+   ${canPrint?`<div class="note" style="margin-top:10px;border-left:3px solid var(--gold);background:#fff8e6">
+     <b>Printer alignment — this computer only.</b> Every printer prints at a slightly different position (Windows vs Mac, different top margins). Nudge <b>only this machine</b> until the amount lands in the box — it does <u>not</u> change anyone else's. If the print is <b>too low</b>, move it <b>up</b>; if too high, move it <b>down</b>.
+     <div class="flex" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+       <button class="btn ghost" id="chqUp">▲ Up 1&nbsp;mm</button>
+       <button class="btn ghost" id="chqDn">▼ Down 1&nbsp;mm</button>
+       <label style="font-size:12px">Up/down offset (mm, − = up):</label>
+       <input id="chqDevY" type="number" step="0.5" style="width:90px" value="${devChqOff().y}">
+       <label style="font-size:12px">Left/right (mm, − = left):</label>
+       <input id="chqDevX" type="number" step="0.5" style="width:90px" value="${devChqOff().x}">
+       <button class="btn" id="chqTest">Print test cheque</button>
+       <button class="btn ghost" id="chqResetDev">Reset</button>
+       <span class="muted" id="chqDevMsg" style="font-size:11px"></span>
+     </div></div>`:""}
    </div>`;
+  const syncDev=(msg)=>{ const x=$("#chqDevX"), y=$("#chqDevY"); if(!x||!y) return; setDevChqOff(x.value,y.value); const m=$("#chqDevMsg"); if(m) m.textContent=msg||("Saved on this computer — up/down "+(+y.value||0)+" mm"); };
+  if($("#chqDevX")) $("#chqDevX").onchange=()=>syncDev();
+  if($("#chqDevY")) $("#chqDevY").onchange=()=>syncDev();
+  if($("#chqUp")) $("#chqUp").onclick=()=>{ const y=$("#chqDevY"); y.value=(+y.value||0)-1; syncDev("Moved up 1 mm (now "+y.value+" mm) — print to check"); };
+  if($("#chqDn")) $("#chqDn").onclick=()=>{ const y=$("#chqDevY"); y.value=(+y.value||0)+1; syncDev("Moved down 1 mm (now "+y.value+" mm) — print to check"); };
+  if($("#chqResetDev")) $("#chqResetDev").onclick=()=>{ setDevChqOff(0,0); if($("#chqDevX"))$("#chqDevX").value=0; if($("#chqDevY"))$("#chqDevY").value=0; const m=$("#chqDevMsg"); if(m)m.textContent="Reset to 0 on this computer"; };
+  if($("#chqTest")) $("#chqTest").onclick=()=>{ syncDev(); printCheque({ no:"TEST", payment:{ payee:"TEST PAYEE — ALIGNMENT CHECK LINE", amount:3047.10, date:new Date().toISOString().slice(0,10) } }); };
   document.querySelectorAll("[data-chq]").forEach(b=>b.onclick=()=>reprintCheque(b.dataset.chq));
   document.querySelectorAll(".chqAmend").forEach(a=>a.onclick=e=>{ e.preventDefault(); amendChequeNo(a.dataset.no, a.dataset.ref, async()=>{ await load(); vCheques(); }); });
   $("#chqCsv").onclick=()=>{ const rows2=[["CertNo","ChequeNo","Date","Supplier","Payee","Bank","Amount"]]
