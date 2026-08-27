@@ -3467,36 +3467,26 @@ function bindSignature(){
 }
 function chequeLayoutCard(){
   const ch=S.cheque, f=ch.fields;
-  const fr=(k)=>`<tr><td>${esc(f[k].label)}</td>
-    <td><input data-fx="${k}" type="number" step="0.5" value="${f[k].x}" style="width:90px"></td>
-    <td><input data-fy="${k}" type="number" step="0.5" value="${f[k].y}" style="width:90px"></td></tr>`;
-  return `<div class="card"><h2>Cheque Layout (calibration)</h2>
-   <div class="note"><b>Important:</b> the page is a <b>full A4 landscape sheet</b> (like your Excel cheque), not a small page. Print the test choosing <b>Paper = A4</b>, <b>Orientation = Landscape</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>, and feed the cheque leaf into the tray exactly the way you do for your Excel cheque. The default field positions are copied from your calibrated Excel cheque, so it should already land right. If it's off, nudge Offset X (→ right) / Offset Y (↓ down) by the millimetres you measure.
-   <br><b>If a printer prints the cheque as 2 pages</b> it is set to Portrait — switch that printer to <b>Landscape</b>. Use the presets below to switch A4 / Letter to match your printer.</div>
-   <div class="flex" style="margin:8px 0"><button class="btn ghost" id="ch_a4">A4 landscape (297×210)</button><button class="btn ghost" id="ch_letter">Letter landscape (279×216)</button></div>
+  const fr=(k)=>`<tr><td>${esc(f[k].label)}</td><td class="num">${f[k].x}</td><td class="num">${f[k].y}</td></tr>`;
+  return `<div class="card"><h2>Cheque Layout</h2>
+   <div class="note"><b>The cheque layout is frozen</b> — the line positions below are locked and cannot be edited. The only adjustment is the <b>global X &amp; Y offset</b>, which moves <b>all lines together as one block</b> (spacing between lines never changes). If the print lands too low, use a <b>negative Y</b> (− = up); too far right, use a <b>negative X</b> (− = left).
+   <br>Print the test choosing <b>Paper = A4</b>, <b>Orientation = Landscape</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>. <b>If a printer prints the cheque as 2 pages</b> it is set to Portrait — switch that printer to <b>Landscape</b>.</div>
    <div class="grid" style="margin-top:10px">
-     <div><label>Page width (mm)</label><input id="ch_w" type="number" step="1" value="${ch.widthMm}"></div>
-     <div><label>Page height (mm)</label><input id="ch_h" type="number" step="1" value="${ch.heightMm}"></div>
-     <div><label>Font size (pt)</label><input id="ch_font" type="number" step="0.5" value="${ch.fontPt}"></div>
-     <div><label>Global offset X → right (mm)</label><input id="ch_ox" type="number" step="0.5" value="${ch.offsetXmm}"></div>
-     <div><label>Global offset Y → down (mm)</label><input id="ch_oy" type="number" step="0.5" value="${ch.offsetYmm}"></div>
-     <div><label>Words wrap width (mm)</label><input id="ch_wrap" type="number" step="1" value="${ch.wordsWrapMm||120}"></div>
+     <div><label>Global offset X → right (mm, − = left)</label><input id="ch_ox" type="number" step="0.5" value="${ch.offsetXmm}"></div>
+     <div><label>Global offset Y → down (mm, − = up)</label><input id="ch_oy" type="number" step="0.5" value="${ch.offsetYmm}"></div>
    </div>
-   <h3>Field positions (mm from top-left)</h3>
-   <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
-   <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save layout</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
+   <h3>Line positions (frozen — reference only)</h3>
+   <table><tr><th>Field</th><th class="num">X (mm)</th><th class="num">Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
+   <div class="muted" style="font-size:11px;margin-top:4px">Page: ${ch.widthMm}×${ch.heightMm} mm (A4 landscape) · Font ${ch.fontPt} pt · Words wrap ${ch.wordsWrapMm||120} mm — all locked.</div>
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save adjustment</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
 }
 function bindChequeLayout(saveS){
   const btn=$("#ch_save"); if(!btn) return;
+  // Only the global X/Y offset is adjustable — line positions, page size, font and
+  // wrap are frozen and never touched by save.
   const pull=()=>{ const ch=S.cheque;
-    ch.widthMm=+$("#ch_w").value||205; ch.heightMm=+$("#ch_h").value||95; ch.fontPt=+$("#ch_font").value||11;
-    ch.offsetXmm=+$("#ch_ox").value||0; ch.offsetYmm=+$("#ch_oy").value||0; ch.wordsWrapMm=+$("#ch_wrap").value||120;
-    document.querySelectorAll("[data-fx]").forEach(i=>ch.fields[i.dataset.fx].x=+i.value||0);
-    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0); };
+    ch.offsetXmm=+$("#ch_ox").value||0; ch.offsetYmm=+$("#ch_oy").value||0; };
   btn.onclick=async ()=>{ pull(); await saveS(); };
-  const a4=$("#ch_a4"), lt=$("#ch_letter");
-  if(a4) a4.onclick=()=>{ $("#ch_w").value=297; $("#ch_h").value=210; };
-  if(lt) lt.onclick=()=>{ $("#ch_w").value=279; $("#ch_h").value=216; };
   $("#ch_test").onclick=()=>{ pull();
     printCheque({ no:"TEST", payment:{ payee:"TEST PAYEE — ALIGNMENT CHECK LINE", amount:3047.10, date:new Date().toISOString().slice(0,10) } }); };
 }
