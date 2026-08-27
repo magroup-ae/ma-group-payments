@@ -13075,9 +13075,9 @@ async function verifyToken(tok) {
   }
 }
 var CHEQUE_LAYOUT = {
-  // v8: correction — payee + amount-in-words are 10 mm left of the original
-  // (x 132 → 122), not 100 mm. Date and figures unchanged.
-  layoutVersion: 8,
+  // v9: payee + amount-in-words another 5 mm left (x 122 → 117; total 15 mm left
+  // of the original 132). Date and figures unchanged.
+  layoutVersion: 9,
   widthMm: 297,
   heightMm: 210,
   fontPt: 11,
@@ -13087,9 +13087,9 @@ var CHEQUE_LAYOUT = {
   paper: "A4",
   fields: {
     date: { x: 227, y: 87, label: "Date" },
-    payee: { x: 122, y: 94, label: "Payee" },
-    words1: { x: 122, y: 107, label: "Amount in words (line 1)" },
-    words2: { x: 122, y: 114, label: "Amount in words (line 2)" },
+    payee: { x: 117, y: 94, label: "Payee" },
+    words1: { x: 117, y: 107, label: "Amount in words (line 1)" },
+    words2: { x: 117, y: 114, label: "Amount in words (line 2)" },
     figures: { x: 240, y: 115, label: "Amount in figures" }
   }
 };
