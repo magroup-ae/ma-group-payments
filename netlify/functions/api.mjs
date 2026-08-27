@@ -13088,7 +13088,9 @@ var CHEQUE_LAYOUT = {
     payee: { x: 132, y: 94, label: "Payee" },
     words1: { x: 132, y: 107, label: "Amount in words (line 1)" },
     words2: { x: 132, y: 114, label: "Amount in words (line 2)" },
-    figures: { x: 240, y: 115, label: "Amount in figures" }
+    figures: { x: 240, y: 115, label: "Amount in figures" },
+    initSig: { x: 20, y: 150, label: "Initiating signature — MA-QS" },
+    cfoSig: { x: 20, y: 158, label: "CFO approval — MA-CFO approved (red)" }
   }
 };
 var DEFAULT_SETTINGS = {
