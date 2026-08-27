@@ -1140,8 +1140,12 @@ function chequeWords(amount){
   return w.charAt(0).toUpperCase()+w.slice(1);
 }
 /* ---------- cheque PDF (exact size, single page, prints at 100%) ---------- */
+// Per-device (per-printer) fine-tune, stored on THIS machine only. Two identical
+// printers can have different unprintable margins, so each machine keeps its own nudge.
+function devChqOff(){ try{ return { x:+localStorage.getItem("chqDevX")||0, y:+localStorage.getItem("chqDevY")||0 }; }catch(e){ return {x:0,y:0}; } }
+function setDevChqOff(x,y){ try{ localStorage.setItem("chqDevX",String(+x||0)); localStorage.setItem("chqDevY",String(+y||0)); }catch(e){} }
 function chequePDF(c){
-  const ch=S.cheque, f=ch.fields, ox=+ch.offsetXmm||0, oy=+ch.offsetYmm||0;
+  const ch=S.cheque, f=ch.fields, dev=devChqOff(), ox=(+ch.offsetXmm||0)+dev.x, oy=(+ch.offsetYmm||0)+dev.y;
   const W=+ch.widthMm||205, H=+ch.heightMm||95, fs=+ch.fontPt||11, wrap=+ch.wordsWrapMm||120;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: W>=H?"landscape":"portrait", unit:"mm", format:[W,H] });
@@ -3482,6 +3486,12 @@ function chequeLayoutCard(){
      <div><label>Global offset Y → down (mm)</label><input id="ch_oy" type="number" step="0.5" value="${ch.offsetYmm}"></div>
      <div><label>Words wrap width (mm)</label><input id="ch_wrap" type="number" step="1" value="${ch.wordsWrapMm||120}"></div>
    </div>
+   <div class="note" style="border-left:3px solid var(--gold);background:#fff8e6;margin-top:10px"><b>This printer only — fine-tune (saved on THIS computer):</b> two identical printers can still print at slightly different positions (different unprintable top margin / paper pickup). Use these to nudge <b>only this machine</b> without changing anyone else's. e.g. if the print lands <b>1.5–2 cm too low</b>, set <b>this-device Y = −18</b> (negative = up). The global offsets above stay shared for everyone; this nudge is added on top, on this computer only.
+   <div class="grid" style="margin-top:8px">
+     <div><label>This device — offset X → right (mm)</label><input id="ch_dx" type="number" step="0.5" value="${devChqOff().x}"></div>
+     <div><label>This device — offset Y → down (mm)</label><input id="ch_dy" type="number" step="0.5" value="${devChqOff().y}"></div>
+     <div style="align-self:end"><button class="btn ghost" id="ch_devreset">Reset this device</button></div>
+   </div></div>
    <h3>Field positions (mm from top-left)</h3>
    <table><tr><th>Field</th><th>X (mm)</th><th>Y (mm)</th></tr>${["date","payee","words1","words2","figures"].map(fr).join("")}</table>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="ch_save">Save layout</button><button class="btn ghost" id="ch_test">Print test cheque</button></div></div>`;
@@ -3492,11 +3502,13 @@ function bindChequeLayout(saveS){
     ch.widthMm=+$("#ch_w").value||205; ch.heightMm=+$("#ch_h").value||95; ch.fontPt=+$("#ch_font").value||11;
     ch.offsetXmm=+$("#ch_ox").value||0; ch.offsetYmm=+$("#ch_oy").value||0; ch.wordsWrapMm=+$("#ch_wrap").value||120;
     document.querySelectorAll("[data-fx]").forEach(i=>ch.fields[i.dataset.fx].x=+i.value||0);
-    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0); };
-  btn.onclick=async ()=>{ pull(); await saveS(); };
+    document.querySelectorAll("[data-fy]").forEach(i=>ch.fields[i.dataset.fy].y=+i.value||0);
+    if($("#ch_dx")&&$("#ch_dy")) setDevChqOff($("#ch_dx").value,$("#ch_dy").value); };
+  btn.onclick=async ()=>{ pull(); await saveS(); toast("Saved — this-device nudge stored on this computer only"); };
   const a4=$("#ch_a4"), lt=$("#ch_letter");
   if(a4) a4.onclick=()=>{ $("#ch_w").value=297; $("#ch_h").value=210; };
   if(lt) lt.onclick=()=>{ $("#ch_w").value=279; $("#ch_h").value=216; };
+  if($("#ch_devreset")) $("#ch_devreset").onclick=()=>{ setDevChqOff(0,0); if($("#ch_dx"))$("#ch_dx").value=0; if($("#ch_dy"))$("#ch_dy").value=0; toast("This device fine-tune reset to 0"); };
   $("#ch_test").onclick=()=>{ pull();
     printCheque({ no:"TEST", payment:{ payee:"TEST PAYEE — ALIGNMENT CHECK LINE", amount:3047.10, date:new Date().toISOString().slice(0,10) } }); };
 }
