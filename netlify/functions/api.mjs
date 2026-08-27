@@ -13075,9 +13075,9 @@ async function verifyToken(tok) {
   }
 }
 var CHEQUE_LAYOUT = {
-  // v7: payee + amount-in-words moved 100 mm LEFT (x 132 → 32) per CEO's print check;
-  // date and figures unchanged. v6 had force-restored the pre-adjustment layout.
-  layoutVersion: 7,
+  // v8: correction — payee + amount-in-words are 10 mm left of the original
+  // (x 132 → 122), not 100 mm. Date and figures unchanged.
+  layoutVersion: 8,
   widthMm: 297,
   heightMm: 210,
   fontPt: 11,
@@ -13087,9 +13087,9 @@ var CHEQUE_LAYOUT = {
   paper: "A4",
   fields: {
     date: { x: 227, y: 87, label: "Date" },
-    payee: { x: 32, y: 94, label: "Payee" },
-    words1: { x: 32, y: 107, label: "Amount in words (line 1)" },
-    words2: { x: 32, y: 114, label: "Amount in words (line 2)" },
+    payee: { x: 122, y: 94, label: "Payee" },
+    words1: { x: 122, y: 107, label: "Amount in words (line 1)" },
+    words2: { x: 122, y: 114, label: "Amount in words (line 2)" },
     figures: { x: 240, y: 115, label: "Amount in figures" }
   }
 };
