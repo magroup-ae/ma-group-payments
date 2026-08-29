@@ -14380,6 +14380,11 @@ function buildRfqHtml(rec, cfg, vendor) {
 // DLP = defects-liability discharge at end of the DLP (UAE practice, Civil Code
 // Arts. 880–883 reserved). All clauses editable per certificate before issue.
 function compCertDefaults(type) {
+  if (type === "WARRANTY") return [
+    "We hereby guarantee and warrant all works performed under the referenced contract / purchase order for a period of {WARRANTY_PERIOD} commencing on {DLP_START} (date of completion) and expiring on {DLP_END}. During this period we will repair or replace, at no additional charge to the owner, any defect arising from faulty workmanship in the works performed by us, subject to the terms and conditions below.",
+    "Products and manufactured items are covered by the respective suppliers' / manufacturers' warranties as submitted in the close-out documents; those warranties apply in accordance with their own terms and are neither extended nor varied by this certificate.",
+    "This warranty covers workmanship defects only. It does not cover damage caused by force, misuse, neglect or accident; damage reported during other fit-out / construction activity; defects or repairs arising from the works of other subcontractors; normal wear and tear; or any part of the works altered, repaired or modified by others without our written consent, in respect of which this warranty is void."
+  ];
   if (type === "DLP") return [
     "This is to certify that the Defects Liability Period for the works described in Section 2, which commenced on {DLP_START} and expired on {DLP_END}, has been completed, and that all defects, shrinkages and other faults notified during the Defects Liability Period have been made good to the satisfaction of the Client.",
     "Accordingly, the balance of retention (or the retention guarantee / cheque, where applicable) becomes releasable in accordance with the terms of the contract, and the Contractor's obligations under the contract are discharged, save as stated in this certificate.",
@@ -14393,11 +14398,11 @@ function compCertDefaults(type) {
 }
 function buildCompCertHtml(rec, cfg, assets) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
-  const isDlp = rec.type === "DLP";
+  const isDlp = rec.type === "DLP", isW = rec.type === "WARRANTY";
   const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
   const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
-  const title = isDlp ? "DEFECTS LIABILITY COMPLETION CERTIFICATE" : "CERTIFICATE OF COMPLETION";
-  const sub = isDlp ? "Certificate of Making Good Defects — end of Defects Liability Period" : "Completion & Handover of Works";
+  const title = isW ? "WARRANTY CERTIFICATE" : isDlp ? "DEFECTS LIABILITY COMPLETION CERTIFICATE" : "CERTIFICATE OF COMPLETION";
+  const sub = isW ? "Warranty of Works — Fit-Out / Construction" : isDlp ? "Certificate of Making Good Defects — end of Defects Liability Period" : "Completion & Handover of Works";
   const vEx = num(rec.valueExVat), vat = r2(vEx * (rec.vatPct != null ? num(rec.vatPct) : 0.05)), vTot = r2(vEx + vat);
   const scopeRows = (rec.scope || []).filter((l) => l && (l.description || "").trim()).map((l, i) =>
     `<tr><td>${esc(l.ref || i + 1)}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty || "—")}</td><td>${esc(l.status || "Completed")}</td></tr>`).join("")
@@ -14406,7 +14411,8 @@ function buildCompCertHtml(rec, cfg, assets) {
     .map((c) => String(c || "")
       .replace(/\{COMPLETION_DATE\}/g, dt(rec.completionDate))
       .replace(/\{DLP_START\}/g, dt(rec.dlpStart))
-      .replace(/\{DLP_END\}/g, dt(rec.dlpEnd)))
+      .replace(/\{DLP_END\}/g, dt(rec.dlpEnd))
+      .replace(/\{WARRANTY_PERIOD\}/g, rec.warrantyPeriod || "12 months"))
     .filter((c) => c.trim())
     .map((c) => `<p style="margin:0 0 8px">${esc(c)}</p>`).join("");
   const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:50px;max-width:160px;object-fit:contain;display:block">` : `<div style="height:50px"></div>`;
@@ -14444,11 +14450,13 @@ function buildCompCertHtml(rec, cfg, assets) {
     <tr><td class="k">Project</td><td>${esc(rec.project || "—")}</td><td class="k">Location</td><td>${esc(rec.location || "—")}</td></tr>
     <tr><td class="k">Contractor</td><td colspan="3">${esc(ent)}${entTrn ? " · TRN " + esc(entTrn) : ""}</td></tr>
     <tr><td class="k">Contract / PO Ref.</td><td>${esc(rec.contractRef || "—")}${rec.contractDate ? " dated " + dt(rec.contractDate) : ""}</td><td class="k">Quotation Ref.</td><td>${esc(rec.quotationRef || "—")}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>
-    ${isDlp
+    ${isW
+      ? `<tr><td class="k">Date of Completion</td><td>${dt(rec.completionDate || rec.dlpStart)}</td><td class="k">Warranty Period</td><td><b>${esc(rec.warrantyPeriod || "12 months")}</b> — from <b>${dt(rec.dlpStart)}</b> to <b>${dt(rec.dlpEnd)}</b></td></tr>`
+      : isDlp
       ? `<tr><td class="k">Date of Completion</td><td>${dt(rec.completionDate)}</td><td class="k">DLP</td><td>From <b>${dt(rec.dlpStart)}</b> to <b>${dt(rec.dlpEnd)}</b></td></tr>`
       : `<tr><td class="k">Date of Completion</td><td colspan="3"><b>${dt(rec.completionDate)}</b></td></tr>`}
   </table>
-  <div class="sec">2. SCOPE OF WORKS ${isDlp ? "COVERED" : "COMPLETED"}</div>
+  <div class="sec">2. SCOPE OF WORKS ${isW ? "COVERED BY THIS WARRANTY" : isDlp ? "COVERED" : "COMPLETED"}</div>
   <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:60px">Unit</th><th style="width:60px">Qty</th><th style="width:110px">Status</th></tr>${scopeRows}</table>
   ${vEx > 0 ? `<div class="sec">3. CONTRACT VALUE</div>
   <table class="pt">
@@ -14458,18 +14466,18 @@ function buildCompCertHtml(rec, cfg, assets) {
     ${rec.paymentTerms ? `<tr><td class="k">Payment terms</td><td colspan="3">${esc(rec.paymentTerms)}</td></tr>` : ""}
     ${isDlp && rec.retentionDue ? `<tr><td class="k">Retention releasable</td><td colspan="3"><b>${esc(rec.retentionDue)}</b></td></tr>` : ""}
   </table>` : (isDlp && rec.retentionDue ? `<div class="sec">3. RETENTION</div><table class="pt"><tr><td class="k">Retention releasable</td><td><b>${esc(rec.retentionDue)}</b></td></tr></table>` : "")}
-  <div class="sec">${vEx > 0 || (isDlp && rec.retentionDue) ? "4" : "3"}. DECLARATION</div>
+  <div class="sec">${vEx > 0 || (isDlp && rec.retentionDue) ? "4" : "3"}. ${isW ? "WARRANTY, TERMS &amp; CONDITIONS" : "DECLARATION"}</div>
   <div class="decl">${clauses}</div>
   ${rec.notes ? `<div class="decl" style="border-left-color:#cc9c30"><b>Remarks / exceptions:</b> ${esc(rec.notes)}</div>` : ""}
   <table class="sig"><tr>
     <td><div class="sh">Issued by — Contractor</div><div class="sn">${esc(ent)}</div>
       <div style="position:relative">${signImg}<div style="position:absolute;left:130px;top:-14px">${stampImg}</div></div>
       <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div><div class="sl">Signature &amp; Company Stamp</div><div class="sl">Date: ${dt(rec.date)}</div></td>
-    <td><div class="sh">Accepted by — ${esc(rec.partyType || "Client")}</div><div class="sn">${esc(rec.partyName || "")}</div>
+    <td><div class="sh">${isW ? "Received &amp; acknowledged by" : "Accepted by"} — ${esc(rec.partyType || "Client")}</div><div class="sn">${esc(rec.partyName || "")}</div>
       <div style="height:50px"></div>
       <div class="sl">Name: ______________________________</div><div class="sl">Title: ______________________________</div><div class="sl">Signature &amp; Company Stamp</div><div class="sl">Date: ______________</div></td>
   </tr></table>
-  <div style="color:#7a8494;font-size:9.5px;margin-top:8px">Issued in duplicate — one signed original to be retained by each party. ${isDlp ? "" : "This certificate is a completion record only; warranty and defects liability, where applicable, remain governed by the approved quotation / purchase order terms."}</div>
+  <div style="color:#7a8494;font-size:9.5px;margin-top:8px">Issued in duplicate — one signed original to be retained by each party. ${isW ? "Warranty claims are to be notified in writing to info@maagroup.ae within the warranty period." : isDlp ? "" : "This certificate is a completion record only; warranty and defects liability, where applicable, remain governed by the approved quotation / purchase order terms."}</div>
   ${mahFooter(ent)}
 </div></body></html>`;
 }
@@ -15272,18 +15280,18 @@ var api_default = async (req, context) => {
   if (path === "compcert" && req.method === "POST") {
     if (!can("contracts")) return err("Not permitted", 403);
     const b = await req.json();
-    const type = b.type === "DLP" ? "DLP" : "COMPLETION";
+    const type = b.type === "DLP" ? "DLP" : b.type === "WARRANTY" ? "WARRANTY" : "COMPLETION";
     const stg = await s.get("settings", { type: "json" });
     let id = b.id, ex = null;
     if (id) { ex = await s.get("compcert/" + id, { type: "json" }); if (!ex) return err("Not found", 404); }
     else { id = await nextId(s, stg, "compcertSeq", "CX", "compcert/", 4); }
-    // Document number: MA/CC/<year>/<serial> or MA/DLP/<year>/<serial> (editable while Draft).
+    // Document number: MA/CC | MA/DLP | MA/WC /<year>/<serial> (editable while Draft).
     let docNo = String(b.docNo || ex?.docNo || "").trim();
     if (!docNo) {
       const yr = String(new Date().getFullYear());
-      const key = type === "DLP" ? "dlpSerial" : "ccSerial";
+      const key = type === "DLP" ? "dlpSerial" : type === "WARRANTY" ? "wcSerial" : "ccSerial";
       stg[key] = (num(stg[key]) || 102) + 1; // continues after MA/CC/2026/0102 in the register
-      docNo = `MA/${type === "DLP" ? "DLP" : "CC"}/${yr}/${String(stg[key]).padStart(4, "0")}`;
+      docNo = `MA/${type === "DLP" ? "DLP" : type === "WARRANTY" ? "WC" : "CC"}/${yr}/${String(stg[key]).padStart(4, "0")}`;
     }
     await s.setJSON("settings", stg);
     const str = (k) => b[k] === void 0 ? (ex?.[k] || "") : (b[k] || "");
@@ -15299,6 +15307,7 @@ var api_default = async (req, context) => {
       quotationRef: str("quotationRef"), quotationDate: str("quotationDate"),
       completionDate: str("completionDate"),
       dlpStart: str("dlpStart"), dlpEnd: str("dlpEnd"), retentionDue: str("retentionDue"),
+      warrantyPeriod: str("warrantyPeriod"),
       scope: Array.isArray(b.scope) ? b.scope.map((l, i) => ({ ref: String(l.ref || i + 1), description: String(l.description || ""), unit: String(l.unit || ""), qty: String(l.qty || ""), status: String(l.status || "Completed") })) : (ex?.scope || []),
       valueExVat: b.valueExVat === void 0 ? num(ex?.valueExVat) : num(b.valueExVat),
       vatPct: b.vatPct === void 0 ? (ex?.vatPct != null ? num(ex.vatPct) : 0.05) : num(b.vatPct),
@@ -15314,6 +15323,7 @@ var api_default = async (req, context) => {
     if (!rec.project) return err("Enter the project");
     if (type === "COMPLETION" && !rec.completionDate) return err("Enter the date of completion");
     if (type === "DLP" && (!rec.dlpStart || !rec.dlpEnd)) return err("Enter the DLP start and end dates");
+    if (type === "WARRANTY" && (!rec.dlpStart || !rec.dlpEnd)) return err("Enter the warranty start and end dates");
     await s.setJSON("compcert/" + id, rec);
     return json(rec);
   }
