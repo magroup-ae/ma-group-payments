@@ -366,6 +366,7 @@ function render(){
   if(["CEO","PM","QS","Accounts"].includes(ME.role)) tabs.push(["bank","Bank"]);
   if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["procure","Procurement"]);
   if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["awards","Contracts / LOA"]);
+  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["hocerts","Completion / DLP"]);
   if(ME.role==="CEO") tabs.push(["announce","Announcements"]);
   if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
   root.innerHTML = `
@@ -379,7 +380,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -3491,6 +3492,140 @@ function bindChequeLayout(saveS){
     printCheque({ no:"TEST", payment:{ payee:"TEST PAYEE — ALIGNMENT CHECK LINE", amount:3047.10, date:new Date().toISOString().slice(0,10) } }); };
 }
 
+/* ---------- Completion & DLP certificates ---------- */
+async function vCompCerts(){
+  const canEdit=["CEO","PM"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Completion &amp; DLP Certificates</h2>
+    <span class="muted">issued on project completion and at the end of the Defects Liability Period</span>
+    <div class="right flex">${canEdit?`<button class="btn gold" id="hcNewC">+ Completion certificate</button><button class="btn" id="hcNewD">+ DLP certificate</button>`:""}</div></div>
+    <div class="note" style="margin-top:8px">UAE standard: the <b>Completion Certificate</b> records completion, handover and acceptance only (warranty/DLP stay governed by the quotation / PO terms). The <b>DLP Certificate</b> is issued at the end of the Defects Liability Period — defects made good, retention releasable, decennial liability under UAE Civil Code Arts. 880–883 reserved. All clauses are <b>editable per certificate</b> before issue.</div>
+    <div id="hcList" class="muted" style="margin-top:10px">Loading…</div></div>`;
+  if(canEdit){ $("#hcNewC").onclick=()=>compCertForm({type:"COMPLETION"}); $("#hcNewD").onclick=()=>compCertForm({type:"DLP"}); }
+  let items=[]; try{ items=(await api("compcerts")).items||[]; }catch(e){ $("#hcList").textContent=e.message; return; }
+  const h=$("#hcList"); if(!items.length){ h.innerHTML="No certificates yet."; return; }
+  h.classList.remove("muted");
+  const stc={Draft:"#8a8a8a",Issued:"#2E75B6",Countersigned:"#375623"};
+  h.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Certificate No.</th><th>Type</th><th>Party</th><th>Project</th><th>Date</th><th>Status</th><th></th></tr>
+    ${items.map(r=>`<tr><td><b>${esc(r.docNo)}</b></td><td>${r.type==="DLP"?'<span class="pill" style="background:#7A5C00">DLP</span>':'<span class="pill" style="background:#183048">Completion</span>'}</td>
+      <td>${esc(r.partyName)}</td><td>${esc(r.project)}</td><td>${dmy(r.date)}</td>
+      <td><span class="pill" style="background:${stc[r.status]||'#5B6B85'}">${esc(r.status)}</span>${r.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(r.sentAt)}</span>`:""}</td>
+      <td style="white-space:nowrap"><button class="btn ghost hcOpen" data-id="${esc(r.id)}" style="padding:4px 9px;font-size:12px">Open</button>
+        <button class="btn ghost hcView" data-id="${esc(r.id)}" style="padding:4px 9px;font-size:12px">View / Print</button></td></tr>`).join("")}</table></div>`;
+  h.querySelectorAll(".hcOpen").forEach(b=>b.onclick=async ()=>{ try{ compCertForm(await api("compcert/"+b.dataset.id)); }catch(e){ toast(e.message); } });
+  h.querySelectorAll(".hcView").forEach(b=>b.onclick=()=>openCompCertDoc(b.dataset.id,false));
+}
+async function openCompCertDoc(id,doPrintIt){
+  try{ const html=await apiText("compcert/"+id+"/html"); const w=window.open("","_blank");
+    if(!w){ toast("Allow pop-ups to view the document"); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    if(doPrintIt){ setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },400); }
+  }catch(e){ toast(e.message); }
+}
+function compCertForm(r){
+  r=r||{}; const isDlp=r.type==="DLP"; const isNew=!r.id;
+  const canEdit=["CEO","PM"].includes(ME.role);
+  const scope=(r.scope&&r.scope.length)?r.scope:[{ref:"1",description:"",unit:"",qty:"",status:"Completed"}];
+  const clauses=(r.clauses&&r.clauses.length)?r.clauses.slice():(isDlp
+    ?["This is to certify that the Defects Liability Period for the works described in Section 2, which commenced on {DLP_START} and expired on {DLP_END}, has been completed, and that all defects, shrinkages and other faults notified during the Defects Liability Period have been made good to the satisfaction of the Client.",
+      "Accordingly, the balance of retention (or the retention guarantee / cheque, where applicable) becomes releasable in accordance with the terms of the contract, and the Contractor's obligations under the contract are discharged, save as stated in this certificate.",
+      "This certificate does not affect any liability arising from latent defects, fraud or deliberate concealment, nor the decennial liability imposed by Articles 880–883 of the UAE Civil Code, where applicable."]
+    :["This is to certify that the works described in Section 2, executed under the referenced contract / purchase order for the project stated in Section 1, were fully completed on {COMPLETION_DATE} in accordance with the contract documents, approved drawings and specifications, and to a good and workmanlike standard.",
+      "The works have been handed over, the site has been cleared of the Contractor's plant, surplus materials and rubbish, and all keys, documentation and deliverables associated with the works have been delivered.",
+      "The works are hereby accepted by the Client without reservation. Any works beyond the scope stated in Section 2 shall be treated as a separate order or variation."]);
+  const srow=(l,i)=>`<tr><td><input class="hc_sref" value="${esc(l.ref||String(i+1))}" style="width:44px"></td>
+    <td><input class="hc_sdesc" value="${esc(l.description||"")}" style="width:270px"></td>
+    <td><input class="hc_sunit" value="${esc(l.unit||"")}" style="width:60px"></td>
+    <td><input class="hc_sqty" value="${esc(l.qty||"")}" style="width:60px"></td>
+    <td><input class="hc_sst" value="${esc(l.status||"Completed")}" style="width:100px"></td>
+    <td><a href="#" class="hc_sdel">✕</a></td></tr>`;
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${isNew?"New ":""}${isDlp?"DLP (Defects Liability) Certificate":"Completion Certificate"}${r.docNo?" — "+esc(r.docNo):""}</h2>
+    ${r.status?`<span class="pill st-${r.status==="Countersigned"?"Approved":r.status}">${esc(r.status)}</span>`:""}
+    <div class="right flex"><button class="btn ghost" id="hcBack">Back</button></div></div>
+   <div class="note" style="margin-top:8px">Prefill from a record, then edit anything — including the declaration clauses — before issuing. Dates DD/MM/YYYY on the printed certificate.</div>
+   <h3>Prefill</h3><div class="grid">
+     <div><label>Issue to</label><select id="hc_ptype"><option ${((r.partyType||"Client")==="Client")?"selected":""}>Client</option><option ${r.partyType==="Subcontractor"?"selected":""}>Subcontractor</option></select></div>
+     <div><label>Pick client contract</label><select id="hc_pickC"><option value="">—</option></select></div>
+     <div><label>Pick supplier / subcontractor</label><select id="hc_pickS"><option value="">—</option></select></div>
+   </div>
+   <h3>Certificate particulars</h3><div class="grid">
+     <div><label>Certificate No. ${isNew?'<span class="muted" style="font-size:10px">(auto if left blank)</span>':""}</label><input id="hc_docNo" value="${esc(r.docNo||"")}"></div>
+     <div><label>Date of issue</label><input id="hc_date" type="date" value="${esc((r.date||new Date().toISOString().slice(0,10)).slice(0,10))}"></div>
+     <div><label>Paying entity</label><select id="hc_ent">${S.entities.map(e=>`<option value="${esc(e.short)}" ${((r.entity||S.entities[0].short)===e.short)?"selected":""}>${esc(e.short)}</option>`).join("")}</select></div>
+     <div><label>Party name (client / subcontractor)</label><input id="hc_partyName" value="${esc(r.partyName||"")}"></div>
+     <div><label>Party TRN</label><input id="hc_partyTrn" value="${esc(r.partyTrn||"")}"></div>
+     <div><label>Attention (contact person)</label><input id="hc_partyAttn" value="${esc(r.partyAttn||"")}"></div>
+     <div><label>Party email</label><input id="hc_partyEmail" type="email" value="${esc(r.partyEmail||"")}"></div>
+     <div><label>Project</label><input id="hc_project" value="${esc(r.project||"")}"></div>
+     <div><label>Location</label><input id="hc_location" value="${esc(r.location||"")}"></div>
+     <div><label>Contract / PO ref.</label><input id="hc_contractRef" value="${esc(r.contractRef||"")}"></div>
+     <div><label>Contract / PO date</label><input id="hc_contractDate" type="date" value="${esc((r.contractDate||"").slice(0,10))}"></div>
+     <div><label>Quotation ref.</label><input id="hc_quotationRef" value="${esc(r.quotationRef||"")}"></div>
+     <div><label>Quotation date</label><input id="hc_quotationDate" type="date" value="${esc((r.quotationDate||"").slice(0,10))}"></div>
+     <div><label>Date of completion</label><input id="hc_completionDate" type="date" value="${esc((r.completionDate||"").slice(0,10))}"></div>
+     ${isDlp?`<div><label>DLP start</label><input id="hc_dlpStart" type="date" value="${esc((r.dlpStart||"").slice(0,10))}"></div>
+     <div><label>DLP end</label><input id="hc_dlpEnd" type="date" value="${esc((r.dlpEnd||"").slice(0,10))}"></div>
+     <div><label>Retention releasable (text)</label><input id="hc_retentionDue" value="${esc(r.retentionDue||"")}" placeholder="e.g. AED 25,000.00 (final 5%)"></div>`:""}
+   </div>
+   <h3>Scope of works</h3>
+   <div style="overflow-x:auto"><table id="hcScope"><tr><th>#</th><th>Description</th><th>Unit</th><th>Qty</th><th>Status</th><th></th></tr>${scope.map(srow).join("")}</table></div>
+   <div class="flex" style="margin-top:6px"><button class="btn ghost" id="hcAddRow">+ Add line</button></div>
+   <h3>Contract value <span class="muted" style="font-size:11px;font-weight:400">(leave 0 to omit the value section)</span></h3><div class="grid">
+     <div><label>Value excl. VAT (AED)</label><input id="hc_valueExVat" type="number" step="0.01" value="${r.valueExVat||0}"></div>
+     <div><label>VAT %</label><input id="hc_vatPct" type="number" step="0.5" value="${Math.round((r.vatPct!=null?r.vatPct:0.05)*100)}"></div>
+     <div><label>Variations to date</label><input id="hc_variations" value="${esc(r.variations||"NIL")}"></div>
+     <div style="grid-column:1/-1"><label>Payment terms (optional)</label><input id="hc_paymentTerms" value="${esc(r.paymentTerms||"")}"></div>
+   </div>
+   <h3>Declaration — editable clauses</h3>
+   <div class="muted" style="font-size:11px;margin-bottom:6px">Placeholders {COMPLETION_DATE}, {DLP_START}, {DLP_END} are replaced automatically on the printed certificate.${isDlp?"":" The acceptance-without-reservation / variation clause protects against later scope claims — edit with care."}</div>
+   ${clauses.map((c,i)=>`<div style="margin-bottom:6px"><label>Clause ${i+1}</label><textarea class="hc_clause" style="width:100%;min-height:58px">${esc(c)}</textarea></div>`).join("")}
+   <div><label>Remarks / exceptions (optional — printed on the certificate)</label><input id="hc_notes" value="${esc(r.notes||"")}"></div>
+   <div style="height:14px"></div>
+   <div class="flex" style="gap:10px">
+     ${canEdit?`<button class="btn green" id="hcSave">${isNew?"Create draft":"Save changes"}</button>`:""}
+     ${r.id?`<button class="btn" id="hcPrint">View / Print</button>`:""}
+     ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (PDF attached)</button>`:""}
+     ${r.id&&ME.role==="CEO"?`<button class="btn red" id="hcDel">Delete</button>`:""}
+   </div></div>`;
+  $("#hcBack").onclick=vCompCerts;
+  // prefill pickers
+  (async ()=>{ try{ if(!CONTRACTS.length) CONTRACTS=await api("contracts"); }catch(e){}
+    const pc=$("#hc_pickC"); if(pc) pc.innerHTML=`<option value="">—</option>`+CONTRACTS.map(c=>`<option value="${esc(c.id)}">${esc(c.project)} — ${esc(c.clientName||"")}</option>`).join("");
+    const ps=$("#hc_pickS"); if(ps) ps.innerHTML=`<option value="">—</option>`+SUPS.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
+    if(pc) pc.onchange=async ()=>{ const ct=CONTRACTS.find(x=>x.id===pc.value); if(!ct) return;
+      $("#hc_ptype").value="Client"; $("#hc_partyName").value=ct.clientName||ct.mainContractor||""; $("#hc_project").value=ct.project||"";
+      $("#hc_contractRef").value=ct.subcontractRef||""; $("#hc_quotationRef").value=ct.offerRef||"";
+      $("#hc_valueExVat").value=r2(num(ct.contractSum)+num(ct.variations))||0;
+      try{ const cl=await api("clients"); const c2=cl.find(x=>x.id===ct.clientId); if(c2){ $("#hc_partyTrn").value=c2.trn||""; $("#hc_partyEmail").value=c2.email||""; $("#hc_partyAttn").value=c2.contactName||""; } }catch(e){} };
+    if(ps) ps.onchange=()=>{ const sp=SUPS.find(x=>x.id===ps.value); if(!sp) return;
+      $("#hc_ptype").value="Subcontractor"; $("#hc_partyName").value=sp.name||""; $("#hc_partyTrn").value=sp.trn||"";
+      $("#hc_partyEmail").value=sp.email||""; $("#hc_partyAttn").value=sp.contactName||""; $("#hc_project").value=sp.project||$("#hc_project").value;
+      $("#hc_contractRef").value=sp.lpoRef||sp.subcontractRef||""; $("#hc_valueExVat").value=num(sp.contractValue)||0; }; })();
+  const bindDel=()=>document.querySelectorAll(".hc_sdel").forEach(a=>a.onclick=e=>{ e.preventDefault(); a.closest("tr").remove(); }); bindDel();
+  $("#hcAddRow").onclick=()=>{ const t=$("#hcScope"); const tr=document.createElement("tr"); tr.innerHTML=srow({ref:String(t.rows.length),description:"",unit:"",qty:"",status:"Completed"},t.rows.length-1); t.appendChild(tr); bindDel(); };
+  const gather=()=>{ const g=id=>{const el=$("#hc_"+id); return el?el.value:"";};
+    const sc=[...$("#hcScope").querySelectorAll("tr")].slice(1).map(tr=>({ ref:tr.querySelector(".hc_sref").value, description:tr.querySelector(".hc_sdesc").value, unit:tr.querySelector(".hc_sunit").value, qty:tr.querySelector(".hc_sqty").value, status:tr.querySelector(".hc_sst").value })).filter(l=>l.description.trim());
+    return { id:r.id, type:isDlp?"DLP":"COMPLETION", docNo:g("docNo"), date:g("date"), entity:g("ent"),
+      partyType:g("ptype"), partyName:g("partyName"), partyTrn:g("partyTrn"), partyAttn:g("partyAttn"), partyEmail:g("partyEmail"),
+      project:g("project"), location:g("location"), contractRef:g("contractRef"), contractDate:g("contractDate"),
+      quotationRef:g("quotationRef"), quotationDate:g("quotationDate"), completionDate:g("completionDate"),
+      dlpStart:g("dlpStart"), dlpEnd:g("dlpEnd"), retentionDue:g("retentionDue"),
+      scope:sc, valueExVat:+g("valueExVat")||0, vatPct:(+g("vatPct")||0)/100,
+      variations:g("variations")||"NIL", paymentTerms:g("paymentTerms"),
+      clauses:[...document.querySelectorAll(".hc_clause")].map(t=>t.value), notes:g("notes") }; };
+  if($("#hcSave")) $("#hcSave").onclick=async ()=>{ try{ const saved=await api("compcert",{method:"POST",body:gather()}); toast(saved.docNo+" saved"); compCertForm(saved); }catch(e){ toast(e.message); } };
+  if($("#hcPrint")) $("#hcPrint").onclick=()=>openCompCertDoc(r.id,true);
+  if($("#hcDel")) $("#hcDel").onclick=async ()=>{ if(!confirm("Delete "+r.docNo+"? This cannot be undone."))return; try{ await api("compcert/"+r.id,{method:"DELETE"}); toast("Deleted"); vCompCerts(); }catch(e){ toast(e.message); } };
+  if($("#hcSend")) $("#hcSend").onclick=async ()=>{ const to=($("#hc_partyEmail").value||"").trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast("Enter the party email first"); return; }
+    if(!confirm(`Email this ${isDlp?"DLP certificate":"completion certificate"} (with PDF attached) to ${to}?`)) return;
+    try{ await api("compcert",{method:"POST",body:gather()}); // save latest edits first
+      toast("Preparing PDF…"); let pdfBase64="",pdfName="";
+      try{ const html=await apiText("compcert/"+r.id+"/html"); pdfBase64=await htmlToPdfBase64(html); pdfName=(r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf"; }
+      catch(e){ if(!confirm("Could not build the PDF ("+e.message+"). Send without attachment?")) return; }
+      toast("Sending…"); const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfBase64,pdfName}});
+      toast("Sent to "+res.to+(res.attached?" (PDF attached)":"")); compCertForm(await api("compcert/"+r.id));
+    }catch(e){ toast(e.message); } };
+}
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();
 </script>
 </body>

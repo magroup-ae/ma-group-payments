@@ -14374,6 +14374,106 @@ function buildRfqHtml(rec, cfg, vendor) {
 </div></body></html>`;
 }
 
+// ===================== COMPLETION & DLP CERTIFICATES =====================
+// Standard MA Group formats (register: MA_COMPLETION_CERTIFICATE_FORMAT_20AUG2026):
+// Completion = completion/acceptance record only (no warranty/DLP wording);
+// DLP = defects-liability discharge at end of the DLP (UAE practice, Civil Code
+// Arts. 880–883 reserved). All clauses editable per certificate before issue.
+function compCertDefaults(type) {
+  if (type === "DLP") return [
+    "This is to certify that the Defects Liability Period for the works described in Section 2, which commenced on {DLP_START} and expired on {DLP_END}, has been completed, and that all defects, shrinkages and other faults notified during the Defects Liability Period have been made good to the satisfaction of the Client.",
+    "Accordingly, the balance of retention (or the retention guarantee / cheque, where applicable) becomes releasable in accordance with the terms of the contract, and the Contractor's obligations under the contract are discharged, save as stated in this certificate.",
+    "This certificate does not affect any liability arising from latent defects, fraud or deliberate concealment, nor the decennial liability imposed by Articles 880–883 of the UAE Civil Code, where applicable."
+  ];
+  return [
+    "This is to certify that the works described in Section 2, executed under the referenced contract / purchase order for the project stated in Section 1, were fully completed on {COMPLETION_DATE} in accordance with the contract documents, approved drawings and specifications, and to a good and workmanlike standard.",
+    "The works have been handed over, the site has been cleared of the Contractor's plant, surplus materials and rubbish, and all keys, documentation and deliverables associated with the works have been delivered.",
+    "The works are hereby accepted by the Client without reservation. Any works beyond the scope stated in Section 2 shall be treated as a separate order or variation."
+  ];
+}
+function buildCompCertHtml(rec, cfg, assets) {
+  const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
+  const isDlp = rec.type === "DLP";
+  const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
+  const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
+  const title = isDlp ? "DEFECTS LIABILITY COMPLETION CERTIFICATE" : "CERTIFICATE OF COMPLETION";
+  const sub = isDlp ? "Certificate of Making Good Defects — end of Defects Liability Period" : "Completion & Handover of Works";
+  const vEx = num(rec.valueExVat), vat = r2(vEx * (rec.vatPct != null ? num(rec.vatPct) : 0.05)), vTot = r2(vEx + vat);
+  const scopeRows = (rec.scope || []).filter((l) => l && (l.description || "").trim()).map((l, i) =>
+    `<tr><td>${esc(l.ref || i + 1)}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty || "—")}</td><td>${esc(l.status || "Completed")}</td></tr>`).join("")
+    || `<tr><td>1</td><td>As per the referenced contract / purchase order and approved quotation.</td><td>—</td><td class="num">—</td><td>Completed</td></tr>`;
+  const clauses = (Array.isArray(rec.clauses) && rec.clauses.length ? rec.clauses : compCertDefaults(rec.type))
+    .map((c) => String(c || "")
+      .replace(/\{COMPLETION_DATE\}/g, dt(rec.completionDate))
+      .replace(/\{DLP_START\}/g, dt(rec.dlpStart))
+      .replace(/\{DLP_END\}/g, dt(rec.dlpEnd)))
+    .filter((c) => c.trim())
+    .map((c) => `<p style="margin:0 0 8px">${esc(c)}</p>`).join("");
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:50px;max-width:160px;object-fit:contain;display:block">` : `<div style="height:50px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:90px;opacity:.85;object-fit:contain">` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.docNo)} — ${title}</title>
+<style>
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12.5px;line-height:1.55}
+  .page{max-width:820px;margin:0 auto;padding:26px 34px}
+  ${MAH_CSS}
+  .band{background:#183048;color:#fff;text-align:center;padding:10px 12px;margin-top:12px}
+  .band .t{font-size:17px;font-weight:800;letter-spacing:1.4px}
+  .band .s{font-size:10.5px;color:#d8e0ea;margin-top:2px}
+  .goldrule{height:3px;background:#cc9c30;margin-bottom:14px}
+  table.pt{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:12px}
+  table.pt td,table.pt th{border:1px solid #d9dfe8;padding:5px 9px;vertical-align:top;text-align:left}
+  table.pt td.k{background:#f4f6f9;color:#5b6472;width:170px;font-weight:600}
+  table.pt th{background:#183048;color:#fff;font-size:11px}
+  td.num{text-align:right}
+  .sec{color:#183048;font-size:13px;font-weight:800;margin:14px 0 4px;border-left:4px solid #cc9c30;padding-left:8px}
+  .decl{border:1px solid #d9dfe8;border-left:4px solid #183048;padding:12px 14px;margin:8px 0;font-size:12.3px}
+  table.sig{width:100%;border-collapse:collapse;margin-top:20px;font-size:11.5px}
+  table.sig td{border:1px solid #d9dfe8;padding:10px 12px;width:50%;vertical-align:top}
+  .sh{color:#5b6472;font-weight:700;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
+  .sn{font-weight:800;color:#183048;margin:3px 0 8px}
+  .sl{color:#444;font-size:11px;margin-top:6px}
+</style></head><body><div class="page">
+  ${mahHeader(cfg, ent)}
+  <div class="band"><div class="t">${title}</div><div class="s">${sub}</div></div><div class="goldrule"></div>
+  <table class="pt">
+    <tr><td class="k">Certificate No.</td><td><b>${esc(rec.docNo)}</b></td><td class="k">Date of Issue</td><td>${dt(rec.date)}</td></tr>
+  </table>
+  <div class="sec">1. PROJECT &amp; CONTRACT PARTICULARS</div>
+  <table class="pt">
+    <tr><td class="k">${isDlp ? "Client / Employer" : "Client"}</td><td colspan="3"><b>${esc(rec.partyName || "—")}</b>${rec.partyTrn ? " · TRN " + esc(rec.partyTrn) : ""}${rec.partyAttn ? " · Attn: " + esc(rec.partyAttn) : ""}</td></tr>
+    <tr><td class="k">Project</td><td>${esc(rec.project || "—")}</td><td class="k">Location</td><td>${esc(rec.location || "—")}</td></tr>
+    <tr><td class="k">Contractor</td><td colspan="3">${esc(ent)}${entTrn ? " · TRN " + esc(entTrn) : ""}</td></tr>
+    <tr><td class="k">Contract / PO Ref.</td><td>${esc(rec.contractRef || "—")}${rec.contractDate ? " dated " + dt(rec.contractDate) : ""}</td><td class="k">Quotation Ref.</td><td>${esc(rec.quotationRef || "—")}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>
+    ${isDlp
+      ? `<tr><td class="k">Date of Completion</td><td>${dt(rec.completionDate)}</td><td class="k">DLP</td><td>From <b>${dt(rec.dlpStart)}</b> to <b>${dt(rec.dlpEnd)}</b></td></tr>`
+      : `<tr><td class="k">Date of Completion</td><td colspan="3"><b>${dt(rec.completionDate)}</b></td></tr>`}
+  </table>
+  <div class="sec">2. SCOPE OF WORKS ${isDlp ? "COVERED" : "COMPLETED"}</div>
+  <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:60px">Unit</th><th style="width:60px">Qty</th><th style="width:110px">Status</th></tr>${scopeRows}</table>
+  ${vEx > 0 ? `<div class="sec">3. CONTRACT VALUE</div>
+  <table class="pt">
+    <tr><td class="k">Contract value (excl. VAT)</td><td class="num">${money(vEx)}</td><td class="k">VAT @ ${Math.round((rec.vatPct != null ? num(rec.vatPct) : 0.05) * 100)}%</td><td class="num">${money(vat)}</td></tr>
+    <tr><td class="k">Total (incl. VAT)</td><td class="num"><b>${money(vTot)}</b></td><td class="k">Variations to date</td><td>${esc(rec.variations || "NIL")}</td></tr>
+    <tr><td class="k">Amount in words</td><td colspan="3" style="font-style:italic">${esc(amountWords(vTot))}</td></tr>
+    ${rec.paymentTerms ? `<tr><td class="k">Payment terms</td><td colspan="3">${esc(rec.paymentTerms)}</td></tr>` : ""}
+    ${isDlp && rec.retentionDue ? `<tr><td class="k">Retention releasable</td><td colspan="3"><b>${esc(rec.retentionDue)}</b></td></tr>` : ""}
+  </table>` : (isDlp && rec.retentionDue ? `<div class="sec">3. RETENTION</div><table class="pt"><tr><td class="k">Retention releasable</td><td><b>${esc(rec.retentionDue)}</b></td></tr></table>` : "")}
+  <div class="sec">${vEx > 0 || (isDlp && rec.retentionDue) ? "4" : "3"}. DECLARATION</div>
+  <div class="decl">${clauses}</div>
+  ${rec.notes ? `<div class="decl" style="border-left-color:#cc9c30"><b>Remarks / exceptions:</b> ${esc(rec.notes)}</div>` : ""}
+  <table class="sig"><tr>
+    <td><div class="sh">Issued by — Contractor</div><div class="sn">${esc(ent)}</div>
+      <div style="position:relative">${signImg}<div style="position:absolute;left:130px;top:-14px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div><div class="sl">Signature &amp; Company Stamp</div><div class="sl">Date: ${dt(rec.date)}</div></td>
+    <td><div class="sh">Accepted by — ${esc(rec.partyType || "Client")}</div><div class="sn">${esc(rec.partyName || "")}</div>
+      <div style="height:50px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">Title: ______________________________</div><div class="sl">Signature &amp; Company Stamp</div><div class="sl">Date: ______________</div></td>
+  </tr></table>
+  <div style="color:#7a8494;font-size:9.5px;margin-top:8px">Issued in duplicate — one signed original to be retained by each party. ${isDlp ? "" : "This certificate is a completion record only; warranty and defects liability, where applicable, remain governed by the approved quotation / purchase order terms."}</div>
+  ${mahFooter(ent)}
+</div></body></html>`;
+}
+
 function buildAwardDocHtml(rec, cfg, assets) {
   const isAgr = rec.type === "AGREEMENT";
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
@@ -15162,6 +15262,113 @@ var api_default = async (req, context) => {
     const items = await getAllJSON(s, "award/");
     items.sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
     return json({ items, threshold: awardThreshold(settings) });
+  }
+  // ===================== COMPLETION & DLP CERTIFICATE ENDPOINTS =====================
+  if (path === "compcerts" && req.method === "GET") {
+    const items = await getAllJSON(s, "compcert/");
+    items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    return json({ items });
+  }
+  if (path === "compcert" && req.method === "POST") {
+    if (!can("contracts")) return err("Not permitted", 403);
+    const b = await req.json();
+    const type = b.type === "DLP" ? "DLP" : "COMPLETION";
+    const stg = await s.get("settings", { type: "json" });
+    let id = b.id, ex = null;
+    if (id) { ex = await s.get("compcert/" + id, { type: "json" }); if (!ex) return err("Not found", 404); }
+    else { id = await nextId(s, stg, "compcertSeq", "CX", "compcert/", 4); }
+    // Document number: MA/CC/<year>/<serial> or MA/DLP/<year>/<serial> (editable while Draft).
+    let docNo = String(b.docNo || ex?.docNo || "").trim();
+    if (!docNo) {
+      const yr = String(new Date().getFullYear());
+      const key = type === "DLP" ? "dlpSerial" : "ccSerial";
+      stg[key] = (num(stg[key]) || 102) + 1; // continues after MA/CC/2026/0102 in the register
+      docNo = `MA/${type === "DLP" ? "DLP" : "CC"}/${yr}/${String(stg[key]).padStart(4, "0")}`;
+    }
+    await s.setJSON("settings", stg);
+    const str = (k) => b[k] === void 0 ? (ex?.[k] || "") : (b[k] || "");
+    const entObj = (settings.entities || []).find((e) => e.short === (b.entity || ex?.entity)) || settings.entities[0];
+    const rec = {
+      id, type, docNo,
+      date: str("date") || now().slice(0, 10),
+      entity: entObj.short, entityName: entObj.name, entityTRN: entityTRN(entObj),
+      partyType: str("partyType") || "Client", partyName: str("partyName"), partyTrn: str("partyTrn"),
+      partyAttn: str("partyAttn"), partyEmail: str("partyEmail"),
+      project: str("project"), location: str("location"),
+      contractRef: str("contractRef"), contractDate: str("contractDate"),
+      quotationRef: str("quotationRef"), quotationDate: str("quotationDate"),
+      completionDate: str("completionDate"),
+      dlpStart: str("dlpStart"), dlpEnd: str("dlpEnd"), retentionDue: str("retentionDue"),
+      scope: Array.isArray(b.scope) ? b.scope.map((l, i) => ({ ref: String(l.ref || i + 1), description: String(l.description || ""), unit: String(l.unit || ""), qty: String(l.qty || ""), status: String(l.status || "Completed") })) : (ex?.scope || []),
+      valueExVat: b.valueExVat === void 0 ? num(ex?.valueExVat) : num(b.valueExVat),
+      vatPct: b.vatPct === void 0 ? (ex?.vatPct != null ? num(ex.vatPct) : 0.05) : num(b.vatPct),
+      variations: str("variations") || "NIL", paymentTerms: str("paymentTerms"),
+      clauses: Array.isArray(b.clauses) ? b.clauses.map((c) => String(c || "")) : (ex?.clauses || compCertDefaults(type)),
+      notes: str("notes"),
+      status: b.status || ex?.status || "Draft",
+      createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
+      updatedAt: now(), updatedBy: me.name, sentAt: ex?.sentAt || "",
+      audit: [...(ex?.audit || []), { at: now(), by: me.name, action: ex ? "Edited" : "Created (Draft)" }]
+    };
+    if (!rec.partyName) return err("Enter the party (client / subcontractor) name");
+    if (!rec.project) return err("Enter the project");
+    if (type === "COMPLETION" && !rec.completionDate) return err("Enter the date of completion");
+    if (type === "DLP" && (!rec.dlpStart || !rec.dlpEnd)) return err("Enter the DLP start and end dates");
+    await s.setJSON("compcert/" + id, rec);
+    return json(rec);
+  }
+  {
+    const m = path.match(/^compcert\/([^/]+)$/);
+    if (m && req.method === "GET") {
+      const rec = await s.get("compcert/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!rec) return err("Not found", 404);
+      return json(rec);
+    }
+    if (m && req.method === "DELETE") {
+      if (!can("admin")) return err("CEO only", 403);
+      await s.delete("compcert/" + decodeURIComponent(m[1])).catch(() => {});
+      return json({ ok: true });
+    }
+  }
+  {
+    const m = path.match(/^compcert\/([^/]+)\/html$/);
+    if (m && req.method === "GET") {
+      const rec = await s.get("compcert/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!rec) return err("Not found", 404);
+      const cfg = await getEmailCfg(s);
+      const sign = await s.get("asset/sign").catch(() => "") || "";
+      const stamp = await s.get("asset/stamp").catch(() => "") || "";
+      return new Response(buildCompCertHtml(rec, cfg, { sign, stamp }), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+  }
+  {
+    const m = path.match(/^compcert\/([^/]+)\/send$/);
+    if (m && req.method === "POST") {
+      if (!can("contracts")) return err("Not permitted", 403);
+      const rec = await s.get("compcert/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!rec) return err("Not found", 404);
+      let b = {}; try { b = await req.json(); } catch (e) {}
+      const to = String(b.to || rec.partyEmail || "").trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err("Enter a valid recipient email", 400);
+      const cfg = await getEmailCfg(s);
+      const sign = await s.get("asset/sign").catch(() => "") || "";
+      const stamp = await s.get("asset/stamp").catch(() => "") || "";
+      const html = buildCompCertHtml(rec, cfg, { sign, stamp });
+      const label = rec.type === "DLP" ? "Defects Liability Completion Certificate" : "Certificate of Completion";
+      const subject = `${label} ${rec.docNo} — ${rec.project || ""}`;
+      let attachments;
+      if (b.pdfBase64) {
+        const fn = String(b.pdfName || (rec.docNo.replace(/[^A-Za-z0-9._-]+/g, "_") + ".pdf"));
+        attachments = [{ filename: fn, content: Buffer.from(String(b.pdfBase64), "base64"), contentType: "application/pdf" }];
+      }
+      const r = await sendMail(s, cfg, { type: "awarddoc", to, toName: rec.partyAttn || rec.partyName, subject, html, attachments });
+      rec.status = rec.status === "Countersigned" ? "Countersigned" : "Issued";
+      rec.sentAt = now(); rec.partyEmail = to;
+      rec.audit = [...(rec.audit || []), { at: now(), by: me.name, action: "Emailed to " + to + (attachments ? " (PDF attached)" : "") }];
+      await s.setJSON("compcert/" + rec.id, rec);
+      try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) {}
+      return json({ ok: true, status: r.status, to, attached: !!attachments });
+    }
   }
   const awdHtml = path.match(/^award\/([^/]+)\/html$/);
   if (awdHtml && req.method === "GET") {
