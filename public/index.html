@@ -1895,7 +1895,7 @@ function importProjectJson(){
   inp.click();
 }
 async function clientCertForm(contractId){
-  try{ CONTRACTS=await api("contracts"); }catch(e){}
+  try{ [CONTRACTS,CLIENTS]=await Promise.all([api("contracts"),api("clients")]); }catch(e){ try{ CONTRACTS=await api("contracts"); }catch(e2){} }
   // Every project set up in Settings appears here. Projects that already have a client
   // contract use it; projects without one show an inline setup so the certificate can
   // still be issued (the contract is created automatically on save).
@@ -1911,7 +1911,7 @@ async function clientCertForm(contractId){
      <div id="q_setup" style="grid-column:1/-1;display:none;border:1px solid #e3c56b;background:#fff8e6;border-radius:8px;padding:10px 12px">
        <b>First certificate for this project — set up the client contract (saved automatically)</b>
        <div class="grid" style="margin-top:8px">
-         <div><label>Client / employer name</label><input id="q_scName"></div>
+         <div><label>Client / employer <span class="muted" style="font-size:10px">(registered on the Clients page)</span></label><select id="q_scName"><option value="">— select client —</option>${(CLIENTS||[]).map(c=>`<option>${esc(c.name)}</option>`).join("")}</select></div>
          <div><label>Contract value excl. VAT (AED)</label><input id="q_scSum" type="number" step="0.01" value="0"></div>
          <div><label>Approved variations (AED)</label><input id="q_scVar" type="number" step="0.01" value="0"></div>
          <div><label>Retention %</label><input id="q_scRet" type="number" step="0.5" value="10"></div>
@@ -1971,7 +1971,7 @@ async function clientCertForm(contractId){
     try{ const all=(await api("clientcerts")).filter(x=>x&&x.contractId===id&&x.status!=="Cancelled"&&Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
       if(all[0]) all[0].lines.forEach(l=>{ PREV.priorPct[l.ref]=num(l.pct); }); }catch(e){}
     renderBuildings(); preview(); };
-  ["q_scName","q_scSum","q_scVar","q_scRet","q_scAdv","q_scRec","q_scVat"].forEach(id=>{ const el=$("#"+id); if(el) el.addEventListener("input",()=>{ const v=$("#q_contract").value||""; if(v.startsWith("n:")){ PREV.ct=synthCt(v.slice(2)); preview(); } }); });
+  ["q_scName","q_scSum","q_scVar","q_scRet","q_scAdv","q_scRec","q_scVat"].forEach(id=>{ const el=$("#"+id); if(!el) return; const h=()=>{ const v=$("#q_contract").value||""; if(v.startsWith("n:")){ PREV.ct=synthCt(v.slice(2)); preview(); } }; el.addEventListener("input",h); el.addEventListener("change",h); });
   const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
     LINES=liveLines();
     const gross=boqMode()?LINES.reduce((a,l)=>a+r2(num(l.value)*num(l.pct)),0):(+$("#q_gross").value||0);
@@ -2012,7 +2012,7 @@ async function clientCertForm(contractId){
       else { // project with no contract yet — create client + contract first, then certify
         const projName=v.slice(2);
         const cname=(($("#q_scName")||{}).value||"").trim();
-        if(!cname){ toast("Enter the client / employer name for this project"); $("#q_scName").focus(); return; }
+        if(!cname){ toast("Select the client — register them first on the Clients page if missing"); $("#q_scName").focus(); return; }
         const sum=+$("#q_scSum").value||0;
         if(!(sum>0)){ toast("Enter the contract value (excl. VAT)"); $("#q_scSum").focus(); return; }
         toast("Setting up the client contract…");
@@ -3390,8 +3390,8 @@ function vSettings(){
   const admin=ME.role==="CEO";
   $("#main").innerHTML=`<div class="card"><h2>Settings ${admin?"":"(view only — CEO can edit)"}</h2>
    <h3>Projects</h3><div id="projList"></div>
-   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><input id="npClient" placeholder="Client / employer name" style="max-width:220px"><input id="npRef" placeholder="Contract / quotation ref" style="max-width:190px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.1" placeholder="Retention % (10)" style="max-width:120px"><input id="npTM" type="number" step="0.1" placeholder="Target margin % (15)" style="max-width:150px"><button class="btn" id="npAdd">Add project</button></div>
-   <div class="muted" style="font-size:11px;margin-top:4px">Enter the <b>client name</b> and <b>contract / quotation reference</b> here and the client + contract record is created automatically — so the project is immediately ready for client payment certificates (no "no contract yet").</div>
+   ${admin?`<div class="flex" style="flex-wrap:wrap;gap:8px"><input id="npCode" placeholder="Code (3 letters)" style="max-width:120px"><input id="npName" placeholder="Project name" style="max-width:260px"><select id="npClient" style="max-width:220px"><option value="">— client (from Clients page) —</option></select><input id="npRef" placeholder="Contract / quotation ref" style="max-width:190px"><input id="npValue" type="number" step="0.01" placeholder="Contract value (ex-VAT)" style="max-width:180px"><input id="npDown" type="number" step="0.01" placeholder="Down payment received" style="max-width:180px"><input id="npRet" type="number" step="0.1" placeholder="Retention % (10)" style="max-width:120px"><input id="npTM" type="number" step="0.1" placeholder="Target margin % (15)" style="max-width:150px"><button class="btn" id="npAdd">Add project</button></div>
+   <div class="muted" style="font-size:11px;margin-top:4px">Pick the <b>client from the dropdown</b> (registered on the Clients page — register the client there first if missing) and add the <b>contract / quotation reference</b>: the contract record is created automatically, so the project is immediately ready for client payment certificates.</div>
    <div class="card" style="margin-top:14px;background:#f7f9fc"><h3 style="margin-top:0">Merge duplicate projects</h3>
      <div class="note">If the same project was created under two or more names, tick them below, type the single name and code to keep, then Merge. Every contract, client &amp; supplier IPC, expense and budget under the ticked names moves to the kept name, and the duplicates are removed from the list. CEO password required.</div>
      <div id="mgList" style="margin:10px 0"></div>
@@ -3417,7 +3417,11 @@ function vSettings(){
     const pjCell=(p,i,field)=>(admin&&!p.fixed)?`<input type="number" step="0.01" class="pjEdit" data-i="${i}" data-field="${field}" value="${p[field]??""}" placeholder="—" style="width:130px;text-align:right">`:(p[field]?fmt(p[field]):"—");
     const pjPct=(p,i,field,def)=>(admin&&!p.fixed)?`<input type="number" step="0.1" class="pjPctEdit" data-i="${i}" data-field="${field}" value="${p[field]!=null?Math.round(p[field]*1000)/10:def}" style="width:62px;text-align:right">%`:(p[field]!=null?pct(p[field]):def+"%");
     const pjTxt=(p,i,field,ph)=>admin&&!p.fixed?`<input class="pjTxtEdit" data-i="${i}" data-field="${field}" value="${esc(p[field]||"")}" placeholder="${ph||""}" style="width:160px">`:esc(p[field]||"—");
-    $("#projList").innerHTML=`<div style="overflow-x:auto"><table><tr><th>Code</th><th>Name</th><th>Client</th><th>Contract / quotation ref</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention %</th><th class="num">Target margin %</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td>${p.fixed?"—":pjTxt(p,i,"client","client name")}</td><td>${p.fixed?"—":pjTxt(p,i,"contractRef","ref")}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjPct(p,i,"retentionPct",10)}</td><td class="num">${p.fixed?"—":pjPct(p,i,"targetMargin",15)}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table></div>
+    // Client column = dropdown of REGISTERED clients (Clients page), never free text —
+    // guarantees the auto-created contract links to the right client record.
+    const clientOpts=(cur)=>`<option value="">— select —</option>`+(CLIENTS||[]).map(c=>`<option ${cur===c.name?"selected":""}>${esc(c.name)}</option>`).join("")+((cur&&!(CLIENTS||[]).some(c=>c.name===cur))?`<option selected>${esc(cur)}</option>`:"");
+    const pjClientSel=(p,i)=>admin&&!p.fixed?`<select class="pjTxtEdit" data-i="${i}" data-field="client" style="width:185px">${clientOpts(p.client||"")}</select>`:esc(p.client||"—");
+    $("#projList").innerHTML=`<div style="overflow-x:auto"><table><tr><th>Code</th><th>Name</th><th>Client</th><th>Contract / quotation ref</th><th class="num">Contract value (ex-VAT)</th><th class="num">Down payment received</th><th class="num">Retention %</th><th class="num">Target margin %</th>${admin?"<th></th>":""}</tr>${S.projects.map((p,i)=>`<tr><td><b>${esc(p.code)}</b></td><td>${esc(p.name)}${p.fixed?` <span class="pill" style="background:#7A5C00;font-size:10px">fixed · overhead</span>`:""}</td><td>${p.fixed?"—":pjClientSel(p,i)}</td><td>${p.fixed?"—":pjTxt(p,i,"contractRef","ref")}</td><td class="num">${pjCell(p,i,"contractValue")}</td><td class="num">${p.fixed?"—":pjCell(p,i,"downPayment")}</td><td class="num">${p.fixed?"—":pjPct(p,i,"retentionPct",10)}</td><td class="num">${p.fixed?"—":pjPct(p,i,"targetMargin",15)}</td>${admin?`<td>${p.fixed?`<span class="muted" style="font-size:11px">permanent</span>`:`<a href="#" data-dp="${i}">remove</a>`}</td>`:""}</tr>`).join("")}</table></div>
     <div class="muted" style="font-size:11px;margin-top:4px">Down payment received = advance paid to you by the client. Retention % (default 10%) is withheld by the client — release 5% on completion + 5% after the 12-month DLP. Target margin % (default 15%) is your planned profit — it drives the WIP forecast cost when no BOQ is set.</div>`;
     $("#bankList").innerHTML=`<table>${S.banks.map((b,i)=>`<tr><td>${esc(b)}</td>${admin?`<td><a href="#" data-db="${i}">remove</a></td>`:""}</tr>`).join("")}</table>`;
     if(admin){ document.querySelectorAll("[data-dp]").forEach(a=>a.onclick=async e=>{e.preventDefault();S.projects.splice(+a.dataset.dp,1);await saveS();});
@@ -3431,6 +3435,10 @@ function vSettings(){
     ml.querySelectorAll(".mgChk").forEach(c=>c.onchange=()=>{ const checked=[...ml.querySelectorAll(".mgChk:checked")]; if(checked.length && !$("#mgName").value){ $("#mgName").value=checked[0].value; $("#mgCode").value=checked[0].dataset.code||""; } }); };
   const saveS=async ()=>{ try{ const d=await api("settings",{method:"POST",body:{projects:S.projects,banks:S.banks,cheque:S.cheque}}); S=d.settings; COSTMETA=null; renderLists(); renderMerge(); toast("Saved — available on all pages"); }catch(e){ toast(e.message); } };
   renderLists();
+  // Load registered clients for the project↔client dropdowns, then re-render with them.
+  api("clients").then(cl=>{ CLIENTS=cl||[]; const np=$("#npClient");
+    if(np) np.innerHTML=`<option value="">— client (from Clients page) —</option>`+CLIENTS.map(c=>`<option>${esc(c.name)}</option>`).join("");
+    renderLists(); }).catch(()=>{});
   if(admin){ api("usage").then(u=>{ const b=$("#usageBox"); if(!b) return;
     b.innerHTML=`<div class="kpis"><div class="kpi"><div class="v">${u.certs}</div><div class="l">Certificates</div></div>
       <div class="kpi"><div class="v">${u.suppliers}</div><div class="l">Suppliers</div></div>
