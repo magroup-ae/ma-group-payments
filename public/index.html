@@ -723,6 +723,7 @@ function certForm(c){
     <div id="w_variations"><label>Approved variations (net, AED)</label><input id="f_variations" type="number" step="0.01" value="${c.variations??0}"></div>
     <div id="w_workPct"><label>Cumulative work done %</label><input id="f_workPct" type="number" step="0.1" value="${c.workPct!==undefined?Math.round(c.workPct*1000)/10:""}" placeholder="e.g. 45"></div>
     <div id="w_invoiceAmount" style="display:none"><label>Invoice amount this certificate (AED, excl VAT)</label><input id="f_invoiceAmount" type="number" step="0.01" value="${c.invoiceAmount??""}" placeholder="value of the submitted invoice"></div>
+    <div id="w_invoices" style="display:none;grid-column:1/-1"></div>
     <div><label>Materials on site (AED)</label><input id="f_materialsOnSite" type="number" step="0.01" value="${c.materialsOnSite??0}"></div>
     <div><label>Contra / back-charges (AED)</label><input id="f_contra" type="number" step="0.01" value="${c.contra??0}"></div>
   </div>
@@ -731,7 +732,40 @@ function certForm(c){
   <div style="height:14px"></div><div class="flex">
     <button class="btn green" id="saveBtn">${isNew?"Create draft":"Save changes"}</button>
     <button class="btn ghost" id="backBtn">Back</button></div></div>`;
-  let TERMS=null, BOQMODE=false, BOQ=[], BOQPERINV=false;
+  let TERMS=null, BOQMODE=false, BOQ=[], BOQPERINV=false, INVMODE=false;
+  /* ----- multi-invoice rows (per-invoice certification): full or PART payment,
+     remaining balance stays open for a later IPC ----- */
+  const invPrevPaid=(no)=>{ const key=String(no||"").trim().toLowerCase(); if(!key) return 0;
+    const supId=$("#f_supplierId").value;
+    return (CERTS||[]).filter(x=>x&&x.supplierId===supId&&x.status!=="Cancelled"&&x.kind!=="advance"&&x.no!==(c&&c.no)).reduce((a,x)=>{
+      if(Array.isArray(x.invoices)&&x.invoices.length){ for(const v of x.invoices){ if(String(v.no||"").trim().toLowerCase()===key) a+=num(v.thisAmount); } }
+      else if(String(x.invoiceNo||"").trim().toLowerCase()===key) a+=num(x.invoiceAmount);
+      return a; },0); };
+  const invRow=(iv)=>`<tr class="invrow"><td><input class="iv_no" value="${esc(iv.no||"")}" placeholder="invoice no." style="width:130px"></td>
+    <td><input class="iv_amt" type="number" step="0.01" value="${iv.amount?iv.amount:""}" placeholder="full value" style="width:110px;text-align:right"></td>
+    <td class="num iv_prev" style="color:#7a8494">—</td>
+    <td><input class="iv_this" type="number" step="0.01" value="${iv.thisAmount?iv.thisAmount:""}" placeholder="pay now" style="width:110px;text-align:right"></td>
+    <td class="num iv_rem">—</td><td><a href="#" class="iv_del">✕</a></td></tr>`;
+  const recalcInv=()=>{ let tot=0; document.querySelectorAll("#invTbl tr.invrow").forEach(tr=>{
+      const no=tr.querySelector(".iv_no").value, amt=+tr.querySelector(".iv_amt").value||0, th=+tr.querySelector(".iv_this").value||0;
+      const prev=invPrevPaid(no); tot+=th;
+      const rem=amt>0?r2(amt-prev-th):0;
+      const pc=tr.querySelector(".iv_prev"); if(pc)pc.textContent=amt>0?fmt(prev):"—";
+      const rc=tr.querySelector(".iv_rem"); if(rc){ rc.textContent=amt>0?fmt(rem):"—"; rc.style.color=rem<-0.009?"#C0392B":(rem>0.009?"#7A5C00":"#2E7D32"); rc.style.fontWeight=rem<-0.009?"700":"400"; } });
+    const t=$("#invTot"); if(t)t.textContent=fmt(tot);
+    const fi=$("#f_invoiceNo"); if(fi&&INVMODE) fi.value=[...document.querySelectorAll("#invTbl .iv_no")].map(i=>i.value.trim()).filter(Boolean).join(", "); };
+  const wireInv=()=>{ document.querySelectorAll("#invTbl .iv_del").forEach(a=>a.onclick=e=>{ e.preventDefault(); a.closest("tr").remove(); recalcInv(); });
+    document.querySelectorAll("#invTbl input").forEach(i=>i.oninput=recalcInv); };
+  const renderInvoices=()=>{ const host=$("#w_invoices"); if(!host) return;
+    const seed=(Array.isArray(c.invoices)&&c.invoices.length)?c.invoices:(c.invoiceNo?[{no:c.invoiceNo,amount:num(c.invoiceAmount),thisAmount:num(c.invoiceAmount)}]:[{no:"",amount:"",thisAmount:""}]);
+    host.innerHTML=`<div class="note" style="margin:0 0 6px"><b>Invoices on this certificate</b> — add one row per supplier invoice. Pay the <b>full value</b> or a <b>part</b>: the remaining balance stays open and can be certified on a later IPC (paying more than the remaining balance is blocked).</div>
+     <div style="overflow-x:auto"><table id="invTbl"><tr><th>Invoice no.</th><th class="num">Invoice value (excl VAT)</th><th class="num">Previously certified</th><th>This certificate (AED)</th><th class="num">Remaining after</th><th></th></tr>
+     ${seed.map(invRow).join("")}
+     <tr class="tot"><td colspan="3" style="text-align:right"><b>Total this certificate (excl VAT)</b></td><td class="num"><b id="invTot">0</b></td><td colspan="2"></td></tr></table></div>
+     <div class="flex" style="margin-top:6px"><button class="btn ghost" id="invAdd" type="button">+ Add invoice</button></div>`;
+    $("#invAdd").onclick=()=>{ $("#invTbl").querySelector("tr.tot").insertAdjacentHTML("beforebegin", invRow({})); wireInv(); recalcInv(); };
+    wireInv(); recalcInv(); };
+  const gatherInvoices=()=>[...document.querySelectorAll("#invTbl tr.invrow")].map(tr=>({ no:tr.querySelector(".iv_no").value.trim(), amount:+tr.querySelector(".iv_amt").value||0, thisAmount:+tr.querySelector(".iv_this").value||0 })).filter(iv=>iv.no&&iv.thisAmount>0);
   const priorLinesMap=()=>{ const supId=$("#f_supplierId").value, proj=$("#f_project").value;
     const priors=(CERTS||[]).filter(x=>x&&x.supplierId===supId&&String(x.project||"")===String(proj)&&x.no!==(c&&c.no)&&x.status!=="Cancelled"&&Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
     const m={}; if(priors[0]) priors[0].lines.forEach(l=>{ m[l.ref]=num(l.qty); }); return m; };
@@ -789,7 +823,12 @@ function certForm(c){
       :(perInvoice
         ?`<b>${rate?"Rate contract (services)":"Per-invoice supplier (no fixed contract for this project)"}</b> · certify the submitted invoice amount · Retention ${pct(retP)} · VAT ${pct(vatP)} · Ref ${esc(docNo||"—")}${setupLink}`
         :`<b>Contract — ${esc(proj)}: AED ${fmt(cv)}</b> · Retention ${pct(retP)} · VAT ${pct(vatP)}${num(advA)>0?` · Advance AED ${fmt(advA)} @ ${pct(advR)}`:""} · Ref ${esc(docNo||"—")}${setupLink}`)):"";
-    $("#w_workPct").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_variations").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_invoiceAmount").style.display=(perInvoice&&!BOQMODE)?"":"none";
+    $("#w_workPct").style.display=(perInvoice||BOQMODE)?"none":""; $("#w_variations").style.display=(perInvoice||BOQMODE)?"none":"";
+    INVMODE=(perInvoice&&!BOQMODE);
+    $("#w_invoiceAmount").style.display="none";
+    $("#w_invoices").style.display=INVMODE?"":"none";
+    const fiRO=$("#f_invoiceNo"); if(fiRO) fiRO.readOnly=INVMODE;
+    if(INVMODE) renderInvoices();
     $("#w_boq").style.display=BOQMODE?"":"none";
     $("#progH").textContent=BOQMODE?(BOQPERINV?"Items on this invoice (BOQ)":"Measurement this certificate (BOQ)"):(perInvoice?"This certificate (per invoice)":"Progress this certificate");
     $("#calcNote").innerHTML=BOQMODE
@@ -808,6 +847,13 @@ function certForm(c){
       date:g("date"), periodFrom:g("periodFrom"), periodTo:g("periodTo"),
       variations:+g("variations")||0, workPct:(+g("workPct")||0)/100, invoiceAmount:+g("invoiceAmount")||0, materialsOnSite:+g("materialsOnSite")||0, contra:+g("contra")||0 };
     if(BOQMODE) body.lines=gatherLines();
+    if(INVMODE){
+      const invs=gatherInvoices();
+      if(!invs.length){ toast("Add at least one invoice with an amount to pay"); return; }
+      for(const iv of invs){ if(iv.amount>0){ const rem=r2(iv.amount-invPrevPaid(iv.no));
+        if(iv.thisAmount>rem+0.01){ toast("Invoice "+iv.no+": only AED "+fmt(rem)+" remains uncertified"); return; } } }
+      body.invoices=invs; body.invoiceAmount=r2(invs.reduce((a,iv)=>a+iv.thisAmount,0)); body.invoiceNo=invs.map(iv=>iv.no).join(", ");
+    }
     try{ const d = isNew ? await api("cert",{method:"POST",body}) : await api("cert/"+encodeURIComponent(c.no),{method:"PUT",body});
       toast(isNew?("Created "+d.no):"Saved"); await load(); openCert(d.no);
     }catch(e){ toast(e.message); } };
@@ -862,6 +908,7 @@ async function openCert(no){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
       <div><h3>Certificate calculation (AED)${K.perInvoice?' <span class="muted" style="font-size:11px;font-weight:400">— per invoice</span>':""}</h3><table>
         ${K.perInvoice?`
+        ${invHistory(c).map(h=>row(esc(h.no)+(h.amount>0?` <span class="muted" style="font-size:10px">(value ${fmt(h.amount)}${h.prev?` · prev ${fmt(h.prev)}`:""}${h.remaining!=null&&h.remaining>0.009?` · <b style="color:#7A5C00">remaining ${fmt(h.remaining)}</b>`:h.remaining!=null?" · settled":""})</span>`:""),fmt(h.thisAmount))).join("")}
         ${row("Invoice amount (this certificate)",fmt(K.cumValue))}
         ${row("Materials on site",fmt(c.materialsOnSite))}
         ${row("Gross this certificate",fmt(K.gross),"tot")}
@@ -1034,6 +1081,17 @@ async function doAction(c,a){
 }
 
 /* ---------- printable certificate ---------- */
+// Invoice-by-invoice history for a per-invoice certificate: full value, previously
+// certified (earlier certs only), this certificate, and remaining balance.
+function invHistory(c){
+  const list=Array.isArray(c.invoices)&&c.invoices.length?c.invoices:[];
+  return list.map(iv=>{ const key=String(iv.no||"").trim().toLowerCase();
+    const prev=(CERTS||[]).filter(x=>x&&x.supplierId===c.supplierId&&x.status!=="Cancelled"&&x.kind!=="advance"&&(x.seq||0)<(c.seq||0)).reduce((a,x)=>{
+      if(Array.isArray(x.invoices)&&x.invoices.length){ for(const v of x.invoices){ if(String(v.no||"").trim().toLowerCase()===key) a+=num(v.thisAmount); } }
+      else if(String(x.invoiceNo||"").trim().toLowerCase()===key) a+=num(x.invoiceAmount); return a; },0);
+    const amt=num(iv.amount), th=num(iv.thisAmount);
+    return { no:iv.no, amount:amt, prev:r2(prev), thisAmount:th, remaining: amt>0?r2(amt-prev-th):null }; });
+}
 function printCert(c){
   const K=c.calc||{}, ent=S.entities.find(e=>e.short===c.entity)||{name:"MA GROUP",line2:"",line3:""};
   const r2r=(l,v)=>`<tr><td class="lab">${l}</td><td style="text-align:right">${v}</td></tr>`;
@@ -1052,7 +1110,8 @@ function printCert(c){
    <tr><td class="lab">Subcontract / LPO Ref</td><td>${esc(c.lpoRef||"—")}</td><td class="lab">Supplier Invoice No.</td><td>${esc(c.invoiceNo||"—")}</td></tr>
    <tr><td class="lab">Period</td><td colspan="3">${c.periodFrom?dmy(c.periodFrom)+" – "+dmy(c.periodTo):"—"}</td></tr></table>
    ${K.perInvoice?`<table><tr><td class="sec" colspan="2">1. VALUATION OF SERVICES / SUPPLY — PER INVOICE (AED)</td></tr>
-   ${r2r("Basis of certification","Certified against submitted invoice")}
+   ${r2r("Basis of certification","Certified against submitted invoice(s)")}
+   ${invHistory(c).map(h=>r2r("Invoice "+esc(h.no)+(h.amount>0?" — value "+fmt(h.amount)+(h.prev?" · previously certified "+fmt(h.prev):"")+(h.remaining!=null&&h.remaining>0.009?" · <b>remaining "+fmt(h.remaining)+"</b>":h.remaining!=null?" · fully settled":""):""),fmt(h.thisAmount))).join("")}
    ${r2r("Invoice amount this certificate (excl VAT)",fmt(K.cumValue))}${r2r("Add: materials & goods on site",fmt(c.materialsOnSite))}
    <tr class="tot"><td>GROSS VALUE THIS CERTIFICATE (excl VAT)</td><td style="text-align:right">${fmt(K.gross)}</td></tr></table>
    <table><tr><td class="sec" colspan="2">2. CERTIFICATE CALCULATION (AED)</td></tr>

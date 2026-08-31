@@ -15888,12 +15888,37 @@ var api_default = async (req, context) => {
     if (!b.supplierId) return err("Choose a supplier");
     const sup = await s.get("supplier/" + b.supplierId, { type: "json" });
     if (!sup) return err("Supplier not found");
-    // Anti-duplication: the same supplier invoice must not be certified twice.
-    const invNo = String(b.invoiceNo || "").trim();
-    if (invNo) {
+    // Multiple invoices per certificate, with PARTIAL payment support: each line is
+    // {no, amount (full invoice value), thisAmount (certified on THIS IPC)}. The
+    // remaining balance of an invoice can be certified on a later IPC. Validation
+    // blocks certifying more than the invoice's remaining balance.
+    const invoices = Array.isArray(b.invoices) ? b.invoices
+      .map((iv) => ({ no: String(iv.no || "").trim(), amount: num(iv.amount), thisAmount: num(iv.thisAmount) }))
+      .filter((iv) => iv.no && iv.thisAmount > 0) : [];
+    const paidSoFar = (priorC, key) => priorC.filter((x) => x.status !== "Cancelled" && x.kind !== "advance").reduce((a, x) => {
+      if (Array.isArray(x.invoices) && x.invoices.length) { for (const v of x.invoices) { if (String(v.no || "").trim().toLowerCase() === key) a += num(v.thisAmount); } }
+      else if (String(x.invoiceNo || "").trim().toLowerCase() === key) a += num(x.invoiceAmount);
+      return a;
+    }, 0);
+    if (invoices.length) {
       const priorC = await certsBySupplier(sup.id);
-      const dupC = priorC.find((x) => x.status !== "Cancelled" && String(x.invoiceNo || "").trim().toLowerCase() === invNo.toLowerCase());
-      if (dupC) return err(`Supplier invoice ${invNo} is already certified on ${dupC.no} (${dupC.status}). Duplicate certification of the same invoice is not allowed.`, 409);
+      for (const iv of invoices) {
+        const key = iv.no.toLowerCase();
+        const paid = r2(paidSoFar(priorC, key));
+        if (iv.amount > 0) {
+          const remaining = r2(iv.amount - paid);
+          if (remaining <= 0) return err(`Invoice ${iv.no} is already fully certified (AED ${iv.amount.toFixed(2)}).`, 409);
+          if (iv.thisAmount > remaining + 0.01) return err(`Invoice ${iv.no}: only AED ${remaining.toFixed(2)} remains uncertified (invoice ${iv.amount.toFixed(2)}, previously certified ${paid.toFixed(2)}).`, 409);
+        }
+      }
+    } else {
+      // Legacy single-invoice path: block exact duplicate certification.
+      const invNo = String(b.invoiceNo || "").trim();
+      if (invNo) {
+        const priorC = await certsBySupplier(sup.id);
+        const dupC = priorC.find((x) => x.status !== "Cancelled" && String(x.invoiceNo || "").trim().toLowerCase() === invNo.toLowerCase());
+        if (dupC) return err(`Supplier invoice ${invNo} is already certified on ${dupC.no} (${dupC.status}). Use the multi-invoice rows to certify a remaining balance.`, 409);
+      }
     }
     const st = await s.get("settings", { type: "json" });
     const project = b.project || sup.project || "";
@@ -15926,13 +15951,14 @@ var api_default = async (req, context) => {
       supplierId: sup.id,
       supplier: sup.name,
       lpoRef: sup.lpoRef || "",
-      invoiceNo: b.invoiceNo || "",
+      invoiceNo: invoices.length ? invoices.map((iv) => iv.no).join(", ") : (b.invoiceNo || ""),
+      invoices,
       trade: sup.trade || sup.category || b.trade || "",
       periodFrom: b.periodFrom || "",
       periodTo: b.periodTo || "",
       originalValue: num(terms.contractValue),
       basis: terms.contractType === "Rate" ? "rate" : "fixed",
-      invoiceAmount: num(b.invoiceAmount),
+      invoiceAmount: invoices.length ? r2(invoices.reduce((a, iv) => a + iv.thisAmount, 0)) : num(b.invoiceAmount),
       variations: num(b.variations),
       workPct: num(b.workPct),
       lines: Array.isArray(b.lines) ? b.lines.map((l, i) => ({ ref: String(l.ref || (i + 1)), description: String(l.description || ""), unit: String(l.unit || ""), rate: num(l.rate), contractQty: num(l.contractQty), qty: num(l.qty) })) : [],
@@ -15964,6 +15990,25 @@ var api_default = async (req, context) => {
     const b = await req.json();
     for (const f of ["date", "invoiceNo", "periodFrom", "periodTo", "notes", "project", "entity"]) if (b[f] !== void 0) c[f] = b[f];
     for (const f of ["variations", "workPct", "materialsOnSite", "contra", "invoiceAmount"]) if (b[f] !== void 0) c[f] = num(b[f]);
+    if (Array.isArray(b.invoices)) {
+      const invoices = b.invoices.map((iv) => ({ no: String(iv.no || "").trim(), amount: num(iv.amount), thisAmount: num(iv.thisAmount) })).filter((iv) => iv.no && iv.thisAmount > 0);
+      // Validate remaining balances against OTHER certificates (this one excluded).
+      const priorC = await certsBySupplier(c.supplierId, c.no);
+      for (const iv of invoices) {
+        if (!(iv.amount > 0)) continue;
+        const key = iv.no.toLowerCase();
+        const paid = r2(priorC.filter((x) => x.status !== "Cancelled" && x.kind !== "advance").reduce((a, x) => {
+          if (Array.isArray(x.invoices) && x.invoices.length) { for (const v of x.invoices) { if (String(v.no || "").trim().toLowerCase() === key) a += num(v.thisAmount); } }
+          else if (String(x.invoiceNo || "").trim().toLowerCase() === key) a += num(x.invoiceAmount);
+          return a;
+        }, 0));
+        const remaining = r2(iv.amount - paid);
+        if (iv.thisAmount > remaining + 0.01) return err(`Invoice ${iv.no}: only AED ${remaining.toFixed(2)} remains uncertified on other certificates.`, 409);
+      }
+      c.invoices = invoices;
+      c.invoiceAmount = r2(invoices.reduce((a, iv) => a + iv.thisAmount, 0));
+      c.invoiceNo = invoices.map((iv) => iv.no).join(", ");
+    }
     if (b.lines !== void 0) c.lines = Array.isArray(b.lines) ? b.lines.map((l, i) => ({ ref: String(l.ref || (i + 1)), description: String(l.description || ""), unit: String(l.unit || ""), rate: num(l.rate), contractQty: num(l.contractQty), qty: num(l.qty) })) : [];
     const sup = await s.get("supplier/" + c.supplierId, { type: "json" });
     if (sup && c.kind !== "advance") {
