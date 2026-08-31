@@ -14482,6 +14482,81 @@ function buildCompCertHtml(rec, cfg, assets) {
 </div></body></html>`;
 }
 
+// Professional Project Completion Report — accompanies the Completion Certificate:
+// executive summary, project & contract particulars, scope completed, and the
+// photographic record of the finished works, on the corporate letterhead.
+function buildCompReportHtml(rec, cfg, assets) {
+  const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
+  const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
+  const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
+  const vEx = num(rec.valueExVat), vat = r2(vEx * (rec.vatPct != null ? num(rec.vatPct) : 0.05)), vTot = r2(vEx + vat);
+  const photos = Array.isArray(rec.photos) ? rec.photos : [];
+  const scopeRows = (rec.scope || []).filter((l) => l && (l.description || "").trim()).map((l, i) =>
+    `<tr><td>${esc(l.ref || i + 1)}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty || "—")}</td><td>${esc(l.status || "Completed")}</td></tr>`).join("")
+    || `<tr><td>1</td><td>As per the referenced contract / purchase order and approved quotation.</td><td>—</td><td class="num">—</td><td>Completed</td></tr>`;
+  const summary = String(rec.reportIntro || "").trim() ||
+    `${ent} is pleased to report the successful completion of the works for ${rec.partyName || "the Client"} on the project “${rec.project || ""}”${rec.location ? " at " + rec.location : ""}. The works, executed under ${rec.contractRef ? "contract / purchase order " + rec.contractRef : "the referenced contract"}${rec.quotationRef ? " (quotation " + rec.quotationRef + ")" : ""}, were completed on ${emDate(rec.completionDate)} in accordance with the contract documents, approved drawings and specifications. This report accompanies Certificate No. ${rec.docNo} dated ${emDate(rec.date)} and records the project particulars, the scope of works completed and the photographic record of the finished works.`;
+  const photoCells = photos.map((p, i) => `<div class="ph"><img src="${p.dataUrl}" alt=""><div class="pc"><b>Photo ${String(i + 1).padStart(2, "0")}</b>${p.caption ? " — " + esc(p.caption) : ""}</div></div>`).join("");
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:50px;max-width:160px;object-fit:contain;display:block">` : `<div style="height:50px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:90px;opacity:.85;object-fit:contain">` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.docNo)} — Project Completion Report</title>
+<style>
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12.5px;line-height:1.55}
+  .page{max-width:820px;margin:0 auto;padding:26px 34px}
+  ${MAH_CSS}
+  .band{background:#183048;color:#fff;text-align:center;padding:10px 12px;margin-top:12px}
+  .band .t{font-size:17px;font-weight:800;letter-spacing:1.4px}
+  .band .s{font-size:10.5px;color:#d8e0ea;margin-top:2px}
+  .goldrule{height:3px;background:#cc9c30;margin-bottom:14px}
+  table.pt{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:12px}
+  table.pt td,table.pt th{border:1px solid #d9dfe8;padding:5px 9px;vertical-align:top;text-align:left}
+  table.pt td.k{background:#f4f6f9;color:#5b6472;width:170px;font-weight:600}
+  table.pt th{background:#183048;color:#fff;font-size:11px}
+  td.num{text-align:right}
+  .sec{color:#183048;font-size:13px;font-weight:800;margin:14px 0 4px;border-left:4px solid #cc9c30;padding-left:8px}
+  .exec{border:1px solid #d9dfe8;border-left:4px solid #183048;padding:12px 14px;margin:8px 0;font-size:12.3px}
+  .phgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0}
+  .ph{border:1px solid #d9dfe8;border-radius:4px;overflow:hidden;page-break-inside:avoid}
+  .ph img{width:100%;height:250px;object-fit:cover;display:block}
+  .pc{padding:6px 9px;font-size:10.5px;color:#374151;background:#f8fafc;border-top:1px solid #e5e9f0}
+  table.sig{width:100%;border-collapse:collapse;margin-top:20px;font-size:11.5px}
+  table.sig td{border:1px solid #d9dfe8;padding:10px 12px;width:50%;vertical-align:top}
+  .sh{color:#5b6472;font-weight:700;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
+  .sn{font-weight:800;color:#183048;margin:3px 0 8px}
+  .sl{color:#444;font-size:11px;margin-top:6px}
+  @media print{ .ph img{height:230px} }
+</style></head><body><div class="page">
+  ${mahHeader(cfg, ent)}
+  <div class="band"><div class="t">PROJECT COMPLETION REPORT</div><div class="s">Accompanying Certificate No. ${esc(rec.docNo)} · ${dt(rec.date)}</div></div><div class="goldrule"></div>
+  <div class="sec">1. EXECUTIVE SUMMARY</div>
+  <div class="exec">${esc(summary)}</div>
+  <div class="sec">2. PROJECT &amp; CONTRACT PARTICULARS</div>
+  <table class="pt">
+    <tr><td class="k">Client / Employer</td><td colspan="3"><b>${esc(rec.partyName || "—")}</b>${rec.partyTrn ? " · TRN " + esc(rec.partyTrn) : ""}</td></tr>
+    <tr><td class="k">Project</td><td>${esc(rec.project || "—")}</td><td class="k">Location</td><td>${esc(rec.location || "—")}</td></tr>
+    <tr><td class="k">Contractor</td><td colspan="3">${esc(ent)}${entTrn ? " · TRN " + esc(entTrn) : ""}</td></tr>
+    <tr><td class="k">Contract / PO Ref.</td><td>${esc(rec.contractRef || "—")}${rec.contractDate ? " dated " + dt(rec.contractDate) : ""}</td><td class="k">Quotation Ref.</td><td>${esc(rec.quotationRef || "—")}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>
+    <tr><td class="k">Date of Completion</td><td><b>${dt(rec.completionDate)}</b></td><td class="k">Certificate</td><td>${esc(rec.docNo)} — ${dt(rec.date)}</td></tr>
+    ${vEx > 0 ? `<tr><td class="k">Contract Value</td><td>${money(vEx)} excl. VAT</td><td class="k">Incl. VAT ${Math.round((rec.vatPct != null ? num(rec.vatPct) : 0.05) * 100)}%</td><td><b>${money(vTot)}</b></td></tr>` : ""}
+  </table>
+  <div class="sec">3. SCOPE OF WORKS COMPLETED</div>
+  <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:60px">Unit</th><th style="width:60px">Qty</th><th style="width:110px">Status</th></tr>${scopeRows}</table>
+  ${rec.notes ? `<div class="exec" style="border-left-color:#cc9c30"><b>Remarks:</b> ${esc(rec.notes)}</div>` : ""}
+  <div class="sec">4. PHOTOGRAPHIC RECORD OF COMPLETED WORKS ${photos.length ? `<span style="font-weight:400;color:#6b7280;font-size:11px">(${photos.length} photograph${photos.length === 1 ? "" : "s"})</span>` : ""}</div>
+  ${photos.length ? `<div class="phgrid">${photoCells}</div>` : `<div class="exec" style="color:#6b7280">No photographs attached.</div>`}
+  <div class="sec">5. COMPLETION STATEMENT</div>
+  <div class="exec">We confirm that the works recorded in this report have been completed, inspected and handed over in a satisfactory condition, and that the photographic record above fairly represents the state of the completed works at handover. This report is issued in support of Certificate No. ${esc(rec.docNo)} and forms part of the project close-out documentation.</div>
+  <table class="sig"><tr>
+    <td><div class="sh">Prepared &amp; issued by — Contractor</div><div class="sn">${esc(ent)}</div>
+      <div style="position:relative">${signImg}<div style="position:absolute;left:130px;top:-14px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div><div class="sl">Signature &amp; Company Stamp</div><div class="sl">Date: ${dt(rec.date)}</div></td>
+    <td><div class="sh">Received by — ${esc(rec.partyType || "Client")}</div><div class="sn">${esc(rec.partyName || "")}</div>
+      <div style="height:50px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">Title: ______________________________</div><div class="sl">Signature &amp; Date</div></td>
+  </tr></table>
+  ${mahFooter(ent)}
+</div></body></html>`;
+}
 function buildAwardDocHtml(rec, cfg, assets) {
   const isAgr = rec.type === "AGREEMENT";
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
@@ -15314,6 +15389,8 @@ var api_default = async (req, context) => {
       variations: str("variations") || "NIL", paymentTerms: str("paymentTerms"),
       clauses: Array.isArray(b.clauses) ? b.clauses.map((c) => String(c || "")) : (ex?.clauses || compCertDefaults(type)),
       notes: str("notes"),
+      reportIntro: str("reportIntro"),
+      photos: ex?.photos || [],
       status: b.status || ex?.status || "Draft",
       createdAt: ex?.createdAt || now(), createdBy: ex?.createdBy || me.name,
       updatedAt: now(), updatedBy: me.name, sentAt: ex?.sentAt || "",
@@ -15352,6 +15429,41 @@ var api_default = async (req, context) => {
     }
   }
   {
+    // Photos attached to a completion/DLP/warranty certificate (for the photo report).
+    const m = path.match(/^compcert\/([^/]+)\/photo$/);
+    if (m && req.method === "POST") {
+      if (!can("contracts")) return err("Not permitted", 403);
+      const rec = await s.get("compcert/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!rec) return err("Not found", 404);
+      const b = await req.json();
+      rec.photos = Array.isArray(rec.photos) ? rec.photos : [];
+      if (b.removeIndex != null) {
+        rec.photos.splice(num(b.removeIndex), 1);
+      } else if (b.captionIndex != null) {
+        if (rec.photos[num(b.captionIndex)]) rec.photos[num(b.captionIndex)].caption = String(b.caption || "");
+      } else {
+        if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(String(b.dataUrl || ""))) return err("Photo must be a JPEG/PNG image");
+        if (String(b.dataUrl).length > 2e6) return err("Photo too large after compression — under ~1.5 MB");
+        if (rec.photos.length >= 40) return err("Maximum 40 photos per report");
+        rec.photos.push({ name: String(b.name || "photo"), caption: String(b.caption || ""), dataUrl: b.dataUrl, at: now(), by: me.name });
+      }
+      rec.updatedAt = now();
+      await s.setJSON("compcert/" + rec.id, rec);
+      return json({ ok: true, count: rec.photos.length, photos: rec.photos.map((p, i) => ({ i, name: p.name, caption: p.caption })) });
+    }
+  }
+  {
+    const m = path.match(/^compcert\/([^/]+)\/report$/);
+    if (m && req.method === "GET") {
+      const rec = await s.get("compcert/" + decodeURIComponent(m[1]), { type: "json" });
+      if (!rec) return err("Not found", 404);
+      const cfg = await getEmailCfg(s);
+      const sign = await s.get("asset/sign").catch(() => "") || "";
+      const stamp = await s.get("asset/stamp").catch(() => "") || "";
+      return new Response(buildCompReportHtml(rec, cfg, { sign, stamp }), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+  }
+  {
     const m = path.match(/^compcert\/([^/]+)\/send$/);
     if (m && req.method === "POST") {
       if (!can("contracts")) return err("Not permitted", 403);
@@ -15367,9 +15479,12 @@ var api_default = async (req, context) => {
       const label = rec.type === "DLP" ? "Defects Liability Completion Certificate" : "Certificate of Completion";
       const subject = `${label} ${rec.docNo} — ${rec.project || ""}`;
       let attachments;
-      if (b.pdfBase64) {
-        const fn = String(b.pdfName || (rec.docNo.replace(/[^A-Za-z0-9._-]+/g, "_") + ".pdf"));
-        attachments = [{ filename: fn, content: Buffer.from(String(b.pdfBase64), "base64"), contentType: "application/pdf" }];
+      const pdfs = Array.isArray(b.pdfs) ? b.pdfs.filter((p) => p && p.base64) : (b.pdfBase64 ? [{ name: b.pdfName, base64: b.pdfBase64 }] : []);
+      if (pdfs.length) {
+        attachments = pdfs.map((p, i) => ({
+          filename: String(p.name || (rec.docNo.replace(/[^A-Za-z0-9._-]+/g, "_") + (i ? "_report" : "") + ".pdf")),
+          content: Buffer.from(String(p.base64), "base64"), contentType: "application/pdf"
+        }));
       }
       const r = await sendMail(s, cfg, { type: "awarddoc", to, toName: rec.partyAttn || rec.partyName, subject, html, attachments });
       rec.status = rec.status === "Countersigned" ? "Countersigned" : "Issued";

@@ -3753,11 +3753,18 @@ function compCertForm(r){
    <div class="muted" style="font-size:11px;margin-bottom:6px">Placeholders {COMPLETION_DATE}, {DLP_START}, {DLP_END} are replaced automatically on the printed certificate.${isDlp?"":" The acceptance-without-reservation / variation clause protects against later scope claims — edit with care."}</div>
    ${clauses.map((c,i)=>`<div style="margin-bottom:6px"><label>Clause ${i+1}</label><textarea class="hc_clause" style="width:100%;min-height:58px">${esc(c)}</textarea></div>`).join("")}
    <div><label>Remarks / exceptions (optional — printed on the certificate)</label><input id="hc_notes" value="${esc(r.notes||"")}"></div>
+   ${r.id?`<h3 style="margin-top:14px">Completion report — photos</h3>
+   <div class="muted" style="font-size:11.5px;margin-bottom:6px">Upload site photos of the completed works — the system builds a professional <b>Project Completion Report</b> (executive summary, project &amp; contract details, scope completed, photographic record, completion statement) with your signature &amp; stamp. It prints as its own document and is <b>attached to the email together with the certificate</b>.</div>
+   <div style="margin-bottom:6px"><label>Report executive summary (optional — written automatically from the project details if left blank)</label><textarea id="hc_reportIntro" style="width:100%;min-height:52px">${esc(r.reportIntro||"")}</textarea></div>
+   <div id="hcPhotos" class="flex" style="flex-wrap:wrap;gap:10px;margin-top:4px"></div>
+   <div class="flex" style="gap:8px;margin-top:6px"><button class="btn ghost" id="hcAddPh" type="button">+ Upload photos</button><input id="hcPhFile" type="file" accept="image/*" multiple style="display:none"><span class="muted" id="hcPhMsg" style="font-size:11px"></span></div>`
+   :`<div class="note" style="margin-top:10px">Save the draft first, then upload the report photos.</div>`}
    <div style="height:14px"></div>
    <div class="flex" style="gap:10px">
      ${canEdit?`<button class="btn green" id="hcSave">${isNew?"Create draft":"Save changes"}</button>`:""}
-     ${r.id?`<button class="btn" id="hcPrint">View / Print</button>`:""}
-     ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (PDF attached)</button>`:""}
+     ${r.id?`<button class="btn" id="hcPrint">View / Print certificate</button>`:""}
+     ${r.id?`<button class="btn" id="hcReport">View / Print report</button>`:""}
+     ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (certificate + report PDF)</button>`:""}
      ${r.id&&ME.role==="CEO"?`<button class="btn red" id="hcDel">Delete</button>`:""}
    </div></div>`;
   $("#hcBack").onclick=vCompCerts;
@@ -3785,7 +3792,28 @@ function compCertForm(r){
       dlpStart:g("dlpStart"), dlpEnd:g("dlpEnd"), retentionDue:g("retentionDue"), warrantyPeriod:g("warrantyPeriod"),
       scope:sc, valueExVat:+g("valueExVat")||0, vatPct:(+g("vatPct")||0)/100,
       variations:g("variations")||"NIL", paymentTerms:g("paymentTerms"),
-      clauses:[...document.querySelectorAll(".hc_clause")].map(t=>t.value), notes:g("notes") }; };
+      clauses:[...document.querySelectorAll(".hc_clause")].map(t=>t.value), notes:g("notes"), reportIntro:g("reportIntro") }; };
+  // ---- report photos ----
+  const renderPhotos=()=>{ const host=$("#hcPhotos"); if(!host) return;
+    const ph=Array.isArray(r.photos)?r.photos:[];
+    host.innerHTML=ph.length?ph.map((p,i)=>`<div style="width:172px;border:1px solid #e3e7ee;border-radius:6px;overflow:hidden;background:#fff">
+      <img src="${p.dataUrl}" style="width:100%;height:112px;object-fit:cover;display:block">
+      <div style="padding:5px"><input class="phCap" data-i="${i}" value="${esc(p.caption||"")}" placeholder="caption (e.g. Reception — completed)" style="width:100%;font-size:11px">
+      <a href="#" class="phDel" data-i="${i}" style="color:#c00;font-size:11px">remove</a></div></div>`).join("")
+     :`<span class="muted">No photos yet — click "+ Upload photos".</span>`;
+    host.querySelectorAll(".phDel").forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm("Remove this photo?"))return;
+      try{ await api("compcert/"+r.id+"/photo",{method:"POST",body:{removeIndex:+a.dataset.i}}); r=await api("compcert/"+r.id); renderPhotos(); }catch(e2){ toast(e2.message); } });
+    host.querySelectorAll(".phCap").forEach(inp=>inp.onchange=async ()=>{ try{ await api("compcert/"+r.id+"/photo",{method:"POST",body:{captionIndex:+inp.dataset.i,caption:inp.value}}); if(r.photos&&r.photos[+inp.dataset.i]) r.photos[+inp.dataset.i].caption=inp.value; }catch(e2){ toast(e2.message); } }); };
+  if(r.id&&$("#hcAddPh")){ renderPhotos();
+    $("#hcAddPh").onclick=()=>$("#hcPhFile").click();
+    $("#hcPhFile").onchange=async ()=>{ const files=[...$("#hcPhFile").files]; if(!files.length)return;
+      const msg=$("#hcPhMsg"); let done=0;
+      for(const f of files){ msg.textContent="Uploading "+(++done)+"/"+files.length+"…";
+        await new Promise(res=>fileToDataUrl(f,async d=>{ try{ await api("compcert/"+r.id+"/photo",{method:"POST",body:{dataUrl:d,name:f.name}}); }catch(e2){ toast(f.name+": "+e2.message); } res(); })); }
+      msg.textContent=""; $("#hcPhFile").value="";
+      try{ r=await api("compcert/"+r.id); }catch(e2){}
+      renderPhotos(); toast("Photos uploaded"); }; }
+  if($("#hcReport")) $("#hcReport").onclick=async ()=>{ try{ const html=await apiText("compcert/"+r.id+"/report"); const w=window.open("","_blank"); if(!w){ toast("Allow pop-ups to view the report"); return; } w.document.open(); w.document.write(html); w.document.close(); setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },500); }catch(e){ toast(e.message); } };
   if($("#hcSave")) $("#hcSave").onclick=async ()=>{ try{ const saved=await api("compcert",{method:"POST",body:gather()}); toast(saved.docNo+" saved"); compCertForm(saved); }catch(e){ toast(e.message); } };
   if($("#hcPrint")) $("#hcPrint").onclick=()=>openCompCertDoc(r.id,true);
   if($("#hcDel")) $("#hcDel").onclick=async ()=>{ if(!confirm("Delete "+r.docNo+"? This cannot be undone."))return; try{ await api("compcert/"+r.id,{method:"DELETE"}); toast("Deleted"); vCompCerts(); }catch(e){ toast(e.message); } };
@@ -3793,11 +3821,19 @@ function compCertForm(r){
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast("Enter the party email first"); return; }
     if(!confirm(`Email this ${isW?"warranty certificate":isDlp?"DLP certificate":"completion certificate"} (with PDF attached) to ${to}?`)) return;
     try{ await api("compcert",{method:"POST",body:gather()}); // save latest edits first
-      toast("Preparing PDF…"); let pdfBase64="",pdfName="";
-      try{ const html=await apiText("compcert/"+r.id+"/html"); pdfBase64=await htmlToPdfBase64(html); pdfName=(r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf"; }
-      catch(e){ if(!confirm("Could not build the PDF ("+e.message+"). Send without attachment?")) return; }
-      toast("Sending…"); const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfBase64,pdfName}});
-      toast("Sent to "+res.to+(res.attached?" (PDF attached)":"")); compCertForm(await api("compcert/"+r.id));
+      const base=(r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_");
+      const pdfs=[];
+      toast("Preparing certificate PDF…");
+      try{ const html=await apiText("compcert/"+r.id+"/html"); pdfs.push({name:base+".pdf", base64:await htmlToPdfBase64(html)}); }
+      catch(e){ if(!confirm("Could not build the certificate PDF ("+e.message+"). Send without it?")) return; }
+      // Attach the Project Completion Report too (always for completion certs, and
+      // whenever photos are attached on the other types).
+      const wantReport=(!isDlp&&!isW)||((r.photos||[]).length>0);
+      if(wantReport){ toast("Preparing report PDF…");
+        try{ const rh=await apiText("compcert/"+r.id+"/report"); pdfs.push({name:base+"_Completion_Report.pdf", base64:await htmlToPdfBase64(rh)}); }
+        catch(e){ toast("Report PDF skipped: "+e.message); } }
+      toast("Sending…"); const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfs}});
+      toast("Sent to "+res.to+(res.attached?" ("+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached)":"")); compCertForm(await api("compcert/"+r.id));
     }catch(e){ toast(e.message); } };
 }
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();
