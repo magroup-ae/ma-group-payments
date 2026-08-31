@@ -395,6 +395,20 @@ document.addEventListener("visibilitychange",async ()=>{
   try{ await load(); if(VIEW==="dash") render(); }catch(e){}
 });
 function supById(id){ return SUPS.find(s=>s.id===id); }
+/* ---------- shared project selection (links all pages project-wise) ---------- */
+let PROJ_FILTER="";
+function allProjNames(){
+  return [...new Set([
+    ...((S&&S.projects)||[]).filter(p=>p&&p.name&&!p.fixed).map(p=>p.name),
+    ...(CONTRACTS||[]).map(c=>c&&c.project),
+    ...(CERTS||[]).map(c=>c&&c.project)
+  ])].filter(n=>n&&n!=="MA HQ – Operations").sort();
+}
+function projFilterHtml(){
+  return `<select id="projFilter" title="Project filter — applies across pages" style="max-width:230px;margin-left:10px"><option value="">All projects</option>${allProjNames().map(p=>`<option ${PROJ_FILTER===p?"selected":""}>${esc(p)}</option>`).join("")}</select>`;
+}
+function bindProjFilter(rerender){ const el=$("#projFilter"); if(el) el.onchange=()=>{ PROJ_FILTER=el.value; rerender(); }; }
+function projMatch(name){ return !PROJ_FILTER || String(name||"")===PROJ_FILTER; }
 async function adminDelete(kind,id,name,after){
   if(ME.role!=="CEO"){ toast("Only the CEO can delete records"); return; }
   const pin=prompt("⚠ PERMANENT DELETE — enter CEO password to confirm.\n\nDelete: "+name); if(pin===null||pin==="") return;
@@ -657,12 +671,14 @@ function bindRows(){ document.querySelectorAll("tr.click[data-no]").forEach(r=>r
 
 function vCerts(){
   const canCreate=["QS","CEO"].includes(ME.role);
+  const base=()=>CERTS.filter(c=>projMatch(c.project));
   $("#main").innerHTML = `<div class="card"><div class="flex"><h2 style="margin:0">Certificates</h2>
+    ${projFilterHtml()}
     <input id="q" placeholder="Search…" style="max-width:220px;margin-left:14px">
     ${canCreate?`<button class="btn gold right" id="newBtn">+ New Certificate</button>`:""}</div>
-    <div style="height:10px"></div><div id="list">${certTable(CERTS)}</div></div>`;
-  bindRows();
-  $("#q").oninput=e=>{ const q=e.target.value.toLowerCase(); $("#list").innerHTML=certTable(CERTS.filter(c=>JSON.stringify(c).toLowerCase().includes(q))); bindRows(); };
+    <div style="height:10px"></div><div id="list">${certTable(base())}</div></div>`;
+  bindRows(); bindProjFilter(vCerts);
+  $("#q").oninput=e=>{ const q=e.target.value.toLowerCase(); $("#list").innerHTML=certTable(base().filter(c=>JSON.stringify(c).toLowerCase().includes(q))); bindRows(); };
   if(canCreate) $("#newBtn").onclick=()=>{ if(!SUPS.length){ toast("Add a supplier first"); VIEW="sups"; render(); return; } certForm(null); };
 }
 
@@ -1539,7 +1555,7 @@ function printProjectReport(stats,T){
 /* ---------- cheques page (register + print) ---------- */
 function vCheques(){
   const canPrint=["Accounts","CEO"].includes(ME.role);
-  const cheques=CERTS.filter(c=>c.mode==="Cheque").sort((a,b)=>(a.no<b.no?1:-1));
+  const cheques=CERTS.filter(c=>c.mode==="Cheque"&&projMatch(c.project)).sort((a,b)=>(a.no<b.no?1:-1));
   // pull payment ref/bank/date from REG for each cheque cert
   const regByNo={}; REG.forEach(r=>{ if(r.mode==="Cheque") regByNo[r.no]=r; });
   const rows=cheques.map(c=>{ const r=regByNo[c.no]||{};
@@ -1548,6 +1564,7 @@ function vCheques(){
       <td>${!canPrint?"—":(c.chequePrinted?(ME.role==="CEO"?`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Reprint 🔒</button>`:`<span class="muted" title="Only the CEO can reprint">printed ✓</span>`):`<button class="btn gold" data-chq="${esc(c.no)}" style="padding:5px 12px">Print</button>`)}</td></tr>`; }).join("");
   const approvedNoPay=CERTS.filter(c=>c.status==="Approved").length;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Cheque Register</h2>
+     ${projFilterHtml()}
      <span class="muted">All cheque payments. Print or reprint any cheque here.</span>
      <button class="btn ghost right" id="chqCsv">Export CSV</button></div>
    <div style="height:10px"></div>
@@ -1557,6 +1574,7 @@ function vCheques(){
    <div class="note" style="margin-top:12px"><b>To print:</b> click Print — an A4 <b>landscape</b> cheque PDF opens. In the print dialog set <b>Paper = A4</b>, <b>Orientation = Landscape</b>, <b>Scale = 100% / Actual size</b> (never "Fit"), <b>Margins = None</b>, then feed your ENBD cheque.
    <br><b>Printer prints it as 2 pages / won't accept it?</b> The printer is set to <b>Portrait</b> — switch that printer's orientation to <b>Landscape</b> (or set its default paper to A4 Landscape).</div>
    </div>`;
+  bindProjFilter(vCheques);
   document.querySelectorAll("[data-chq]").forEach(b=>b.onclick=()=>reprintCheque(b.dataset.chq));
   document.querySelectorAll(".chqAmend").forEach(a=>a.onclick=e=>{ e.preventDefault(); amendChequeNo(a.dataset.no, a.dataset.ref, async()=>{ await load(); vCheques(); }); });
   $("#chqCsv").onclick=()=>{ const rows2=[["CertNo","ChequeNo","Date","Supplier","Payee","Bank","Amount"]]
@@ -1597,11 +1615,13 @@ async function reprintCheque(no){
 /* ---------- payment register ---------- */
 function vReg(){
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Payment Register</h2>
+   ${projFilterHtml()}
    <button class="btn ghost right" id="csvBtn">Export CSV</button></div><div style="height:10px"></div>
    <table><tr><th>Sr</th><th>Cert No.</th><th>Invoice</th><th>Project</th><th>Supplier</th><th>Payee</th><th>Mode</th><th>Ref</th><th>Bank</th><th>Date</th><th class="num">Amount</th><th>Receipt</th><th>By</th></tr>
-   ${REG.slice().reverse().map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; const rcell=done?`<span style="color:#2E7D32">✓</span>`:`<span style="color:#C0392B">pending</span>`;
+   ${REG.slice().reverse().filter(r=>projMatch(r.project)).map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; const rcell=done?`<span style="color:#2E7D32">✓</span>`:`<span style="color:#C0392B">pending</span>`;
      return `<tr><td>${r.sr}</td><td><b>${esc(r.no)}</b></td><td>${esc(r.invoiceNo||"—")}</td><td>${esc(r.project)}</td><td>${esc(r.supplier)}</td><td>${esc(r.payee)}</td><td>${esc(r.mode)}</td><td>${esc(r.ref||"—")}</td><td>${esc(r.bank||"—")}</td><td>${dmy(r.date)}</td><td class="num">${fmt(r.amount)}</td><td>${rcell}</td><td>${esc(r.by)}</td></tr>`;}).join("")||`<tr><td colspan="13" class="muted">No payments recorded yet.</td></tr>`}
    </table></div>`;
+  bindProjFilter(vReg);
   $("#csvBtn").onclick=()=>{ const rows=[["Sr","CertNo","Invoice","Entity","Project","Supplier","Payee","Mode","Ref","Bank","Date","Amount","Receipt","By","At"]]
       .concat(REG.map(r=>{ const cc=CERTS.find(x=>x.no===r.no); const done=cc?cc.receiptDone:r.receiptDone; return [r.sr,r.no,r.invoiceNo,r.entity,r.project,r.supplier,r.payee,r.mode,r.ref,r.bank,r.date,r.amount,done?"Received":"Pending",r.by,r.at];}));
     const csv=rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
@@ -1825,14 +1845,17 @@ async function contractDetail(id){
 async function vClientCerts(){
   const can=["CEO","PM","QS"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Client Payment Certificates</h2>
+    ${projFilterHtml()}
     <span class="muted">interim payment certificates you issue to clients (before the proforma invoice)</span>
     <div class="right flex">${can?`<button class="btn ghost" id="impProj">Import project (JSON)</button>`:""}${can?`<button class="btn gold" id="newCC2">+ New certificate</button>`:""}</div></div>
     <div style="height:8px"></div><div id="ccList" class="muted">Loading…</div></div>`;
+  bindProjFilter(vClientCerts);
   let list; try{ [list,CONTRACTS]=await Promise.all([api("clientcerts"),api("contracts")]); }catch(e){ $("#ccList").textContent=e.message; return; }
   const cmap={}; CONTRACTS.forEach(c=>cmap[c.id]=c);
-  if(can) $("#newCC2").onclick=()=>{ if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; } clientCertForm(null); };
+  if(can) $("#newCC2").onclick=()=>clientCertForm(null);
   if(can) $("#impProj").onclick=importProjectJson;
-  if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates yet. Add a client and contract, then create your first certificate.</div>`; return; }
+  list=list.filter(c=>projMatch(cmap[c.contractId]?.project));
+  if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates${PROJ_FILTER?" for "+esc(PROJ_FILTER):""} yet. Create your first certificate — every project from Settings is available in the form.</div>`; return; }
   $("#ccList").classList.remove("muted");
   $("#ccList").innerHTML=`<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Period</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
     ${list.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
@@ -1851,13 +1874,31 @@ function importProjectJson(){
   inp.click();
 }
 async function clientCertForm(contractId){
-  if(!CONTRACTS.length){ try{ CONTRACTS=await api("contracts"); }catch(e){} }
-  if(!CONTRACTS.length){ toast("Add a client & contract first"); VIEW="clients"; render(); return; }
-  const opt=CONTRACTS.map(c=>`<option value="${esc(c.id)}" ${c.id===contractId?"selected":""}>${esc(c.project)} — ${esc(c.clientName||"")} (${esc(c.certPrefix)})</option>`).join("");
+  try{ CONTRACTS=await api("contracts"); }catch(e){}
+  // Every project set up in Settings appears here. Projects that already have a client
+  // contract use it; projects without one show an inline setup so the certificate can
+  // still be issued (the contract is created automatically on save).
+  const byProj={}; CONTRACTS.forEach(c=>{ if(c&&c.project) byProj[c.project]=c; });
+  const projs=[...new Set([...CONTRACTS.map(c=>c&&c.project), ...((S.projects||[]).filter(p=>p&&p.name&&!p.fixed).map(p=>p.name))])].filter(n=>n&&n!=="MA HQ – Operations").sort();
+  const selVal=contractId?("c:"+contractId):(PROJ_FILTER?(byProj[PROJ_FILTER]?("c:"+byProj[PROJ_FILTER].id):("n:"+PROJ_FILTER)):"");
+  const opt=projs.map(p=>{ const ct=byProj[p]; const v=ct?("c:"+ct.id):("n:"+p);
+    return `<option value="${esc(v)}" ${v===selVal?"selected":""}>${esc(p)}${ct?" — "+esc(ct.clientName||"")+" ("+esc(ct.certPrefix||"PC")+")":" — ⚠ no contract yet"}</option>`; }).join("");
   $("#main").innerHTML=`<div class="card"><h2>New client payment certificate</h2>
-   <div class="note">Enter the <b>cumulative % done per building</b> (from the site / project team). The system builds the by-building certificate and computes retention, advance recovery, VAT and the net amount due.</div>
+   <div class="note">Enter the <b>cumulative % done per building</b> (from the site / project team). The system builds the by-building certificate and computes retention, advance recovery, VAT and the net amount due. <b>All projects from Settings are listed</b> — picking one marked "⚠ no contract yet" opens a quick setup and the contract is created automatically when you save.</div>
    <div class="grid" style="margin-top:10px">
-     <div style="grid-column:1/-1"><label>Contract / project</label><select id="q_contract">${opt}</select></div>
+     <div style="grid-column:1/-1"><label>Project</label><select id="q_contract"><option value="">— choose the project —</option>${opt}</select></div>
+     <div id="q_setup" style="grid-column:1/-1;display:none;border:1px solid #e3c56b;background:#fff8e6;border-radius:8px;padding:10px 12px">
+       <b>First certificate for this project — set up the client contract (saved automatically)</b>
+       <div class="grid" style="margin-top:8px">
+         <div><label>Client / employer name</label><input id="q_scName"></div>
+         <div><label>Contract value excl. VAT (AED)</label><input id="q_scSum" type="number" step="0.01" value="0"></div>
+         <div><label>Approved variations (AED)</label><input id="q_scVar" type="number" step="0.01" value="0"></div>
+         <div><label>Retention %</label><input id="q_scRet" type="number" step="0.5" value="10"></div>
+         <div><label>Down payment received (AED)</label><input id="q_scAdv" type="number" step="0.01" value="0"></div>
+         <div><label>Advance recovery % <span class="muted" style="font-size:10px">(0 = pro-rata over the contract)</span></label><input id="q_scRec" type="number" step="0.5" value="0"></div>
+         <div><label>VAT %</label><input id="q_scVat" type="number" step="0.5" value="5"></div>
+       </div>
+     </div>
      <div><label>Certificate date</label><input id="q_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
      <div><label>Period from</label><input id="q_from" placeholder="21/06/26"></div>
      <div><label>Period to</label><input id="q_to" placeholder="20/07/26"></div>
@@ -1892,13 +1933,24 @@ async function clientCertForm(contractId){
     if($("#qbTotVal"))$("#qbTotVal").textContent=fmt(totVal);
     const revised=r2(num(PREV.ct.contractSum)+num(PREV.ct.variations))||totBoq;
     if($("#qbOverall"))$("#qbOverall").textContent=(revised>0?(totVal/revised*100).toFixed(1):"0")+"%"; };
-  const loadPrev=async ()=>{ const id=$("#q_contract").value;
+  const synthCt=(projName)=>{ const gv=id=>{const el=$("#q_sc"+id); return el?(+el.value||0):0;};
+    return { id:"", clientName:(($("#q_scName")||{}).value||"").trim()||"—", project:projName,
+      contractSum:gv("Sum"), variations:gv("Var"), retentionPct:(gv("Ret")||10)/100,
+      advanceAmount:gv("Adv"), advancePct:gv("Sum")>0?gv("Adv")/gv("Sum"):0,
+      recoveryRate:(gv("Rec")||0)/100, vatPct:(gv("Vat")||5)/100, boq:[], summary:{certCount:0} }; };
+  const loadPrev=async ()=>{ const v=$("#q_contract").value||"";
+    const setup=$("#q_setup"); const isNewProj=v.startsWith("n:");
+    if(setup) setup.style.display=isNewProj?"":"none";
+    if(!v){ PREV={prevNet:0,recovered:0,contra:0,grossToDate:0,variationsToDate:0,ct:null,priorPct:{}}; renderBuildings(); preview(); return; }
+    if(isNewProj){ PREV={prevNet:0,recovered:0,contra:0,grossToDate:0,variationsToDate:0,ct:synthCt(v.slice(2)),priorPct:{}}; renderBuildings(); preview(); return; }
+    const id=v.slice(2);
     try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),contra:num(c.summary?.contraToDate),grossToDate:num(c.summary?.grossToDate),variationsToDate:num(c.summary?.variationsToDate),ct:c,priorPct:{}}; }
     catch(e){ PREV={prevNet:0,recovered:0,contra:0,grossToDate:0,variationsToDate:0,ct:CONTRACTS.find(x=>x.id===id),priorPct:{}}; }
     // Prefill each building's % from the latest prior client cert for this contract.
     try{ const all=(await api("clientcerts")).filter(x=>x&&x.contractId===id&&x.status!=="Cancelled"&&Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
       if(all[0]) all[0].lines.forEach(l=>{ PREV.priorPct[l.ref]=num(l.pct); }); }catch(e){}
     renderBuildings(); preview(); };
+  ["q_scName","q_scSum","q_scVar","q_scRet","q_scAdv","q_scRec","q_scVat"].forEach(id=>{ const el=$("#"+id); if(el) el.addEventListener("input",()=>{ const v=$("#q_contract").value||""; if(v.startsWith("n:")){ PREV.ct=synthCt(v.slice(2)); preview(); } }); });
   const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
     LINES=liveLines();
     const gross=boqMode()?LINES.reduce((a,l)=>a+r2(num(l.value)*num(l.pct)),0):(+$("#q_gross").value||0);
@@ -1931,9 +1983,31 @@ async function clientCertForm(contractId){
   ["q_gross","q_mos","q_contra","q_date"].forEach(id=>$("#"+id).addEventListener("input",preview));
   $("#q_contract").onchange=loadPrev; loadPrev();
   $("#q_save").onclick=async ()=>{ const g=id=>$("#q_"+id).value;
-    const body={ contractId:$("#q_contract").value, date:g("date"), periodFrom:g("from"), periodTo:g("to"), mos:+g("mos")||0, contra:+g("contra")||0, notes:g("notes") };
-    if(boqMode()) body.lines=liveLines(); else body.grossCum=+g("gross")||0;
-    try{ const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.key); }catch(e){ toast(e.message); } };
+    const v=$("#q_contract").value||"";
+    if(!v){ toast("Choose the project"); return; }
+    let cid;
+    try{
+      if(v.startsWith("c:")) cid=v.slice(2);
+      else { // project with no contract yet — create client + contract first, then certify
+        const projName=v.slice(2);
+        const cname=(($("#q_scName")||{}).value||"").trim();
+        if(!cname){ toast("Enter the client / employer name for this project"); $("#q_scName").focus(); return; }
+        const sum=+$("#q_scSum").value||0;
+        if(!(sum>0)){ toast("Enter the contract value (excl. VAT)"); $("#q_scSum").focus(); return; }
+        toast("Setting up the client contract…");
+        const seed={ client:{ name:cname }, contract:{ project:projName, contractSum:sum,
+          variations:+$("#q_scVar").value||0, retentionPct:(+$("#q_scRet").value||10)/100,
+          advanceAmount:+$("#q_scAdv").value||0, recoveryRate:(+$("#q_scRec").value||0)/100,
+          vatPct:(+$("#q_scVat").value||5)/100 } };
+        const r=await api("project/seed",{method:"POST",body:seed});
+        cid=r.projects&&r.projects[0]&&r.projects[0].contractId;
+        if(!cid){ toast("Could not create the contract"); return; }
+        CONTRACTS=await api("contracts");
+      }
+      const body={ contractId:cid, date:g("date"), periodFrom:g("from"), periodTo:g("to"), mos:+g("mos")||0, contra:+g("contra")||0, notes:g("notes") };
+      if(boqMode()) body.lines=liveLines(); else body.grossCum=+g("gross")||0;
+      const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.key);
+    }catch(e){ toast(e.message); } };
 }
 async function openClientCert(no){
   let c; try{ c=await api("clientcert/"+encodeURIComponent(no)); }catch(e){ toast(e.message); return; }
@@ -3496,12 +3570,14 @@ function bindChequeLayout(saveS){
 async function vCompCerts(){
   const canEdit=["CEO","PM"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Completion &amp; DLP Certificates</h2>
+    ${projFilterHtml()}
     <span class="muted">issued on project completion and at the end of the Defects Liability Period</span>
     <div class="right flex">${canEdit?`<button class="btn gold" id="hcNewC">+ Completion certificate</button><button class="btn" id="hcNewD">+ DLP certificate</button><button class="btn ghost" id="hcNewW">+ Warranty certificate</button>`:""}</div></div>
     <div class="note" style="margin-top:8px">UAE standard: the <b>Completion Certificate</b> records completion, handover and acceptance only (warranty/DLP stay governed by the quotation / PO terms). The <b>DLP Certificate</b> is issued at the end of the Defects Liability Period — defects made good, retention releasable, decennial liability under UAE Civil Code Arts. 880–883 reserved. All clauses are <b>editable per certificate</b> before issue.</div>
     <div id="hcList" class="muted" style="margin-top:10px">Loading…</div></div>`;
   if(canEdit){ $("#hcNewC").onclick=()=>compCertForm({type:"COMPLETION"}); $("#hcNewD").onclick=()=>compCertForm({type:"DLP"}); $("#hcNewW").onclick=()=>compCertForm({type:"WARRANTY"}); }
-  let items=[]; try{ items=(await api("compcerts")).items||[]; }catch(e){ $("#hcList").textContent=e.message; return; }
+  bindProjFilter(vCompCerts);
+  let items=[]; try{ items=((await api("compcerts")).items||[]).filter(r=>projMatch(r.project)); }catch(e){ $("#hcList").textContent=e.message; return; }
   const h=$("#hcList"); if(!items.length){ h.innerHTML="No certificates yet."; return; }
   h.classList.remove("muted");
   const stc={Draft:"#8a8a8a",Issued:"#2E75B6",Countersigned:"#375623"};
