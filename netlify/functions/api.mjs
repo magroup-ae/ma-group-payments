@@ -13498,6 +13498,76 @@ async function ensureInit() {
     settings.squareClientBoqV1 = true;
     await s.setJSON("settings", settings);
   }
+  // Retrospective ledger completion for The Square 2.0: payments were received against
+  // paid tax invoices before the matching client payment certificate was raised in the
+  // system. For each historical payment below, create the certificate and the receipt
+  // ONLY if no record with a matching amount already exists (idempotent — never
+  // duplicates anything the team already logged). Figures come verbatim from the paid
+  // tax invoice, so the certificate's net/VAT/payable equal the money actually received
+  // and the next certificate deducts them via "previously certified".
+  if (!settings.histSquarePayV1) {
+    try {
+      const contracts = await getAllJSON(s, "contract/");
+      const k = contracts.find((c) => /squar/i.test(c.project || ""));
+      if (k) {
+        const HIST = [
+          { net: 476190.48, vat: 23809.52, payable: 500000, date: "2026-08-11", inv: "MAG/TAX/010/00223", desc: "The Square 2.0 Nad Al Sheba Gardens — Part #3 (P.O. PI-00041)" }
+        ];
+        const client = await s.get("client/" + k.clientId, { type: "json" });
+        const certs = (await getAllJSON(s, "clientcert/")).filter((c) => c && c.contractId === k.id);
+        const receipts = (await getAllJSON(s, "clientreceipt/")).filter((r) => r && (r.contractId === k.id || (r.project && r.project === k.project)));
+        const amtNear = (x, y) => Math.abs(num(x) - num(y)) <= 1;
+        let maxSeq = certs.reduce((a, c) => Math.max(a, c.seq || 0), 0);
+        for (const h of HIST) {
+          let cert = certs.find((c) => c.status !== "Cancelled" && (amtNear(c.calc?.payable, h.payable) || amtNear(c.calc?.net, h.net)));
+          if (!cert) {
+            const seq = ++maxSeq;
+            let key = clientCertKey(k.id, seq);
+            if (await s.get("clientcert/" + key)) continue;
+            const before = certs.filter((c) => c.status !== "Cancelled" && (c.seq || 0) < seq).sort((a, b) => (b.seq || 0) - (a.seq || 0));
+            const prevNet = r2(before.reduce((a, p) => a + (p.calc?.net || 0), 0));
+            const recBefore = r2(before.reduce((a, p) => a + (p.calc?.advanceRecovery || 0), 0));
+            const prevGross = before[0] ? num(before[0].calc?.gross) : 0;
+            const variationsCum = before[0] ? num(before[0].calc?.variationsCum) : 0;
+            const grossCum = r2(prevGross + h.net);
+            cert = {
+              no: clientCertNo(k, client, seq, h.date), key, seq, contractId: k.id, clientId: k.clientId,
+              createdBy: "system", createdAt: now(), date: h.date, periodFrom: "", periodTo: h.date,
+              lines: [], grossCum, variationsCum, mos: 0, contra: 0, historical: true,
+              notes: "Historical certificate raised retrospectively against PAID tax invoice " + h.inv + ". " + h.desc,
+              status: "Approved",
+              audit: [{ at: now(), by: "System", action: "Created retrospectively from paid tax invoice " + h.inv }],
+              calc: {
+                perBuilding: false, cumValue: grossCum, mos: 0, gross: grossCum, retentionPct: 0, retention: 0, afterRet: grossCum,
+                advanceAmount: num(k.advanceAmount), advanceRate: 0, advanceRecovery: 0,
+                advanceRecoveredToDate: recBefore, advanceOutstanding: Math.max(0, r2(num(k.advanceAmount) - recBefore)),
+                retentionHeld: 0, grossThis: h.net, variationsCum, variationsThis: 0,
+                grossCertifiedToDate: grossCum, retentionHeldToDate: 0, netToDate: r2(prevNet + h.net),
+                prevCertified: prevNet, contra: 0, net: h.net, vatPct: 0.05, vat: h.vat, payable: h.payable
+              }
+            };
+            await s.setJSON("clientcert/" + key, cert);
+            certs.push(cert);
+          }
+          if (!receipts.find((r) => amtNear(r.amount, h.payable) && !r.isAdvance && !r.isRetentionRelease)) {
+            const id = await nextId(s, settings, "clientReceiptSeq", "CR", "clientreceipt/", 4);
+            const rec = {
+              id, seq: Number(String(id).replace(/\D/g, "")) || 0,
+              contractId: k.id, clientId: k.clientId, project: k.project, certNo: cert.no,
+              date: h.date, amount: h.payable, mode: "Bank Transfer", ref: h.inv, bank: "",
+              isRetentionRelease: false, isAdvance: false,
+              notes: "Recorded retrospectively — payment received against PAID tax invoice " + h.inv,
+              createdBy: "System", createdAt: now(), updatedAt: now(), updatedBy: "System"
+            };
+            await s.setJSON("clientreceipt/" + id, rec);
+            receipts.push(rec);
+          }
+        }
+      }
+    } catch (e) {}
+    settings.histSquarePayV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
