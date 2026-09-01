@@ -1170,9 +1170,11 @@ function printCert(c){
   doPrint();
 }
 function doPrint(){
-  // Print the certificate inside an isolated iframe with @page margin:0.
-  // This removes the browser's own header/footer (page title on top, URL on
-  // bottom, date, page number) which cannot be suppressed on the main window.
+  // Print inside an isolated iframe with @page margin:0 (suppresses the browser's
+  // own header/footer). Before printing, the content is PAGINATED into explicit A4
+  // pages: every page has real margins, page 2+ repeats a compact letterhead marked
+  // "continued", every page carries "Page N of M", and breaks fall only between
+  // sections / whole rows — never through the middle of a table.
   const styleTags=[...document.querySelectorAll("style")].map(s=>s.outerHTML).join("");
   const base=location.origin+location.pathname;
   const inner=$("#printArea").innerHTML;
@@ -1180,35 +1182,92 @@ function doPrint(){
    <style>
      @page { size:A4; margin:0; }
      html,body { margin:0; padding:0; background:#fff; }
+     * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
      #printArea { display:block !important; position:static; }
-     #printArea .cert { width:210mm; max-width:none; margin:0 auto; padding:0 12mm; box-sizing:border-box; }
-     #printArea .pagebreak { page-break-before:always; height:0; }
-     /* Professional multi-page flow: the per-page top/bottom margin comes from the
-        repeating thead/tfoot spacers of the wrapper table (they print on EVERY page,
-        so page 2+ never starts as a cut-off strip at the paper edge). */
-     table.pgwrap { width:100%; border-collapse:collapse; page-break-inside:auto; }
-     table.pgwrap > thead td, table.pgwrap > tfoot td { height:11mm; padding:0; border:0; }
-     table.pgwrap > tbody > tr > td { padding:0; border:0; vertical-align:top; }
-     /* A certificate longer than one page is ALLOWED to break — but only cleanly:
-        never inside a section table, a signature block or a table row. Breaks fall
-        between sections, so page 2 opens with a complete section, not a sliced one. */
-     body.printing-cert #printArea .cert { page-break-inside:auto; break-inside:auto; }
-     #printArea .cert > table, #printArea .cert .amtbox, #printArea .cert .attnote,
-     #printArea .cert .hd, #printArea .cert .title, #printArea .cert .subtitle,
-     #printArea .cert .sig, #printArea .cert .foot { page-break-inside:avoid; break-inside:avoid; }
-     #printArea .cert tr { page-break-inside:avoid; break-inside:avoid; }
-     #printArea .cert .sec { page-break-after:avoid; break-after:avoid; }
-   </style></head><body class="printing-cert"><table class="pgwrap"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div id="printArea">${inner}</div></td></tr></tbody></table></body></html>`;
+     #printArea .cert { width:186mm; max-width:none; margin:0 auto; padding:0; box-sizing:border-box; box-shadow:none; border:0; }
+     .pg { width:210mm; height:295mm; box-sizing:border-box; padding:10mm 12mm 7mm; margin:0 auto; display:flex; flex-direction:column; overflow:hidden; page-break-after:always; }
+     .pg.last { page-break-after:auto; }
+     .pgbody { flex:1 1 auto; overflow:hidden; }
+     .pgcont { display:flex; align-items:center; gap:10px; border-bottom:2.5px solid #cc9c30; padding-bottom:8px; margin-bottom:12px; }
+     .pgcont img { height:11mm; }
+     .pgcont .en { font-size:12px; font-weight:800; color:#183048; letter-spacing:.3px; }
+     .pgcont .rt { margin-left:auto; text-align:right; font-size:9.5px; color:#555; line-height:1.5; }
+     .pgcont .rt b { color:#183048; font-size:10.5px; }
+     .pgnum { flex:0 0 auto; display:flex; justify-content:space-between; font-size:8.5px; color:#8a8f98; border-top:1px solid #e3e7ee; padding-top:5px; margin-top:8px; }
+   </style></head><body class="printing-cert"><div id="printArea">${inner}</div></body></html>`;
   let f=document.getElementById("printFrame"); if(f) f.remove();
   f=document.createElement("iframe"); f.id="printFrame";
-  f.setAttribute("style","position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden");
+  f.setAttribute("style","position:fixed;right:0;bottom:0;width:230mm;height:80px;border:0;visibility:hidden");
   document.body.appendChild(f);
   const d=f.contentWindow.document; d.open(); d.write(html); d.close();
   const cleanup=()=>{ setTimeout(()=>{ try{ f.remove(); }catch(e){} }, 1500); };
-  const go=()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ window.print(); } cleanup(); };
+  const go=()=>{ try{ paginatePrint(d,f.contentWindow); }catch(e){} try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ window.print(); } cleanup(); };
   let tries=0;
   const ready=()=>{ const imgs=[...d.images]; if(imgs.length===0||imgs.every(i=>i.complete)||tries++>50){ go(); } else setTimeout(ready,50); };
   setTimeout(ready,80);
+}
+// Measure each top-level block of every .cert, pack them into fixed-height A4 pages
+// (an over-tall table is split by whole rows with its section/header rows repeated
+// on the continuation), then rebuild as .pg pages with repeated compact letterhead
+// on page 2+ and "Page N of M" on every page.
+function paginatePrint(d,w){
+  const pa=d.getElementById("printArea"); if(!pa) return;
+  const certs=[...pa.children].filter(x=>x.classList&&x.classList.contains("cert"));
+  if(!certs.length) return;
+  const probe=d.createElement("div"); probe.style.cssText="width:100mm;position:absolute;visibility:hidden";
+  d.body.appendChild(probe); const mm=(probe.getBoundingClientRect().width/100)||3.78; probe.remove();
+  const capFull=Math.floor((295-10-7)*mm)-Math.ceil(9*mm);
+  const contH=Math.ceil(19*mm);
+  const bh=(el)=>{ const cs=w.getComputedStyle(el); return el.getBoundingClientRect().height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0); };
+  const pages=[];
+  for(const cert of certs){
+    const hd=cert.querySelector(".hd");
+    const info={ logo:(hd&&hd.querySelector("img")&&hd.querySelector("img").getAttribute("src"))||"logo.png",
+      name:((hd&&hd.querySelector(".n1"))?hd.querySelector(".n1").textContent:"MA GROUP").trim(),
+      title:(cert.querySelector(".title")?cert.querySelector(".title").textContent:"Document").trim(),
+      no:(cert.querySelector(".meta b")?cert.querySelector(".meta b").textContent:"").trim() };
+    const blocks=[...cert.children].filter(x=>!(x.classList&&x.classList.contains("pagebreak")));
+    let cur=[],curH=0,idx=0;
+    const cap=()=>idx===0?capFull:capFull-contH;
+    const push=()=>{ pages.push({blocks:cur,info,cont:idx>0}); idx++; cur=[]; curH=0; };
+    for(const bl of blocks){
+      const h=bh(bl);
+      if(h>cap()&&bl.tagName==="TABLE"&&bl.rows.length>4){
+        // Too tall for one page even alone: split by whole rows, repeating the
+        // section-title / column-label rows at the top of each continuation part.
+        if(cur.length) push();
+        const rows=[...bl.rows];
+        let hdrN=0; if(rows[0]&&rows[0].querySelector("td.sec")){ hdrN=1; if(rows[1]&&(rows[1].querySelector("th")||rows[1].querySelector("td.lab"))) hdrN=2; }
+        const hdr=rows.slice(0,hdrN), hdrH=hdr.reduce((a,r)=>a+r.getBoundingClientRect().height,0);
+        const rowH=rows.map(r=>r.getBoundingClientRect().height);
+        let part=d.createElement("table"); part.className=bl.className; let ph=0,n=0;
+        for(let i=0;i<rows.length;i++){
+          if(ph+rowH[i]>cap()&&n>hdrN){ cur=[part]; push(); part=d.createElement("table"); part.className=bl.className; hdr.forEach(r=>part.appendChild(r.cloneNode(true))); ph=hdrH; n=hdrN; }
+          part.appendChild(rows[i]); ph+=rowH[i]; n++;
+        }
+        cur=[part]; curH=ph; continue;
+      }
+      if(curH+h>cap()&&cur.length) push();
+      cur.push(bl); curH+=h;
+    }
+    if(cur.length) push();
+  }
+  const eh=(t)=>String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  pa.innerHTML="";
+  pages.forEach((p,i)=>{
+    const pg=d.createElement("div"); pg.className="pg"+(i===pages.length-1?" last":"");
+    if(p.cont){ const c=d.createElement("div"); c.className="pgcont";
+      c.innerHTML=`<img src="${eh(p.info.logo)}"><div class="en">${eh(p.info.name)}</div><div class="rt"><b>${eh(p.info.title)}</b>${p.info.no?" — "+eh(p.info.no):""}<br>continued from previous page</div>`;
+      pg.appendChild(c); }
+    const body=d.createElement("div"); body.className="pgbody";
+    const cw=d.createElement("div"); cw.className="cert";
+    p.blocks.forEach(b=>cw.appendChild(b));
+    body.appendChild(cw); pg.appendChild(body);
+    const num=d.createElement("div"); num.className="pgnum";
+    num.innerHTML=`<span>${eh(p.info.title)}${p.info.no?" · "+eh(p.info.no):""}</span><span>Page ${i+1} of ${pages.length}</span>`;
+    pg.appendChild(num);
+    pa.appendChild(pg);
+  });
 }
 
 /* ---------- petty cash voucher (A5-ish, prints on A4) ---------- */
