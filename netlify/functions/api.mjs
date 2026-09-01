@@ -15343,6 +15343,94 @@ var api_default = async (req, context) => {
     await s.setJSON("rfq/" + rec.id, rec);
     return json({ ...rec, files: (rec.files || []).map((f) => ({ idx: f.idx, name: f.name, size: f.size })) });
   }
+  /* ---------- Technical & commercial evaluation (pre-award) ----------
+     Stored on the RFQ as rec.eval. Weighted-criteria scoring per vendor plus a
+     mandatory prequalification (pass/fail) gate and a normalised commercial
+     comparison, producing a ranked comparison sheet and a recommendation that
+     must be approved before the award is raised. */
+  const rfqEval = path.match(/^rfq\/([^/]+)\/eval$/);
+  if (rfqEval && req.method === "POST") {
+    if (!can("procurement")) return err("Not permitted", 403);
+    const rec = await s.get("rfq/" + decodeURIComponent(rfqEval[1]), { type: "json" });
+    if (!rec) return err("Not found", 404);
+    const b = await req.json();
+    const ex = rec.eval || null;
+    if (ex && ex.status === "Approved" && !can("admin")) return err("Evaluation approved — locked", 403);
+    const criteria = Array.isArray(b.criteria) ? b.criteria.filter((c) => c && String(c.label || "").trim()).map((c, i) => ({
+      key: String(c.key || "c" + i), label: String(c.label || ""), section: c.section === "commercial" ? "commercial" : "technical",
+      weight: num(c.weight), auto: !!c.auto
+    })) : (ex?.criteria || []);
+    const totW = r2(criteria.reduce((a, c) => a + num(c.weight), 0));
+    if (criteria.length && Math.abs(totW - 100) > 0.01) return err(`Criteria weights must total 100% — currently ${totW}%`);
+    const vendors = Array.isArray(b.vendors) ? b.vendors.map((v) => ({
+      vendorId: String(v.vendorId || ""), vendorName: String(v.vendorName || ""),
+      quoted: num(v.quoted), discount: num(v.discount), adjustment: num(v.adjustment),
+      evaluated: r2(num(v.quoted) - num(v.discount) + num(v.adjustment)),
+      vatIncl: !!v.vatIncl, leadTime: String(v.leadTime || ""), validity: String(v.validity || ""),
+      paymentTerms: String(v.paymentTerms || ""), qualifications: String(v.qualifications || ""),
+      excluded: !!v.excluded, excludeReason: String(v.excludeReason || ""),
+      prequal: (v.prequal && typeof v.prequal === "object") ? v.prequal : {},
+      scores: (v.scores && typeof v.scores === "object") ? v.scores : {}
+    })).filter((v) => v.vendorId) : (ex?.vendors || []);
+    // Auto price score: lowest compliant evaluated price scores 10, others pro-rata.
+    const live = vendors.filter((v) => !v.excluded && v.evaluated > 0);
+    const lowest = live.length ? Math.min(...live.map((v) => v.evaluated)) : 0;
+    for (const v of vendors) {
+      for (const c of criteria) if (c.auto) v.scores[c.key] = (!v.excluded && v.evaluated > 0 && lowest > 0) ? r2(10 * lowest / v.evaluated) : 0;
+      const prequalFail = Object.values(v.prequal || {}).some((x) => x === "fail");
+      v.prequalPassed = !prequalFail;
+      v.weighted = v.excluded ? 0 : r2(criteria.reduce((a, c) => a + num(v.scores[c.key]) / 10 * num(c.weight), 0));
+      v.commercialScore = r2(criteria.filter((c) => c.section === "commercial").reduce((a, c) => a + num(v.scores[c.key]) / 10 * num(c.weight), 0));
+      v.technicalScore = r2(criteria.filter((c) => c.section === "technical").reduce((a, c) => a + num(v.scores[c.key]) / 10 * num(c.weight), 0));
+      v.varianceVsLowest = lowest > 0 && v.evaluated > 0 ? r2(v.evaluated - lowest) : 0;
+      v.variancePct = lowest > 0 && v.evaluated > 0 ? r2((v.evaluated - lowest) / lowest * 100) : 0;
+    }
+    const ranked = vendors.filter((v) => !v.excluded).slice().sort((a, b2) => b2.weighted - a.weighted);
+    ranked.forEach((v, i) => { v.rank = i + 1; });
+    vendors.filter((v) => v.excluded).forEach((v) => { v.rank = 0; });
+    const recommendedId = String(b.recommendedVendorId || (ranked[0] ? ranked[0].vendorId : ""));
+    const recV = vendors.find((v) => v.vendorId === recommendedId);
+    const lowestV = live.slice().sort((a, b2) => a.evaluated - b2.evaluated)[0];
+    const notLowest = !!(recV && lowestV && recV.vendorId !== lowestV.vendorId);
+    if (notLowest && !String(b.notLowestJustification || ex?.notLowestJustification || "").trim())
+      return err("The recommended bidder is not the lowest — a written justification is mandatory before approval");
+    rec.eval = {
+      criteria, vendors,
+      budget: num(b.budget), budgetRef: String(b.budgetRef ?? ex?.budgetRef ?? ""),
+      basis: String(b.basis ?? ex?.basis ?? ""), openedAt: String(b.openedAt ?? ex?.openedAt ?? ""),
+      recommendedVendorId: recommendedId, recommendedName: recV?.vendorName || "",
+      recommendedAmount: recV ? recV.evaluated : 0,
+      notLowest, notLowestJustification: String(b.notLowestJustification ?? ex?.notLowestJustification ?? ""),
+      recommendation: String(b.recommendation ?? ex?.recommendation ?? ""),
+      conditions: String(b.conditions ?? ex?.conditions ?? ""),
+      lowestEvaluated: lowest, savingVsBudget: num(b.budget) > 0 && recV ? r2(num(b.budget) - recV.evaluated) : 0,
+      status: ex?.status === "Approved" && !b.reopen ? "Approved" : (ex?.status || "Draft"),
+      preparedBy: ex?.preparedBy || me.name, preparedAt: ex?.preparedAt || now(),
+      approvedBy: ex?.approvedBy || "", approvedAt: ex?.approvedAt || "",
+      updatedBy: me.name, updatedAt: now()
+    };
+    rec.updatedAt = now();
+    await s.setJSON("rfq/" + rec.id, rec);
+    return json({ ...rec, files: (rec.files || []).map((f) => ({ idx: f.idx, name: f.name, size: f.size })) });
+  }
+  const rfqEvalSt = path.match(/^rfq\/([^/]+)\/eval\/status$/);
+  if (rfqEvalSt && req.method === "POST") {
+    const rec = await s.get("rfq/" + decodeURIComponent(rfqEvalSt[1]), { type: "json" });
+    if (!rec || !rec.eval) return err("No evaluation on this inquiry", 404);
+    const b = await req.json(); const a = String(b.action || "");
+    if (a === "approve") {
+      if (!can("admin")) return err("CEO approval only", 403);
+      if (!rec.eval.recommendedVendorId) return err("Select the recommended bidder first");
+      rec.eval.status = "Approved"; rec.eval.approvedBy = me.name; rec.eval.approvedAt = now();
+    } else if (a === "reopen") {
+      if (!can("admin")) return err("CEO only", 403);
+      if (rec.status === "Awarded") return err("Already awarded — the evaluation is part of the award record");
+      rec.eval.status = "Draft"; rec.eval.approvedBy = ""; rec.eval.approvedAt = "";
+    } else return err("Unknown action");
+    rec.eval.updatedBy = me.name; rec.eval.updatedAt = now(); rec.updatedAt = now();
+    await s.setJSON("rfq/" + rec.id, rec);
+    return json({ ok: true, eval: rec.eval });
+  }
   const rfqAward = path.match(/^rfq\/([^/]+)\/award$/);
   if (rfqAward && req.method === "POST") {
     if (!can("contracts")) return err("Not permitted", 403);
@@ -15352,6 +15440,17 @@ var api_default = async (req, context) => {
     const vid = String(b.vendorId || "");
     const q = (rec.quotes || []).find((x) => x.vendorId === vid);
     if (!q) return err("Record the winning vendor's quote first");
+    // Governance: with competing quotes the selection must rest on an approved
+    // evaluation. A deviation from the recommended bidder is allowed only with a
+    // recorded reason (kept on the award record for audit).
+    const liveQ = (rec.quotes || []).filter((x) => num(x.amount) > 0);
+    if (liveQ.length >= 2 && !(rec.eval && rec.eval.status === "Approved") && !b.skipEval)
+      return err("NO_EVAL: Complete and approve the technical & commercial evaluation before awarding (Procurement → Evaluation).");
+    if (rec.eval && rec.eval.status === "Approved" && rec.eval.recommendedVendorId && rec.eval.recommendedVendorId !== vid) {
+      if (!String(b.deviationReason || "").trim())
+        return err("DEVIATION: The approved evaluation recommends " + (rec.eval.recommendedName || "another bidder") + ". Awarding a different bidder requires a recorded reason.");
+      rec.awardDeviationReason = String(b.deviationReason);
+    }
     const pv = await s.get("pvendor/" + vid, { type: "json" });
     if (!pv) return err("Vendor not found", 404);
     // Promote the directory vendor into the finance supplier registry (for LOA/PC),

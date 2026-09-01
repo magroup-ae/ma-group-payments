@@ -3416,10 +3416,11 @@ async function vProc(){
   const withEmailN=PROC.vendors.filter(v=>/@/.test(v.email||"")).length, regN=PROC.vendors.filter(v=>v.supplierId).length;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Procurement</h2>
      <span class="muted">${PROC.vendors.length} vendors · ${regN} registered · ${withEmailN} with email · ${PROC.trades.length} trades</span>
-     <div class="right flex" style="gap:6px">${sub("dir","Directory")}${sub("issue","Issue Inquiry")}${sub("rfqs","Inquiries ("+RFXcount()+")")}</div></div>
+     <div class="right flex" style="gap:6px">${sub("dir","Directory")}${sub("issue","Issue Inquiry")}${sub("rfqs","Inquiries ("+RFXcount()+")")}${sub("evals","Evaluation ("+EVALcount()+")")}</div></div>
    </div><div id="proc_body"></div>`;
   if(PROC_TAB==="dir") procDir();
   else if(PROC_TAB==="issue") procIssue();
+  else if(PROC_TAB==="evals") procEvals();
   else procRfqs();
 }
 function RFXcount(){ return RFQS.filter(r=>r.status!=="Awarded"&&r.status!=="Cancelled").length; }
@@ -3594,6 +3595,7 @@ async function rfqDetail(){
     <div class="flex"><h3 style="margin:0">${esc(r.rfqNo)} <span class="pill" style="background:#5B6B85">${esc(r.status)}</span></h3>
       <div class="right flex" style="gap:6px">
         <button class="btn ghost" id="rd_print">View / Print</button>
+        ${(r.quotes||[]).some(q=>num(q.amount)>0)?`<button class="btn ${r.eval&&r.eval.status==="Approved"?"ghost":"gold"}" id="rd_eval">${r.eval?(r.eval.status==="Approved"?"Evaluation ✓":"Continue evaluation"):"Evaluate bidders"}</button>`:""}
         ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn ghost" id="rd_edit">Edit</button>`:""}
         ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn gold" id="rd_send">${r.status==="Draft"?"Send":"Re-send"}</button>`:""}
         <button class="btn ghost" id="rd_back">Back</button></div></div>
@@ -3617,6 +3619,7 @@ async function rfqDetail(){
     ${r.status==="Awarded"?`<div class="note" style="background:#e7efe9;border-color:#2E7D32;margin-top:10px">Awarded to <b>${esc((procVById(r.awardedVendorId)||{}).name||"")}</b> at AED ${fmt(r.awardedAmount)}. A supplier record was created — issue the LOA/Subcontract from Contracts / LOA, then process the Payment Certificate.</div>`:""}
   </div>`;
   $("#rd_back").onclick=()=>{ RFQ_CUR=null; procRfqs(); };
+  if($("#rd_eval")) $("#rd_eval").onclick=()=>procEvalForm();
   $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400); }catch(e){toast(e.message);} };
   if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
   if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?\nAll recipients are in BCC — addresses stay private.`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
@@ -3626,8 +3629,247 @@ async function rfqDetail(){
     const g=cls=>row.querySelector("."+cls);
     const save=async(extra={})=>{ const body={vendorId:vid,amount:+g("q_amount").value||0,vatIncl:g("q_vat").value==="1",leadTime:g("q_lead").value,validity:g("q_valid").value,paymentTerms:g("q_pay").value,notes:g("q_notes").value,...extra}; RFQ_CUR=await api("rfq/"+r.id+"/quote",{method:"POST",body}); };
     g("q_save").onclick=async()=>{ try{ await save(); toast("Quote saved"); rfqDetail(); }catch(e){toast(e.message);} };
-    if(g("q_award"))g("q_award").onclick=async()=>{ if(!(+g("q_amount").value>0)){toast("Enter the vendor's quoted amount first");return;} if(!confirm("Accept this vendor and create their supplier record for the LOA / Subcontract?"))return; try{ await save({status:"Accepted"}); const res=await api("rfq/"+r.id+"/award",{method:"POST",body:{vendorId:vid}}); toast("Awarded → opening Contracts / LOA"); AW_PRESEL=res.supplierId; AW_PREFILL={amount:res.amount,project:res.project,scopeTitle:r.scopeTitle,scope:res.scope}; await load().catch(()=>{}); IW=null; RFQ_CUR=null; VIEW="awards"; CUR=null; render(); }catch(e){toast(e.message);} };
+    if(g("q_award"))g("q_award").onclick=async()=>{ if(!(+g("q_amount").value>0)){toast("Enter the vendor's quoted amount first");return;} if(!confirm("Accept this vendor and create their supplier record for the LOA / Subcontract?"))return;
+      const doAward=async (extra)=>{ const res=await api("rfq/"+r.id+"/award",{method:"POST",body:{vendorId:vid,...(extra||{})}}); toast("Awarded → opening Contracts / LOA"); AW_PRESEL=res.supplierId; AW_PREFILL={amount:res.amount,project:res.project,scopeTitle:r.scopeTitle,scope:res.scope}; await load().catch(()=>{}); IW=null; RFQ_CUR=null; VIEW="awards"; CUR=null; render(); };
+      try{ await save({status:"Accepted"}); await doAward(); }
+      catch(e){
+        const m=String(e.message||"");
+        if(m.startsWith("NO_EVAL")){ if(confirm("Two or more quotes are recorded, so a technical & commercial evaluation is required before selection.\n\nOpen the evaluation form now?\n\n(Cancel = award without evaluation — not recommended, and only for a single-source or emergency purchase.)")){ RFQ_CUR=await api("rfq/"+r.id); procEvalForm(); return; }
+          const why=prompt("Reason for awarding without a comparison (recorded on the inquiry):",""); if(!why) return;
+          try{ await doAward({skipEval:true,deviationReason:why}); }catch(x){ toast(x.message); } return; }
+        if(m.startsWith("DEVIATION")){ const why=prompt(m.replace(/^DEVIATION:\s*/,"")+"\n\nReason for the deviation:",""); if(!why) return;
+          try{ await doAward({deviationReason:why}); }catch(x){ toast(x.message); } return; }
+        toast(m);
+      } };
   });
+}
+/* ================= Supplier / subcontractor EVALUATION (pre-award) =================
+   Weighted technical + commercial scoring with a mandatory prequalification gate,
+   a normalised commercial comparison and a recommendation that the CEO approves
+   before the award is raised. Criteria and weights are fully editable per inquiry. */
+const EVAL_CRITERIA=[
+  {key:"price",   section:"commercial",label:"Price competitiveness (evaluated net)",              weight:30,auto:true},
+  {key:"payterm", section:"commercial",label:"Payment terms offered",                              weight:10},
+  {key:"validity",section:"commercial",label:"Offer validity & price firmness (no open items)",    weight:10},
+  {key:"techcomp",section:"technical", label:"Technical compliance with specification / BOQ",      weight:12},
+  {key:"exp",     section:"technical", label:"Relevant experience & past performance with MA",     weight:10},
+  {key:"cap",     section:"technical", label:"Manpower, plant & capacity to deliver",              weight:8},
+  {key:"prog",    section:"technical", label:"Programme / lead time & delivery commitment",        weight:8},
+  {key:"qual",    section:"technical", label:"Quality system, samples & material approvals",       weight:6},
+  {key:"hse",     section:"technical", label:"HSE compliance, insurance & safety record",          weight:6}
+];
+const EVAL_PREQUAL=[
+  {key:"tl",   label:"Valid trade licence (activity covers the scope)"},
+  {key:"trn",  label:"VAT / TRN registration certificate"},
+  {key:"prof", label:"Company profile & reference projects"},
+  {key:"ins",  label:"Insurance — workmen's compensation / third-party liability"},
+  {key:"hse",  label:"HSE policy & method statement capability"},
+  {key:"iso",  label:"ISO / third-party certification (where applicable)"},
+  {key:"bank", label:"Bank details / IBAN letter"},
+  {key:"visit",label:"Site visit attended / scope understood"},
+  {key:"comp", label:"Quotation complete — all BOQ items priced, no material qualifications"}
+];
+function EVALcount(){ return RFQS.filter(r=>(r.quotes||[]).some(q=>num(q.amount)>0)&&(!r.eval||r.eval.status!=="Approved")&&r.status!=="Cancelled").length; }
+function procEvals(){
+  const b=$("#proc_body");
+  const list=RFQS.filter(r=>(r.quotes||[]).length).sort((a,c)=>a.createdAt<c.createdAt?1:-1);
+  b.innerHTML=`<div class="card">
+    <div class="note">A <b>technical &amp; commercial evaluation</b> is completed before any supplier or subcontractor is selected. Fill the form per inquiry — prequalification (pass/fail), weighted scoring, normalised price comparison — and the system produces the ranked <b>comparison sheet</b> and the recommendation for CEO approval. With two or more quotes, the award is blocked until the evaluation is approved.</div>
+    ${list.length?`<div style="overflow-x:auto"><table style="margin-top:8px"><tr><th>Inquiry</th><th>Project</th><th>Trade / scope</th><th class="num">Quotes</th><th class="num">Lowest (AED)</th><th>Recommended</th><th>Evaluation</th></tr>
+      ${list.map(r=>{ const qs=(r.quotes||[]).filter(q=>num(q.amount)>0); const low=qs.length?Math.min(...qs.map(q=>num(q.amount))):0;
+        const ev=r.eval; const st=r.status==="Awarded"?`<span class="pill st-Approved">Awarded</span>`:(ev?`<span class="pill st-${esc(ev.status)}">${esc(ev.status)}</span>`:`<span class="pill" style="background:#8a8a8a">Not started</span>`);
+        return `<tr class="click" data-ev="${esc(r.id)}"><td><b>${esc(r.rfqNo)}</b></td><td>${esc(r.project||"—")}</td><td>${esc(r.scopeTitle||r.trade||"—")}</td><td class="num">${qs.length}</td><td class="num">${low?fmt(low):"—"}</td><td>${esc(ev?.recommendedName||"—")}</td><td>${st}</td></tr>`;}).join("")}</table></div>`
+      :`<div class="muted" style="margin-top:8px">No inquiries with quotes yet. Record the vendors' quotes in <b>Inquiries</b> first, then evaluate here.</div>`}
+  </div>`;
+  b.querySelectorAll("[data-ev]").forEach(r=>r.onclick=async ()=>{ try{ RFQ_CUR=await api("rfq/"+r.dataset.ev); procEvalForm(); }catch(e){ toast(e.message); } });
+}
+function procEvalForm(){
+  const r=RFQ_CUR, b=$("#proc_body");
+  const ev=r.eval||{};
+  const locked=ev.status==="Approved"&&ME.role!=="CEO" || r.status==="Awarded";
+  const invited=(r.vendorIds||[]).map(id=>procVById(id)).filter(Boolean);
+  const quoted=(r.quotes||[]).filter(q=>num(q.amount)>0);
+  // Working model: one row per quoting vendor, seeded from the recorded quote.
+  const CR=(ev.criteria&&ev.criteria.length?ev.criteria:EVAL_CRITERIA).map(c=>({...c}));
+  const V=quoted.map(q=>{ const prev=(ev.vendors||[]).find(x=>x.vendorId===q.vendorId)||{}; const pv=procVById(q.vendorId)||{};
+    return { vendorId:q.vendorId, vendorName:q.vendorName||pv.name||"", trade:pv.trade||"",
+      quoted:prev.quoted!==undefined?num(prev.quoted):num(q.amount), discount:num(prev.discount), adjustment:num(prev.adjustment),
+      vatIncl:prev.vatIncl!==undefined?!!prev.vatIncl:!!q.vatIncl,
+      leadTime:prev.leadTime||q.leadTime||"", validity:prev.validity||q.validity||"", paymentTerms:prev.paymentTerms||q.paymentTerms||"",
+      qualifications:prev.qualifications||q.notes||"", excluded:!!prev.excluded, excludeReason:prev.excludeReason||"",
+      prequal:{...(prev.prequal||{})}, scores:{...(prev.scores||{})} }; });
+  const evaluated=v=>r2(num(v.quoted)-num(v.discount)+num(v.adjustment));
+  const lowest=()=>{ const live=V.filter(v=>!v.excluded&&evaluated(v)>0); return live.length?Math.min(...live.map(evaluated)):0; };
+  const scoreOf=(v,c)=>c.auto?(()=>{ const lo=lowest(); const e=evaluated(v); return (!v.excluded&&e>0&&lo>0)?r2(10*lo/e):0; })():num(v.scores[c.key]);
+  const weighted=v=>v.excluded?0:r2(CR.reduce((a,c)=>a+scoreOf(v,c)/10*num(c.weight),0));
+  const secScore=(v,sec)=>v.excluded?0:r2(CR.filter(c=>c.section===sec).reduce((a,c)=>a+scoreOf(v,c)/10*num(c.weight),0));
+  const prequalOk=v=>!Object.values(v.prequal||{}).some(x=>x==="fail");
+  b.innerHTML=`<div class="card"><div class="flex"><h3 style="margin:0">Evaluation — ${esc(r.rfqNo)}</h3>
+      ${ev.status?`<span class="pill st-${esc(ev.status)}">${esc(ev.status)}</span>`:""}
+      ${r.status==="Awarded"?`<span class="pill st-Approved">Awarded</span>`:""}
+      <button class="btn ghost right" id="ev_back">Back</button></div>
+    <div class="muted" style="margin:4px 0 8px">${esc(r.project||"—")} · ${esc(r.scopeTitle||r.trade||"")} · ${V.length} bidder(s) quoted${r.dueDate?" · quotes due "+dmy(r.dueDate):""}</div>
+    <div class="grid">
+      <div><label>Budget / estimate (AED, ex-VAT)</label><input type="number" step="0.01" id="ev_budget" value="${ev.budget||""}"></div>
+      <div><label>Budget reference</label><input id="ev_budgetRef" value="${esc(ev.budgetRef||"")}" placeholder="e.g. tender estimate / BOQ rate"></div>
+      <div><label>Quotes opened on</label><input type="date" id="ev_openedAt" value="${esc((ev.openedAt||"").slice(0,10))}"></div>
+      <div style="grid-column:1/-1"><label>Basis of evaluation</label><input id="ev_basis" value="${esc(ev.basis||"")}" placeholder="e.g. Lump sum, same scope & specification, ex-VAT, delivered & installed to site"></div>
+    </div>
+    <h4 style="margin:14px 0 4px">1. Prequalification — mandatory (fail on any item disqualifies the bidder)</h4>
+    <div id="ev_pq" style="overflow-x:auto"></div>
+    <h4 style="margin:14px 0 4px">2. Commercial comparison (AED, ex-VAT)</h4>
+    <div class="muted" style="font-size:11px;margin-bottom:4px">Evaluated net = quoted − discount + adjustment for scope gaps / unpriced items, so all bidders are compared on the same scope.</div>
+    <div id="ev_comm" style="overflow-x:auto"></div>
+    <h4 style="margin:14px 0 4px">3. Weighted scoring <span class="muted" style="font-weight:400;font-size:11px">— score each criterion 0–10; the price score is calculated automatically (lowest = 10)</span></h4>
+    <div id="ev_sc" style="overflow-x:auto"></div>
+    <h4 style="margin:14px 0 4px">4. Result &amp; recommendation</h4>
+    <div id="ev_res"></div>
+    <div class="grid" style="margin-top:8px">
+      <div style="grid-column:1/-1"><label>Recommended bidder</label><select id="ev_rec"><option value="">— highest weighted score —</option>${V.map(v=>`<option value="${esc(v.vendorId)}" ${ev.recommendedVendorId===v.vendorId?"selected":""}>${esc(v.vendorName)}</option>`).join("")}</select></div>
+      <div style="grid-column:1/-1" id="ev_nlWrap"><label>Justification — recommended bidder is NOT the lowest <b style="color:#c00">(mandatory)</b></label><textarea id="ev_notLowest" rows="2" placeholder="e.g. lowest bidder excluded material items / no ISO / cannot meet the programme; the recommended offer is technically compliant and the difference is justified by …">${esc(ev.notLowestJustification||"")}</textarea></div>
+      <div style="grid-column:1/-1"><label>Recommendation / remarks</label><textarea id="ev_recom" rows="3" placeholder="Summary of the evaluation and the recommendation to award">${esc(ev.recommendation||"")}</textarea></div>
+      <div style="grid-column:1/-1"><label>Conditions to be incorporated in the LOA / subcontract</label><textarea id="ev_cond" rows="2" placeholder="e.g. price firm to completion; 10% retention; HSE liability on subcontractor; delivery within 3 weeks">${esc(ev.conditions||"")}</textarea></div>
+    </div>
+    <div style="height:12px"></div>
+    <div class="flex" style="gap:8px;flex-wrap:wrap" id="ev_btns"></div>
+    ${ev.approvedBy?`<div class="note" style="margin-top:8px;background:#e7efe9;border-color:#2E7D32">Evaluation approved by <b>${esc(ev.approvedBy)}</b> on ${dmy(ev.approvedAt)} — recommended: <b>${esc(ev.recommendedName||"")}</b> at AED ${fmt(ev.recommendedAmount)}. The award may now be raised from the inquiry.</div>`:""}
+  </div>`;
+  $("#ev_back").onclick=()=>{ RFQ_CUR=null; PROC_TAB="evals"; vProc(); };
+  const dis=locked?"disabled":"";
+  const drawPq=()=>{ $("#ev_pq").innerHTML=`<table><tr><th style="min-width:260px">Requirement</th>${V.map(v=>`<th style="text-align:center">${esc(v.vendorName)}</th>`).join("")}</tr>
+    ${EVAL_PREQUAL.map(p=>`<tr><td class="lab">${esc(p.label)}</td>${V.map((v,i)=>`<td style="text-align:center"><select data-pq="${i}" data-k="${p.key}" ${dis} style="width:80px">
+      <option value="" ${!v.prequal[p.key]?"selected":""}>—</option><option value="pass" ${v.prequal[p.key]==="pass"?"selected":""}>Pass</option><option value="na" ${v.prequal[p.key]==="na"?"selected":""}>N/A</option><option value="fail" ${v.prequal[p.key]==="fail"?"selected":""}>Fail</option></select></td>`).join("")}</tr>`).join("")}
+    <tr class="tot"><td><b>Prequalification result</b></td>${V.map(v=>`<td style="text-align:center"><b style="color:${prequalOk(v)?"#2E7D32":"#c00"}">${prequalOk(v)?"QUALIFIED":"DISQUALIFIED"}</b></td>`).join("")}</tr></table>`;
+    $("#ev_pq").querySelectorAll("[data-pq]").forEach(sel=>sel.onchange=()=>{ V[+sel.dataset.pq].prequal[sel.dataset.k]=sel.value; drawPq(); drawRes(); }); };
+  const drawComm=()=>{ const lo=lowest(), bud=num($("#ev_budget").value);
+    $("#ev_comm").innerHTML=`<table><tr><th>Bidder</th><th class="num">Quoted</th><th class="num">Discount</th><th class="num">Adjustment</th><th class="num">Evaluated net</th><th class="num">vs lowest</th>${bud>0?`<th class="num">vs budget</th>`:""}<th>Lead time</th><th>Payment terms</th><th>Qualifications</th><th>Excl.</th></tr>
+      ${V.map((v,i)=>{ const e=evaluated(v); const dv=lo>0&&e>0?r2(e-lo):0;
+        return `<tr${v.excluded?` style="opacity:.5"`:""}><td><b>${esc(v.vendorName)}</b>${e===lo&&!v.excluded&&e>0?` <span class="pill" style="background:#2E7D32;font-size:9px">lowest</span>`:""}${!prequalOk(v)?` <span class="pill" style="background:#C00000;font-size:9px">disqualified</span>`:""}</td>
+        <td class="num"><input type="number" step="0.01" data-c="${i}" data-f="quoted" value="${v.quoted||""}" style="width:110px;text-align:right" ${dis}></td>
+        <td class="num"><input type="number" step="0.01" data-c="${i}" data-f="discount" value="${v.discount||""}" style="width:90px;text-align:right" ${dis}></td>
+        <td class="num"><input type="number" step="0.01" data-c="${i}" data-f="adjustment" value="${v.adjustment||""}" style="width:90px;text-align:right" ${dis}></td>
+        <td class="num"><b>${fmt(e)}</b></td>
+        <td class="num" style="color:${dv>0?"#c00":"#2E7D32"}">${dv>0?"+"+fmt(dv)+" ("+(lo>0?r2(dv/lo*100):0).toFixed(1)+"%)":"—"}</td>
+        ${bud>0?`<td class="num" style="color:${e>bud?"#c00":"#2E7D32"}">${e>bud?"+":"−"}${fmt(Math.abs(r2(e-bud)))}</td>`:""}
+        <td><input data-c="${i}" data-f="leadTime" value="${esc(v.leadTime)}" style="width:90px" ${dis}></td>
+        <td><input data-c="${i}" data-f="paymentTerms" value="${esc(v.paymentTerms)}" style="width:110px" ${dis}></td>
+        <td><input data-c="${i}" data-f="qualifications" value="${esc(v.qualifications)}" style="width:170px" placeholder="exclusions / notes" ${dis}></td>
+        <td style="text-align:center"><input type="checkbox" data-c="${i}" data-f="excluded" ${v.excluded?"checked":""} ${dis} title="exclude from the comparison"></td></tr>`;}).join("")}</table>`;
+    $("#ev_comm").querySelectorAll("[data-c]").forEach(inp=>inp.onchange=()=>{ const v=V[+inp.dataset.c], f=inp.dataset.f;
+      if(f==="excluded"){ v.excluded=inp.checked; if(v.excluded&&!v.excludeReason){ const rz=prompt("Reason for excluding "+v.vendorName+":",""); v.excludeReason=rz||"Non-compliant"; } }
+      else if(["quoted","discount","adjustment"].includes(f)) v[f]=num(inp.value); else v[f]=inp.value;
+      drawComm(); drawScores(); drawRes(); }); };
+  const drawScores=()=>{ const sec=s=>CR.filter(c=>c.section===s);
+    const rows=s=>sec(s).map(c=>`<tr><td class="lab">${esc(c.label)}${c.auto?` <span class="muted" style="font-size:10px">(auto)</span>`:""}</td>
+      <td style="text-align:center"><input type="number" step="1" min="0" max="100" data-w="${esc(c.key)}" value="${c.weight}" style="width:60px;text-align:center" ${dis}></td>
+      ${V.map((v,i)=>`<td style="text-align:center">${c.auto?`<b>${scoreOf(v,c).toFixed(1)}</b>`:`<input type="number" step="0.5" min="0" max="10" data-s="${i}" data-k="${esc(c.key)}" value="${v.scores[c.key]??""}" style="width:60px;text-align:center" ${dis}>`}</td>`).join("")}</tr>`).join("");
+    const totW=r2(CR.reduce((a,c)=>a+num(c.weight),0));
+    $("#ev_sc").innerHTML=`<table><tr><th style="min-width:280px">Criterion</th><th style="text-align:center">Weight %</th>${V.map(v=>`<th style="text-align:center">${esc(v.vendorName)}</th>`).join("")}</tr>
+      <tr><td class="sec navy" colspan="${2+V.length}">COMMERCIAL</td></tr>${rows("commercial")}
+      <tr><td class="sec navy" colspan="${2+V.length}">TECHNICAL / CAPABILITY</td></tr>${rows("technical")}
+      <tr class="tot"><td><b>Weighted score (out of 100)</b></td><td style="text-align:center;color:${Math.abs(totW-100)>0.01?"#c00":"inherit"}"><b>${totW}%</b></td>${V.map(v=>`<td style="text-align:center"><b>${weighted(v).toFixed(1)}</b></td>`).join("")}</tr>
+      <tr><td class="lab">↳ commercial / technical split</td><td></td>${V.map(v=>`<td style="text-align:center;font-size:11px">${secScore(v,"commercial").toFixed(1)} / ${secScore(v,"technical").toFixed(1)}</td>`).join("")}</tr></table>
+      ${Math.abs(totW-100)>0.01?`<div class="note" style="border-color:#C00000;color:#c00;margin-top:6px">Weights currently total ${totW}% — they must total 100% before the evaluation can be saved.</div>`:""}`;
+    $("#ev_sc").querySelectorAll("[data-s]").forEach(inp=>inp.onchange=()=>{ V[+inp.dataset.s].scores[inp.dataset.k]=Math.max(0,Math.min(10,num(inp.value))); drawScores(); drawRes(); });
+    $("#ev_sc").querySelectorAll("[data-w]").forEach(inp=>inp.onchange=()=>{ const c=CR.find(x=>x.key===inp.dataset.w); if(c) c.weight=num(inp.value); drawScores(); drawRes(); }); };
+  const drawRes=()=>{ const ranked=V.filter(v=>!v.excluded).slice().sort((a,c)=>weighted(c)-weighted(a));
+    const lo=lowest(); const lowV=V.filter(v=>!v.excluded&&evaluated(v)>0).sort((a,c)=>evaluated(a)-evaluated(c))[0];
+    const recId=$("#ev_rec").value||(ranked[0]?ranked[0].vendorId:"");
+    const recV=V.find(v=>v.vendorId===recId);
+    const nl=!!(recV&&lowV&&recV.vendorId!==lowV.vendorId);
+    $("#ev_nlWrap").style.display=nl?"":"none";
+    const bud=num($("#ev_budget").value);
+    $("#ev_res").innerHTML=`<table><tr><th class="num">Rank</th><th>Bidder</th><th class="num">Evaluated net (AED)</th><th class="num">Technical</th><th class="num">Commercial</th><th class="num">Total score</th><th>Prequalification</th></tr>
+      ${ranked.map((v,i)=>`<tr${v.vendorId===recId?` style="background:#eef4ec"`:""}><td class="num"><b>${i+1}</b></td><td><b>${esc(v.vendorName)}</b>${v.vendorId===recId?` <span class="pill" style="background:#375623;font-size:9px">RECOMMENDED</span>`:""}${evaluated(v)===lo?` <span class="pill" style="background:#2E7D32;font-size:9px">lowest</span>`:""}</td><td class="num">${fmt(evaluated(v))}</td><td class="num">${secScore(v,"technical").toFixed(1)}</td><td class="num">${secScore(v,"commercial").toFixed(1)}</td><td class="num"><b>${weighted(v).toFixed(1)}</b></td><td style="color:${prequalOk(v)?"#2E7D32":"#c00"}">${prequalOk(v)?"Qualified":"Disqualified"}</td></tr>`).join("")}
+      ${V.filter(v=>v.excluded).map(v=>`<tr style="opacity:.55"><td class="num">—</td><td>${esc(v.vendorName)}</td><td class="num">${fmt(evaluated(v))}</td><td colspan="4" class="muted">Excluded — ${esc(v.excludeReason||"non-compliant")}</td></tr>`).join("")}</table>
+      ${recV?`<div class="note" style="margin-top:8px;background:#f7f9fc"><b>Recommendation:</b> award to <b>${esc(recV.vendorName)}</b> at <b>AED ${fmt(evaluated(recV))}</b> (score ${weighted(recV).toFixed(1)}/100)${bud>0?` — ${evaluated(recV)<=bud?`<b style="color:#2E7D32">AED ${fmt(r2(bud-evaluated(recV)))} under budget</b>`:`<b style="color:#c00">AED ${fmt(r2(evaluated(recV)-bud))} over budget</b>`}`:""}${nl?` · <b style="color:#c00">not the lowest bidder — justification required</b>`:""}</div>`:""}`; };
+  ["ev_budget"].forEach(id=>$("#"+id).addEventListener("input",()=>{ drawComm(); drawRes(); }));
+  $("#ev_rec").onchange=drawRes;
+  drawPq(); drawComm(); drawScores(); drawRes();
+  const gather=()=>({ criteria:CR, budget:num($("#ev_budget").value), budgetRef:$("#ev_budgetRef").value,
+    basis:$("#ev_basis").value, openedAt:$("#ev_openedAt").value,
+    vendors:V.map(v=>({...v, scores:CR.reduce((o,c)=>{ o[c.key]=scoreOf(v,c); return o; },{})})),
+    recommendedVendorId:$("#ev_rec").value||"", notLowestJustification:$("#ev_notLowest").value,
+    recommendation:$("#ev_recom").value, conditions:$("#ev_cond").value });
+  const B=$("#ev_btns"); const ceo=ME.role==="CEO"; let h="";
+  if(!locked) h+=`<button class="btn green" id="ev_save">Save evaluation</button>`;
+  h+=`<button class="btn ghost" id="ev_print">View / Print comparison sheet</button>`;
+  if(ev.status!=="Approved"&&ceo) h+=`<button class="btn gold" id="ev_approve">Approve evaluation (CEO)</button>`;
+  if(ev.status==="Approved"&&ceo&&r.status!=="Awarded") h+=`<button class="btn ghost" id="ev_reopen">Reopen</button>`;
+  if(ev.status==="Approved"&&r.status!=="Awarded") h+=`<button class="btn" id="ev_award">Proceed to award →</button>`;
+  B.innerHTML=h;
+  const save=async ()=>{ RFQ_CUR=await api("rfq/"+r.id+"/eval",{method:"POST",body:gather()});
+    const i=RFQS.findIndex(x=>x.id===r.id); if(i>=0) RFQS[i]={...RFQS[i],eval:RFQ_CUR.eval}; return RFQ_CUR; };
+  if($("#ev_save")) $("#ev_save").onclick=async ()=>{ try{ await save(); toast("Evaluation saved"); procEvalForm(); }catch(e){ toast(e.message); } };
+  if($("#ev_print")) $("#ev_print").onclick=async ()=>{ try{ if(!locked) await save(); printEvalSheet(RFQ_CUR); }catch(e){ toast(e.message); } };
+  if($("#ev_approve")) $("#ev_approve").onclick=async ()=>{ try{ await save();
+      const rec=RFQ_CUR.eval||{}; if(!confirm(`Approve this evaluation?\n\nRecommended: ${rec.recommendedName||"—"} at AED ${fmt(rec.recommendedAmount)}\nScore: highest weighted of ${(rec.vendors||[]).filter(v=>!v.excluded).length} qualified bidder(s).\n\nOnce approved the award can be raised against this recommendation.`)) return;
+      await api("rfq/"+r.id+"/eval/status",{method:"POST",body:{action:"approve"}}); RFQ_CUR=await api("rfq/"+r.id); toast("Evaluation approved"); procEvalForm(); }catch(e){ toast(e.message); } };
+  if($("#ev_reopen")) $("#ev_reopen").onclick=async ()=>{ try{ await api("rfq/"+r.id+"/eval/status",{method:"POST",body:{action:"reopen"}}); RFQ_CUR=await api("rfq/"+r.id); procEvalForm(); }catch(e){ toast(e.message); } };
+  if($("#ev_award")) $("#ev_award").onclick=()=>{ PROC_TAB="rfqs"; rfqDetail(); };
+}
+function printEvalSheet(r){
+  const ev=r.eval||{}, V=(ev.vendors||[]), CR=(ev.criteria||[]);
+  const ent=S.entities.find(e=>e.short===r.entity)||{name:r.entityName||"MA GROUP",line2:"",line3:""};
+  const live=V.filter(v=>!v.excluded).slice().sort((a,b)=>num(b.weighted)-num(a.weighted));
+  const approved=ev.status==="Approved";
+  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:44px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const stampImg=(approved&&ASSETS.stamp)?`<img src="${ASSETS.stamp}" alt="company stamp" style="position:absolute;height:90px;opacity:.82;left:5%;top:-12px;pointer-events:none">`:"";
+  const hdr=V.map(v=>`<th style="text-align:center">${esc(v.vendorName)}</th>`).join("");
+  const rows=sec=>CR.filter(c=>c.section===sec).map(c=>`<tr><td class="lab">${esc(c.label)}</td><td style="text-align:center">${c.weight}%</td>${V.map(v=>`<td style="text-align:center">${num(v.scores?.[c.key]).toFixed(1)}</td>`).join("")}</tr>`).join("");
+  const bud=num(ev.budget);
+  const recV=V.find(v=>v.vendorId===ev.recommendedVendorId);
+  $("#printArea").innerHTML=`<div class="cert">
+   ${certLetterhead(ent)}
+   <div class="title">Supplier / Subcontractor Evaluation &amp; Comparison Sheet</div>
+   <div class="subtitle">${esc(r.project||"")}</div>
+   <table class="meta"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup>
+     <tr><td class="lab">Inquiry / RFQ No.</td><td><b>${esc(r.rfqNo)}</b></td><td class="lab">Evaluation date</td><td>${dmy(ev.updatedAt||new Date())}</td></tr>
+     <tr><td class="lab">Trade / package</td><td>${esc(r.trade||"—")}</td><td class="lab">Quotes opened</td><td>${ev.openedAt?dmy(ev.openedAt):"—"}</td></tr>
+     <tr><td class="lab">Scope</td><td colspan="3">${esc(r.scopeTitle||r.scope||"—")}</td></tr>
+     <tr><td class="lab">Basis of evaluation</td><td colspan="3">${esc(ev.basis||"Like-for-like comparison on the same scope and specification, ex-VAT")}</td></tr>
+     ${bud>0?`<tr><td class="lab">Budget / estimate</td><td class="amt">AED ${fmt(bud)}</td><td class="lab">Reference</td><td>${esc(ev.budgetRef||"—")}</td></tr>`:""}
+     <tr><td class="lab">Bidders invited / quoted</td><td>${(r.vendorIds||[]).length} invited · ${V.length} quoted</td><td class="lab">Status</td><td><b>${esc(ev.status||"Draft")}</b></td></tr>
+   </table>
+   <table><tr><td class="sec navy" colspan="${2+V.length}">1. PREQUALIFICATION (MANDATORY)</td></tr>
+     <tr><td class="lab" style="width:38%">Requirement</td><td></td>${hdr}</tr>
+     ${EVAL_PREQUAL.map(p=>`<tr><td class="lab">${esc(p.label)}</td><td></td>${V.map(v=>{const x=(v.prequal||{})[p.key];return `<td style="text-align:center;${x==="fail"?"color:#c00;font-weight:700":""}">${x==="pass"?"✓":x==="fail"?"✗":x==="na"?"N/A":"—"}</td>`;}).join("")}</tr>`).join("")}
+     <tr class="tot"><td><b>Result</b></td><td></td>${V.map(v=>`<td style="text-align:center"><b style="${v.prequalPassed===false?"color:#c00":""}">${v.prequalPassed===false?"DISQUALIFIED":"QUALIFIED"}</b></td>`).join("")}</tr></table>
+   <table><tr><td class="sec navy" colspan="${2+V.length}">2. COMMERCIAL COMPARISON (AED, EX-VAT)</td></tr>
+     <tr><td class="lab">Description</td><td></td>${hdr}</tr>
+     <tr><td class="lab">Quoted amount</td><td></td>${V.map(v=>`<td style="text-align:right">${fmt(v.quoted)}</td>`).join("")}</tr>
+     <tr><td class="lab">Less: discount</td><td></td>${V.map(v=>`<td style="text-align:right">${v.discount?"("+fmt(v.discount)+")":"—"}</td>`).join("")}</tr>
+     <tr><td class="lab">Add: adjustment for scope gaps / unpriced items</td><td></td>${V.map(v=>`<td style="text-align:right">${v.adjustment?fmt(v.adjustment):"—"}</td>`).join("")}</tr>
+     <tr class="tot"><td><b>Evaluated net</b></td><td></td>${V.map(v=>`<td style="text-align:right"><b>${fmt(v.evaluated)}</b></td>`).join("")}</tr>
+     <tr><td class="lab">Variance vs lowest</td><td></td>${V.map(v=>`<td style="text-align:right">${num(v.varianceVsLowest)>0?"+"+fmt(v.varianceVsLowest)+" ("+num(v.variancePct).toFixed(1)+"%)":"—"}</td>`).join("")}</tr>
+     <tr><td class="lab">Lead time / delivery</td><td></td>${V.map(v=>`<td style="text-align:center">${esc(v.leadTime||"—")}</td>`).join("")}</tr>
+     <tr><td class="lab">Payment terms</td><td></td>${V.map(v=>`<td style="text-align:center">${esc(v.paymentTerms||"—")}</td>`).join("")}</tr>
+     <tr><td class="lab">Validity</td><td></td>${V.map(v=>`<td style="text-align:center">${esc(v.validity||"—")}</td>`).join("")}</tr>
+     <tr><td class="lab">Qualifications / exclusions</td><td></td>${V.map(v=>`<td style="font-size:9.5px">${esc(v.qualifications||"None stated")}</td>`).join("")}</tr></table>
+   <table><tr><td class="sec navy" colspan="${2+V.length}">3. WEIGHTED SCORING (0–10 PER CRITERION)</td></tr>
+     <tr><td class="lab">Criterion</td><td style="text-align:center">Weight</td>${hdr}</tr>
+     <tr><td class="lab" colspan="${2+V.length}" style="background:#f2f4f8"><b>Commercial</b></td></tr>${rows("commercial")}
+     <tr><td class="lab" colspan="${2+V.length}" style="background:#f2f4f8"><b>Technical / capability</b></td></tr>${rows("technical")}
+     <tr><td class="lab">Commercial weighted</td><td style="text-align:center">${CR.filter(c=>c.section==="commercial").reduce((a,c)=>a+num(c.weight),0)}%</td>${V.map(v=>`<td style="text-align:center">${num(v.commercialScore).toFixed(1)}</td>`).join("")}</tr>
+     <tr><td class="lab">Technical weighted</td><td style="text-align:center">${CR.filter(c=>c.section==="technical").reduce((a,c)=>a+num(c.weight),0)}%</td>${V.map(v=>`<td style="text-align:center">${num(v.technicalScore).toFixed(1)}</td>`).join("")}</tr>
+     <tr class="tot"><td><b>TOTAL WEIGHTED SCORE</b></td><td style="text-align:center"><b>100%</b></td>${V.map(v=>`<td style="text-align:center"><b>${num(v.weighted).toFixed(1)}</b></td>`).join("")}</tr>
+     <tr><td class="lab">Ranking</td><td></td>${V.map(v=>`<td style="text-align:center">${v.excluded?"Excluded":"#"+(v.rank||"—")}</td>`).join("")}</tr></table>
+   <table><tr><td class="sec navy" colspan="2">4. RECOMMENDATION</td></tr>
+     <tr><td class="lab" style="width:38%">Recommended bidder</td><td><b>${esc(ev.recommendedName||"—")}</b></td></tr>
+     <tr><td class="lab">Recommended award value (ex-VAT)</td><td class="amt"><b>AED ${fmt(ev.recommendedAmount)}</b></td></tr>
+     ${bud>0?`<tr><td class="lab">Against budget / estimate</td><td>${num(ev.savingVsBudget)>=0?`Saving of AED ${fmt(ev.savingVsBudget)}`:`Over budget by AED ${fmt(Math.abs(num(ev.savingVsBudget)))}`}</td></tr>`:""}
+     <tr><td class="lab">Lowest evaluated bid</td><td>AED ${fmt(ev.lowestEvaluated)}${ev.notLowest?` — <b style="color:#c00">the recommended bidder is not the lowest</b>`:` — recommended bidder is the lowest compliant offer`}</td></tr>
+     ${ev.notLowest?`<tr><td class="lab">Justification (not lowest)</td><td>${esc(ev.notLowestJustification||"—")}</td></tr>`:""}
+     ${ev.recommendation?`<tr><td class="lab">Remarks</td><td style="white-space:pre-wrap">${esc(ev.recommendation)}</td></tr>`:""}
+     ${ev.conditions?`<tr><td class="lab">Conditions for the LOA / subcontract</td><td style="white-space:pre-wrap">${esc(ev.conditions)}</td></tr>`:""}</table>
+   <table><tr><td class="certify">This evaluation has been carried out on a like-for-like basis against the scope, specification and commercial terms issued with the above inquiry. Scores are awarded 0–10 per criterion and weighted as shown. The price score is derived from the lowest compliant evaluated bid. Award shall be subject to the conditions stated above and to the company's approval thresholds.</td></tr></table>
+   <div style="position:relative">${stampImg}<table class="sig"><tr>
+     <td class="nm" style="vertical-align:bottom;padding-top:6px">&nbsp;</td><td class="nm"></td><td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td></tr>
+     <tr><td>Prepared by<br>MA Group — Quantity Surveyor${ev.preparedBy?"<br><span style='font-weight:400;font-size:8px'>"+esc(ev.preparedBy)+"</span>":""}</td><td>Reviewed by<br>Project Manager</td><td>Approved by<br>Chief Executive Officer${ev.approvedBy?"<br><span style='font-weight:400;font-size:8px'>"+esc(ev.approvedBy)+" · "+dmy(ev.approvedAt)+"</span>":""}</td></tr></table></div>
+   ${certCredits()}
+   <div class="foot">MA Group Finance &nbsp;•&nbsp; Evaluation &amp; Comparison Sheet &nbsp;•&nbsp; ${esc(r.rfqNo)} &nbsp;•&nbsp; Status: ${esc(ev.status||"Draft")} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
+  </div>`;
+  doPrint();
 }
 async function openRfqFile(rfqId,idx,name){ try{ const res=await fetch("/api/rfqfile/"+rfqId+"/"+idx,{headers:TOKEN?{authorization:"Bearer "+TOKEN}:{}}); if(!res.ok)throw new Error("Download failed"); const blob=await res.blob(); const url=URL.createObjectURL(blob); const w=window.open(url,"_blank"); if(!w){const a=document.createElement("a");a.href=url;a.download=name||"file";a.click();} setTimeout(()=>URL.revokeObjectURL(url),60000); }catch(e){toast(e.message);} }
 function waNorm(n){ let d=String(n||"").replace(/[^0-9]/g,""); if(!d)return ""; if(d.startsWith("00"))d=d.slice(2); if(d.startsWith("971"))return d; if(d.startsWith("0"))return "971"+d.slice(1); if(d.length===9)return "971"+d; return d; }
