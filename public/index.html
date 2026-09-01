@@ -719,6 +719,7 @@ function certForm(c){
     <div><label>Period to</label><input id="f_periodTo" type="date" value="${esc(c.periodTo||"")}"></div>
   </div>
   <div class="note" id="supInfo" style="margin-top:8px"></div>
+  <div id="supPrev" style="margin-top:8px"></div>
   <h3 id="progH">Progress this certificate</h3><div class="grid">
     <div id="w_variations"><label>Approved variations (net, AED)</label><input id="f_variations" type="number" step="0.01" value="${c.variations??0}"></div>
     <div id="w_workPct"><label>Cumulative work done %</label><input id="f_workPct" type="number" step="0.1" value="${c.workPct!==undefined?Math.round(c.workPct*1000)/10:""}" placeholder="e.g. 45"></div>
@@ -839,7 +840,24 @@ function certForm(c){
         ?"<b>Per-invoice certification:</b> enter the <b>Invoice amount</b> — the certificate is valued at that amount (plus any materials, less retention/VAT). Use <b>Contra / back-charges only to deduct</b> money the supplier owes you; leave it 0 for a normal payment."
         :"Contract value, retention %, VAT % and <b>advance recovery</b> come from <b>this project's contract</b>, scoped to this project only.");
     if(BOQMODE) renderBoq();
+    renderPrevCerts();
     if($("#boqSetup")) $("#boqSetup").onclick=(e)=>{ e.preventDefault(); $("#w_boq").style.display=""; boqEditor(); }; };
+  // Previous certificates for this supplier on THIS project — shown so the new
+  // certificate is prepared with full visibility of what was already certified/paid.
+  const renderPrevCerts=()=>{ const host=$("#supPrev"); if(!host) return;
+    const supId=$("#f_supplierId").value, proj=$("#f_project").value;
+    const prior=(CERTS||[]).filter(x=>x&&x.supplierId===supId&&String(x.project||"")===String(proj)&&x.no!==(c&&c.no)&&x.status!=="Cancelled").sort((a,b)=>(a.seq||0)-(b.seq||0));
+    if(!prior.length){ host.innerHTML=""; return; }
+    const totNet=prior.filter(x=>x.kind!=="advance").reduce((a,x)=>a+num(x.net),0);
+    const totPay=prior.reduce((a,x)=>a+num(x.payable),0);
+    const paid=prior.filter(x=>x.status==="Paid").reduce((a,x)=>a+num(x.payable),0);
+    const advRec=prior.reduce((a,x)=>a+num(x.advanceRecovery),0);
+    host.innerHTML=`<div class="card" style="background:#f7f9fc;border:1px solid #e3e7ee;padding:12px 14px;margin:0">
+      <b style="color:var(--navy)">Previous payment certificates — this supplier · ${esc(proj)}</b>
+      <div style="overflow-x:auto"><table style="margin-top:6px"><tr><th>No.</th><th>Date</th><th>Type</th><th>Invoice(s)</th><th class="num">Net</th><th class="num">Payable (incl VAT)</th><th>Status</th></tr>
+      ${prior.map(x=>`<tr><td><b>${esc(x.no)}</b></td><td>${dmy(x.date)}</td><td>${x.kind==="advance"?'<span class="pill" style="background:#7A5C00;font-size:10px">DOWN PAYMENT</span>':"Progress"}</td><td class="muted" style="font-size:11px">${esc(x.invoiceNo||"—")}</td><td class="num">${fmt(x.net)}</td><td class="num">${fmt(x.payable)}</td><td><span class="pill st-${x.status}" style="font-size:10px">${esc(x.status)}</span></td></tr>`).join("")}
+      <tr class="tot"><td colspan="4">TOTAL previously certified (net, excl. down payment)</td><td class="num">${fmt(totNet)}</td><td class="num">${fmt(totPay)}</td><td></td></tr></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px"><b>Paid to date: AED ${fmt(paid)}</b>${advRec?` · Advance recovered so far: AED ${fmt(advRec)}`:""} — all of this is <b>considered automatically</b> in the new certificate: cumulative contracts deduct "previously certified", per-invoice certificates track each invoice's remaining balance, and advance recovery continues from where it stopped. Nothing is double-paid.</div></div>`; };
   showSup(); $("#f_supplierId").onchange=showSup; $("#f_project").onchange=showSup;
   $("#backBtn").onclick=()=>{ CUR?openCert(CUR.no):vCerts(); };
   $("#saveBtn").onclick=async ()=>{ const g=id=>$("#f_"+id).value;
@@ -1988,6 +2006,7 @@ async function clientCertForm(contractId){
      <div style="grid-column:1/-1"><label>Notes</label><input id="q_notes"></div>
    </div>
    <div id="q_buildings" style="margin-top:12px"></div>
+   <div id="q_prev" style="margin-top:12px"></div>
    <div id="q_preview" style="margin-top:12px"></div>
    <div style="height:12px"></div><div class="flex"><button class="btn green" id="q_save">Save as draft</button><button class="btn ghost" id="q_back">Back</button>
    <span class="muted" style="font-size:11px;align-self:center">Saved as a <b>Draft</b> — nothing is issued yet. Open the draft and click <b>Issue certificate</b> when it's ready.</span></div></div>`;
@@ -2027,10 +2046,30 @@ async function clientCertForm(contractId){
     const id=v.slice(2);
     try{ const c=await api("contract/"+encodeURIComponent(id)); PREV={prevNet:num(c.summary?.certifiedNet),recovered:num(c.summary?.advanceRecovered),contra:num(c.summary?.contraToDate),grossToDate:num(c.summary?.grossToDate),variationsToDate:num(c.summary?.variationsToDate),ct:c,priorPct:{}}; }
     catch(e){ PREV={prevNet:0,recovered:0,contra:0,grossToDate:0,variationsToDate:0,ct:CONTRACTS.find(x=>x.id===id),priorPct:{}}; }
-    // Prefill each building's % from the latest prior client cert for this contract.
-    try{ const all=(await api("clientcerts")).filter(x=>x&&x.contractId===id&&x.status!=="Cancelled"&&Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
-      if(all[0]) all[0].lines.forEach(l=>{ PREV.priorPct[l.ref]=num(l.pct); }); }catch(e){}
+    // Prefill each building's % from the latest prior client cert for this contract,
+    // and show the previous-certificates & payments panel.
+    let priorCC=[], receipts=[];
+    try{ priorCC=(await api("clientcerts")).filter(x=>x&&x.contractId===id&&x.status!=="Cancelled").sort((a,b)=>(a.seq||0)-(b.seq||0)); }catch(e){}
+    const withLines=priorCC.filter(x=>Array.isArray(x.lines)&&x.lines.length).sort((a,b)=>(b.seq||0)-(a.seq||0));
+    if(withLines[0]) withLines[0].lines.forEach(l=>{ PREV.priorPct[l.ref]=num(l.pct); });
+    try{ if(PREV.ct&&PREV.ct.project) receipts=await api("clientreceipts?project="+encodeURIComponent(PREV.ct.project)); }catch(e){}
+    renderPrevCC(priorCC,receipts);
     renderBuildings(); preview(); };
+  const renderPrevCC=(certs,receipts)=>{ const host=$("#q_prev"); if(!host) return;
+    certs=certs||[]; receipts=receipts||[];
+    if(!certs.length&&!receipts.length){ host.innerHTML=""; return; }
+    const totNet=certs.reduce((a,x)=>a+num(x.net),0), totPay=certs.reduce((a,x)=>a+num(x.payable),0);
+    const totRec=receipts.reduce((a,x)=>a+num(x.amount),0);
+    host.innerHTML=`<div class="card" style="background:#f7f9fc;border:1px solid #e3e7ee;padding:12px 14px;margin:0">
+      <b style="color:var(--navy)">Previous certificates &amp; payments received — ${esc((PREV.ct&&PREV.ct.project)||"")}</b>
+      ${certs.length?`<div style="overflow-x:auto"><table style="margin-top:6px"><tr><th>No.</th><th>Date</th><th class="num">Gross (cum.)</th><th class="num">Net this cert</th><th class="num">Payable (incl VAT)</th><th>Status</th></tr>
+        ${certs.map(x=>`<tr><td><b>${esc(x.no)}</b></td><td>${dmy(x.date)}</td><td class="num">${fmt(x.gross)}</td><td class="num">${fmt(x.net)}</td><td class="num">${fmt(x.payable)}</td><td><span class="pill st-${x.status}" style="font-size:10px">${esc(x.status)}</span></td></tr>`).join("")}
+        <tr class="tot"><td colspan="3">TOTAL previously certified</td><td class="num">${fmt(totNet)}</td><td class="num">${fmt(totPay)}</td><td></td></tr></table></div>`:`<div class="muted" style="margin-top:6px">No previous certificates on this contract.</div>`}
+      ${receipts.length?`<div style="margin-top:8px"><b style="font-size:12px;color:var(--navy)">Payments received from the client</b>
+        <div style="overflow-x:auto"><table style="margin-top:4px"><tr><th>Date</th><th>Ref</th><th>Type</th><th class="num">Amount (incl VAT)</th></tr>
+        ${receipts.map(rr=>`<tr><td>${dmy(rr.date)}</td><td>${esc(rr.ref||"—")}</td><td>${(rr.isAdvance||rr.type==="advance")?"Advance / down payment":rr.isRetentionRelease?"Retention release":"Progress payment"}</td><td class="num">${fmt(rr.amount)}</td></tr>`).join("")}
+        <tr class="tot"><td colspan="3">TOTAL received</td><td class="num">${fmt(totRec)}</td></tr></table></div></div>`:""}
+      <div class="muted" style="font-size:11px;margin-top:6px">All of the above is <b>considered automatically</b> in the new certificate: "Less: previously certified" deducts the prior certificates, and the advance already recovered carries forward — nothing can be certified or paid twice.</div></div>`; };
   ["q_scName","q_scSum","q_scVar","q_scRet","q_scAdv","q_scRec","q_scVat"].forEach(id=>{ const el=$("#"+id); if(!el) return; const h=()=>{ const v=$("#q_contract").value||""; if(v.startsWith("n:")){ PREV.ct=synthCt(v.slice(2)); preview(); } }; el.addEventListener("input",h); el.addEventListener("change",h); });
   const preview=()=>{ const ct=PREV.ct; if(!ct){ $("#q_preview").innerHTML=""; return; }
     LINES=liveLines();

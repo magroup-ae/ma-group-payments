@@ -16669,7 +16669,7 @@ var api_default = async (req, context) => {
   if (path === "clientcerts" && req.method === "GET") {
     const [all, clist] = await Promise.all([getAllJSON(s, "clientcert/"), listContracts()]);
     const cmap = {}; for (const c of clist) cmap[c.id] = c;
-    const out = all.map((c) => { const ct = cmap[c.contractId] || {}; return { no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status }; });
+    const out = all.map((c) => { const ct = cmap[c.contractId] || {}; return { no: c.no, key: c.key || clientCertKey(c.contractId, c.seq), seq: c.seq, date: c.date, contractId: c.contractId, project: ct.project || "", clientId: c.clientId, periodFrom: c.periodFrom, periodTo: c.periodTo, gross: c.calc?.gross, net: c.calc?.net, payable: c.calc?.payable, status: c.status, lines: Array.isArray(c.lines) ? c.lines : void 0 }; });
     out.sort((a, b) => a.no < b.no ? 1 : -1);
     return json(out);
   }
