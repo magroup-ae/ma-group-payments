@@ -2328,6 +2328,7 @@ function printClientIPC(c){
   const approved=["Issued","Approved"].includes(c.status);
   const isApproved=c.status==="Approved";
   const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:44px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const stampImg=(approved&&ASSETS.stamp)?`<img src="${ASSETS.stamp}" alt="company stamp" style="position:absolute;height:90px;opacity:.82;left:5%;top:-12px;pointer-events:none">`:"";
   const stampBox=isApproved?`<div style="position:absolute;right:6px;top:-6px"><span class="stamp-appr">APPROVED FOR PAYMENT</span></div>`:"";
   const period=(c.periodFrom||"")+(c.periodTo?" – "+esc(c.periodTo):"");
   $("#printArea").innerHTML=`<div class="cert">
@@ -2350,7 +2351,7 @@ function printClientIPC(c){
      <tr><td class="lab">Advance balance to recover</td><td class="amt">${fmt(K.advanceOutstanding)}</td><td class="lab">Retention held to date (${pct(ct.retentionPct)})</td><td class="amt">${fmt(K.retention)}</td></tr>
      <tr><td class="lab">Retention release</td><td colspan="3">${esc(ct.retentionRelease||"—")}</td></tr></table>
    <table><tr><td class="certify">We certify that the value of work properly executed to the date of valuation, after deduction of retention, advance recovery and previous certificates, amounts to the net sum stated above, and recommend the said amount for payment in accordance with the terms of the Contract.</td></tr></table>
-   <div style="position:relative">${stampBox}<table class="sig"><tr>
+   <div style="position:relative">${stampBox}${stampImg}<table class="sig"><tr>
      <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
      <tr><td>Prepared &amp; Certified by<br>MA Group — Quantity Surveyor</td><td>Reviewed by<br>Client — Project Manager</td><td>Approved by<br>Client — Authorised Signatory</td></tr></table></div>
    ${certCredits()}
