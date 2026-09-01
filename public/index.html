@@ -1989,7 +1989,8 @@ async function clientCertForm(contractId){
    </div>
    <div id="q_buildings" style="margin-top:12px"></div>
    <div id="q_preview" style="margin-top:12px"></div>
-   <div style="height:12px"></div><div class="flex"><button class="btn green" id="q_save">Create certificate</button><button class="btn ghost" id="q_back">Back</button></div></div>`;
+   <div style="height:12px"></div><div class="flex"><button class="btn green" id="q_save">Save as draft</button><button class="btn ghost" id="q_back">Back</button>
+   <span class="muted" style="font-size:11px;align-self:center">Saved as a <b>Draft</b> — nothing is issued yet. Open the draft and click <b>Issue certificate</b> when it's ready.</span></div></div>`;
   $("#q_back").onclick=()=>{VIEW="ccerts";render();};
   let PREV={prevNet:0,recovered:0,contra:0,ct:null,priorPct:{}};
   let LINES=[]; // live per-building lines when the contract has a BOQ breakdown
@@ -2086,7 +2087,7 @@ async function clientCertForm(contractId){
       }
       const body={ contractId:cid, date:g("date"), periodFrom:g("from"), periodTo:g("to"), mos:+g("mos")||0, contra:+g("contra")||0, notes:g("notes") };
       if(boqMode()) body.lines=liveLines(); else body.grossCum=+g("gross")||0;
-      const saved=await api("clientcert",{method:"POST",body}); toast("Certificate "+saved.no+" created"); openClientCert(saved.key);
+      const saved=await api("clientcert",{method:"POST",body}); toast("Draft "+saved.no+" saved — click Issue certificate when ready"); openClientCert(saved.key);
     }catch(e){ toast(e.message); } };
 }
 async function openClientCert(no){
@@ -3760,13 +3761,16 @@ function compCertForm(r){
    <div class="flex" style="gap:8px;margin-top:6px"><button class="btn ghost" id="hcAddPh" type="button">+ Upload photos</button><input id="hcPhFile" type="file" accept="image/*" multiple style="display:none"><span class="muted" id="hcPhMsg" style="font-size:11px"></span></div>`
    :`<div class="note" style="margin-top:10px">Save the draft first, then upload the report photos.</div>`}
    <div style="height:14px"></div>
-   <div class="flex" style="gap:10px">
-     ${canEdit?`<button class="btn green" id="hcSave">${isNew?"Create draft":"Save changes"}</button>`:""}
+   <div class="flex" style="gap:10px;flex-wrap:wrap">
+     ${canEdit?`<button class="btn green" id="hcSave">${isNew?"Save as draft":"Save changes"}</button>`:""}
+     ${r.id&&canEdit&&r.status==="Draft"?`<button class="btn" id="hcSubmit" style="background:var(--navy);color:#fff">Submit — mark as Issued</button>`:""}
+     ${r.id&&ME.role==="CEO"&&r.status!=="Draft"?`<button class="btn ghost" id="hcReopen">Reopen to draft 🔒</button>`:""}
      ${r.id?`<button class="btn" id="hcPrint">View / Print certificate</button>`:""}
      ${r.id?`<button class="btn" id="hcReport">View / Print report</button>`:""}
      ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (certificate + report PDF)</button>`:""}
      ${r.id&&ME.role==="CEO"?`<button class="btn red" id="hcDel">Delete</button>`:""}
-   </div></div>`;
+   </div>
+   ${r.id&&r.status==="Draft"?`<div class="muted" style="font-size:11px;margin-top:6px">This is a <b>Draft</b> — edit freely. <b>Submit</b> marks it Issued (official register); emailing it also issues it automatically.</div>`:""}</div>`;
   $("#hcBack").onclick=vCompCerts;
   // prefill pickers
   (async ()=>{ try{ if(!CONTRACTS.length) CONTRACTS=await api("contracts"); }catch(e){}
@@ -3814,7 +3818,11 @@ function compCertForm(r){
       try{ r=await api("compcert/"+r.id); }catch(e2){}
       renderPhotos(); toast("Photos uploaded"); }; }
   if($("#hcReport")) $("#hcReport").onclick=async ()=>{ try{ const html=await apiText("compcert/"+r.id+"/report"); const w=window.open("","_blank"); if(!w){ toast("Allow pop-ups to view the report"); return; } w.document.open(); w.document.write(html); w.document.close(); setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },500); }catch(e){ toast(e.message); } };
-  if($("#hcSave")) $("#hcSave").onclick=async ()=>{ try{ const saved=await api("compcert",{method:"POST",body:gather()}); toast(saved.docNo+" saved"); compCertForm(saved); }catch(e){ toast(e.message); } };
+  if($("#hcSave")) $("#hcSave").onclick=async ()=>{ try{ const saved=await api("compcert",{method:"POST",body:gather()}); toast(saved.docNo+" saved"+(saved.status==="Draft"?" as draft":"")); compCertForm(saved); }catch(e){ toast(e.message); } };
+  if($("#hcSubmit")) $("#hcSubmit").onclick=async ()=>{ if(!confirm("Submit "+(r.docNo||"this certificate")+" and mark it as ISSUED? It becomes part of the official register."))return;
+    try{ const saved=await api("compcert",{method:"POST",body:{...gather(),status:"Issued"}}); toast(saved.docNo+" issued"); compCertForm(saved); }catch(e){ toast(e.message); } };
+  if($("#hcReopen")) $("#hcReopen").onclick=async ()=>{ if(!confirm("Reopen "+(r.docNo||"this certificate")+" to Draft for editing?"))return;
+    try{ const saved=await api("compcert",{method:"POST",body:{...gather(),status:"Draft"}}); toast(saved.docNo+" reopened to draft"); compCertForm(saved); }catch(e){ toast(e.message); } };
   if($("#hcPrint")) $("#hcPrint").onclick=()=>openCompCertDoc(r.id,true);
   if($("#hcDel")) $("#hcDel").onclick=async ()=>{ if(!confirm("Delete "+r.docNo+"? This cannot be undone."))return; try{ await api("compcert/"+r.id,{method:"DELETE"}); toast("Deleted"); vCompCerts(); }catch(e){ toast(e.message); } };
   if($("#hcSend")) $("#hcSend").onclick=async ()=>{ const to=($("#hc_partyEmail").value||"").trim();
