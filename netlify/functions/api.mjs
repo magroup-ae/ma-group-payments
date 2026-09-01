@@ -16781,6 +16781,120 @@ var api_default = async (req, context) => {
     await s.delete("clientreceipt/" + decodeURIComponent(crDel[1]));
     return json({ ok: true });
   }
+  /* ---------- Variation Orders (client-side) ----------
+     Lifecycle: Draft → Submitted (to client) → Approved / Rejected.
+     Approval RECORDS the client's approval; a separate CEO-only "apply" step adds
+     the VO value to the contract's Approved Variations (revised contract sum) and
+     appends a variation line to the by-building BOQ — auditable, never automatic. */
+  if (path === "vos" && req.method === "GET") {
+    const [all, clist] = await Promise.all([getAllJSON(s, "vo/"), listContracts()]);
+    const cmap = {}; for (const c of clist) cmap[c.id] = c;
+    const out = all.map((v) => ({ ...v, project: v.project || cmap[v.contractId]?.project || "" }));
+    out.sort((a, b) => a.no < b.no ? 1 : -1);
+    return json(out);
+  }
+  if (path === "vo" && req.method === "POST") {
+    if (!can("clientcert")) return err("No rights to record variations", 403);
+    const b = await req.json();
+    if (!b.contractId) return err("Choose the contract / project");
+    const contract = await s.get("contract/" + b.contractId, { type: "json" });
+    if (!contract) return err("Contract not found");
+    const client = await s.get("client/" + contract.clientId, { type: "json" });
+    let ex = null, key = b.key ? String(b.key) : "";
+    if (key) {
+      ex = await s.get("vo/" + key, { type: "json" }); if (!ex) return err("Variation not found", 404);
+      if (ex.status === "Approved" && !can("admin")) return err("Locked after approval", 403);
+      if (ex.appliedToContract) return err("Already applied to the contract — record a further VO instead of editing this one");
+    }
+    let seq = ex?.seq;
+    if (!ex) {
+      const all = (await getAllJSON(s, "vo/")).filter((v) => v && v.contractId === contract.id);
+      seq = all.reduce((a, v) => Math.max(a, v.seq || 0), 0) + 1;
+      key = contract.id + "-V" + String(seq).padStart(3, "0");
+      let guard = 0; while (await s.get("vo/" + key) && guard++ < 200) { seq++; key = contract.id + "-V" + String(seq).padStart(3, "0"); }
+    }
+    const lines = Array.isArray(b.lines) ? b.lines.filter((l) => l && (String(l.description || "").trim() || num(l.qty) || num(l.rate))).map((l) => ({ description: String(l.description || ""), unit: String(l.unit || ""), qty: num(l.qty), rate: num(l.rate), amount: r2(num(l.qty) * num(l.rate)) })) : [];
+    const amount = lines.length ? r2(lines.reduce((a, l) => a + l.amount, 0)) : num(b.amount);
+    if (!(amount > 0)) return err("Enter the variation amount (or measured lines)");
+    const title = String(b.title ?? ex?.title ?? "").trim();
+    if (!title) return err("Enter the variation title / subject");
+    const yr = String(b.date || now()).slice(2, 4);
+    const first = String(client?.name || "CLIENT").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase() || "CLIENT";
+    const proj = (String(contract.projShort || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase() || String(contract.project || "PRJ").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3)).slice(0, 3).padEnd(3, "X");
+    const rec = {
+      key, seq, no: ex?.no || `VO/MA${yr}/${first}/${proj}/${String(seq).padStart(3, "0")}`,
+      contractId: contract.id, clientId: contract.clientId, project: contract.project || "",
+      title, type: b.type === "omission" ? "omission" : "addition",
+      instructionRef: String(b.instructionRef ?? ex?.instructionRef ?? ""),
+      description: String(b.description ?? ex?.description ?? ""),
+      lines, amount,
+      date: String(b.date || ex?.date || now().slice(0, 10)).slice(0, 10),
+      dateInstructed: String(b.dateInstructed ?? ex?.dateInstructed ?? "").slice(0, 10),
+      certNo: String(b.certNo ?? ex?.certNo ?? ""), proformaRef: String(b.proformaRef ?? ex?.proformaRef ?? ""),
+      otherLinks: String(b.otherLinks ?? ex?.otherLinks ?? ""),
+      clientApprovalRef: String(b.clientApprovalRef ?? ex?.clientApprovalRef ?? ""),
+      notes: String(b.notes ?? ex?.notes ?? ""),
+      status: ex?.status || "Draft",
+      submittedAt: ex?.submittedAt || "", approvedAt: ex?.approvedAt || "", approvedBy: ex?.approvedBy || "",
+      appliedToContract: ex?.appliedToContract || false, appliedAt: ex?.appliedAt || "",
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedBy: me.name, updatedAt: now(),
+      audit: [...(ex?.audit || []), { at: now(), by: me.name, action: ex ? "Updated" : "Created (Draft)" }]
+    };
+    await s.setJSON("vo/" + key, rec);
+    return json(rec);
+  }
+  const voStat = path.match(/^vo\/([^/]+)\/status$/);
+  if (voStat && req.method === "POST") {
+    const v = await s.get("vo/" + decodeURIComponent(voStat[1]), { type: "json" });
+    if (!v) return err("Not found", 404);
+    const b = await req.json(); const a = String(b.action || "");
+    if (a === "submit") { if (!can("clientcert")) return err("Not permitted", 403); if (!["Draft", "Rejected"].includes(v.status)) return err("Only a draft can be submitted"); v.status = "Submitted"; v.submittedAt = now(); }
+    else if (a === "approve") { if (!can("admin")) return err("CEO only", 403); if (!["Submitted", "Draft"].includes(v.status)) return err("Already " + v.status); v.status = "Approved"; v.approvedAt = now(); v.approvedBy = me.name; if (b.clientApprovalRef !== void 0) v.clientApprovalRef = String(b.clientApprovalRef || ""); }
+    else if (a === "reject") { if (!can("admin")) return err("CEO only", 403); if (v.appliedToContract) return err("Already applied to the contract"); v.status = "Rejected"; }
+    else if (a === "reopen") { if (!can("admin")) return err("CEO only", 403); if (v.appliedToContract) return err("Already applied to the contract — adjust with a new omission VO instead"); v.status = "Draft"; }
+    else return err("Unknown action");
+    v.audit = [...(v.audit || []), { at: now(), by: me.name, action: "Status → " + v.status }];
+    v.updatedAt = now(); v.updatedBy = me.name;
+    await s.setJSON("vo/" + v.key, v);
+    return json(v);
+  }
+  const voApply = path.match(/^vo\/([^/]+)\/apply$/);
+  if (voApply && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const v = await s.get("vo/" + decodeURIComponent(voApply[1]), { type: "json" });
+    if (!v) return err("Not found", 404);
+    if (v.status !== "Approved") return err("Only an APPROVED variation can be applied to the contract");
+    if (v.appliedToContract) return err("Already applied to the contract");
+    const ct = await s.get("contract/" + v.contractId, { type: "json" });
+    if (!ct) return err("Contract not found", 404);
+    const delta = v.type === "omission" ? -num(v.amount) : num(v.amount);
+    ct.variations = r2(num(ct.variations) + delta);
+    if (Array.isArray(ct.boq) && ct.boq.length) {
+      ct.boq.push({ ref: "V" + v.seq, name: `VO ${v.no} — ${v.title}`, value: delta, isVariation: true, remarks: "VO applied " + now().slice(0, 10) });
+    }
+    ct.updatedAt = now();
+    await s.setJSON("contract/" + ct.id, ct);
+    v.appliedToContract = true; v.appliedAt = now();
+    v.audit = [...(v.audit || []), { at: now(), by: me.name, action: `Applied to contract — Approved Variations ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}; revised contract sum updated` }];
+    v.updatedAt = now(); v.updatedBy = me.name;
+    await s.setJSON("vo/" + v.key, v);
+    return json({ ok: true, vo: v, contract: ct });
+  }
+  const voOne = path.match(/^vo\/([^/]+)$/);
+  if (voOne && req.method === "GET") {
+    const v = await s.get("vo/" + decodeURIComponent(voOne[1]), { type: "json" });
+    if (!v) return err("Not found", 404);
+    const contract = await s.get("contract/" + v.contractId, { type: "json" });
+    const client = contract ? await s.get("client/" + contract.clientId, { type: "json" }) : null;
+    return json({ ...v, contract, client });
+  }
+  if (voOne && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    const v = await s.get("vo/" + decodeURIComponent(voOne[1]), { type: "json" });
+    if (v && v.appliedToContract) return err("Applied to the contract — cannot delete; record an omission VO instead");
+    await s.delete("vo/" + decodeURIComponent(voOne[1]));
+    return json({ ok: true });
+  }
   if (path === "treasury" && req.method === "GET") {
     if (!can("pnl") && !can("pay")) return err("Not permitted", 403);
     return json(await computeTreasury(s));

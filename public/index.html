@@ -37,6 +37,7 @@
   .pill { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; color:#fff; }
   .st-Draft{background:#8a8a8a}.st-Certified{background:var(--blue)}.st-Checked{background:var(--gold)}
   .st-Approved{background:var(--green)}.st-Paid{background:var(--navy)}.st-Cancelled{background:var(--red)}
+  .st-Submitted{background:var(--blue)}.st-Rejected{background:var(--red)}.st-Issued{background:var(--blue)}
   .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
   .kpi { background:#fff; border-radius:10px; padding:14px; box-shadow:0 1px 4px rgba(0,0,0,.08); border-top:4px solid var(--gold); }
   .kpi .v { font-size:20px; font-weight:800; color:var(--navy); }
@@ -362,7 +363,7 @@ async function unlockSettings(){
 }
 function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
-  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
+  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["vos","Variations"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
   if(["CEO","PM","QS","Accounts"].includes(ME.role)) tabs.push(["bank","Bank"]);
   if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["procure","Procurement"]);
   if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["awards","Contracts / LOA"]);
@@ -380,7 +381,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -2032,6 +2033,165 @@ async function vClientCerts(){
   $("#ccList").innerHTML=`<table><tr><th>No.</th><th>Date</th><th>Project</th><th>Period</th><th class="num">Net due</th><th class="num">Payable</th><th>Status</th></tr>
     ${list.map(c=>`<tr class="click" data-cc="${esc(c.key||c.no)}"><td><b>${esc(c.no)}</b></td><td>${dmy(c.date)}</td><td>${esc(cmap[c.contractId]?.project||"")}</td><td>${esc(c.periodFrom||"")}${c.periodTo?" – "+esc(c.periodTo):""}</td><td class="num">${fmt(c.net)}</td><td class="num">${fmt(c.payable)}</td><td><span class="pill st-${c.status}">${c.status}</span></td></tr>`).join("")}</table>`;
   $("#ccList").querySelectorAll("[data-cc]").forEach(r=>r.onclick=()=>openClientCert(r.dataset.cc));
+}
+/* ---------- Variation Orders (client-side) ---------- */
+async function vVos(){
+  const canDo=["CEO","PM","QS"].includes(ME.role);
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Variation Orders</h2>
+    ${projFilterHtml()}
+    <span class="muted">client-side variations — issue, submit, record approval, then apply to the contract value</span>
+    <div class="right flex">${canDo?`<button class="btn gold" id="newVo">+ New variation</button>`:""}</div></div>
+    <div style="height:8px"></div><div id="voList" class="muted">Loading…</div></div>`;
+  bindProjFilter(vVos);
+  let list; try{ [list,CONTRACTS]=await Promise.all([api("vos"),api("contracts")]); }catch(e){ $("#voList").textContent=e.message; return; }
+  if(canDo) $("#newVo").onclick=()=>voForm(null);
+  list=list.filter(v=>projMatch(v.project));
+  if(!list.length){ $("#voList").innerHTML=`<div class="muted">No variation orders${PROJ_FILTER?" for "+esc(PROJ_FILTER):""} yet. A VO records extra / omitted works instructed by the client: draft it, submit it, record the client's approval, then apply it to the contract value so IPCs pick it up.</div>`; return; }
+  const sgn=v=>v.type==="omission"?-num(v.amount):num(v.amount);
+  const tApproved=list.filter(v=>v.status==="Approved").reduce((a,v)=>a+sgn(v),0);
+  const tPending=list.filter(v=>["Draft","Submitted"].includes(v.status)).reduce((a,v)=>a+sgn(v),0);
+  const tApplied=list.filter(v=>v.appliedToContract).reduce((a,v)=>a+sgn(v),0);
+  $("#voList").classList.remove("muted");
+  $("#voList").innerHTML=`
+    <div class="flex" style="gap:18px;margin-bottom:8px;font-size:12px">
+      <span><b style="color:var(--green)">Approved:</b> AED ${fmt(tApproved)}</span>
+      <span><b>Applied to contracts:</b> AED ${fmt(tApplied)}</span>
+      <span><b style="color:#b45309">Draft / with client:</b> AED ${fmt(tPending)}</span></div>
+    <table><tr><th>VO No.</th><th>Date</th><th>Project</th><th>Title</th><th>Type</th><th class="num">Value (ex-VAT)</th><th>Linked IPC</th><th>Status</th></tr>
+    ${list.map(v=>`<tr class="click" data-vo="${esc(v.key)}"><td><b>${esc(v.no)}</b></td><td>${dmy(v.date)}</td><td>${esc(v.project)}</td><td>${esc(v.title)}</td><td>${v.type==="omission"?`<span style="color:#c00">Omission</span>`:"Addition"}</td><td class="num">${v.type==="omission"?"− ":""}${fmt(v.amount)}</td><td style="font-size:11px">${esc(v.certNo||"—")}</td><td><span class="pill st-${esc(v.status)}">${esc(v.status)}</span>${v.appliedToContract?` <span class="pill" style="background:var(--navy);font-size:9px">APPLIED</span>`:""}</td></tr>`).join("")}</table>`;
+  $("#voList").querySelectorAll("[data-vo]").forEach(r=>r.onclick=()=>voForm(r.dataset.vo));
+}
+async function voForm(key){
+  let v=null;
+  try{ CONTRACTS=await api("contracts"); if(key) v=await api("vo/"+encodeURIComponent(key)); }catch(e){ toast(e.message); return; }
+  const isNew=!v; v=v||{status:"Draft",type:"addition",lines:[],date:new Date().toISOString().slice(0,10)};
+  const locked=v.status==="Approved"&&ME.role!=="CEO" || v.appliedToContract;
+  const ctOpt=CONTRACTS.map(c=>`<option value="${esc(c.id)}" ${v.contractId===c.id||(!v.contractId&&PROJ_FILTER&&c.project===PROJ_FILTER)?"selected":""}>${esc(c.project||c.id)} — ${esc(c.clientName||"")}</option>`).join("");
+  $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${isNew?"New variation order":esc(v.no)}</h2>
+    ${isNew?"":`<span class="pill st-${esc(v.status)}">${esc(v.status)}</span>${v.appliedToContract?` <span class="pill" style="background:var(--navy)">APPLIED TO CONTRACT</span>`:""}`}
+    <button class="btn ghost right" id="voBack">Back</button></div>
+   ${isNew?`<div class="note">A VO records works <b>added to or omitted from</b> the contract on the client's instruction. Flow: <b>Draft → Submit to client → record client approval → Apply to contract</b> (CEO) — applying adds the value to the Approved Variations / revised contract sum and to the by-building BOQ, so the next client IPC picks it up automatically.</div>`:""}
+   <div class="grid" style="margin-top:10px">
+     <div style="grid-column:1/-1"><label>Project / contract</label><select id="vo_contract" ${isNew?"":"disabled"}><option value="">— choose —</option>${ctOpt}</select></div>
+     <div><label>VO date</label><input type="date" id="vo_date" value="${esc(v.date||"")}"></div>
+     <div><label>Client instruction date</label><input type="date" id="vo_dateInstructed" value="${esc(v.dateInstructed||"")}"></div>
+     <div><label>Type</label><select id="vo_type"><option value="addition" ${v.type!=="omission"?"selected":""}>Addition (+)</option><option value="omission" ${v.type==="omission"?"selected":""}>Omission (−)</option></select></div>
+     <div><label>Client instruction / SI / RFI ref</label><input id="vo_instructionRef" value="${esc(v.instructionRef||"")}" placeholder="e.g. SI-014 / email dated …"></div>
+     <div style="grid-column:1/-1"><label>Title / subject</label><input id="vo_title" value="${esc(v.title||"")}" placeholder="e.g. Additional firefighting works to Kids Play Area"></div>
+     <div style="grid-column:1/-1"><label>Scope description</label><textarea id="vo_description" rows="3" placeholder="Describe the varied works, the reason, and the basis of pricing (contract rates / star rates / lump sum)">${esc(v.description||"")}</textarea></div>
+   </div>
+   <div style="margin-top:10px"><b style="color:var(--navy)">Measured breakdown (optional)</b> <span class="muted" style="font-size:11px">— add lines for a measured VO; leave empty for a lump sum</span>
+     <div id="voLines"></div>
+     <button class="btn ghost" id="voAddLn" style="margin-top:6px">+ Add line</button></div>
+   <div class="grid" style="margin-top:10px">
+     <div><label>VO value (ex-VAT, AED)</label><input type="number" step="0.01" id="vo_amount" value="${v.amount||""}"></div>
+     <div><label>Client approval ref <span class="muted">(when approved)</span></label><input id="vo_clientApprovalRef" value="${esc(v.clientApprovalRef||"")}" placeholder="approval letter / signed VO ref"></div>
+   </div>
+   <div style="margin-top:10px"><b style="color:var(--navy)">Links</b>
+   <div class="grid" style="margin-top:6px">
+     <div><label>Certified under client IPC</label><select id="vo_certNo"><option value="">— not yet certified —</option></select></div>
+     <div><label>Proforma / tax invoice ref</label><input id="vo_proformaRef" value="${esc(v.proformaRef||"")}" placeholder="e.g. MAG/TAX/010/00xxx"></div>
+     <div style="grid-column:1/-1"><label>Other references <span class="muted">(drawings, minutes, correspondence)</span></label><input id="vo_otherLinks" value="${esc(v.otherLinks||"")}"></div>
+     <div style="grid-column:1/-1"><label>Internal notes</label><input id="vo_notes" value="${esc(v.notes||"")}"></div>
+   </div></div>
+   <div style="height:14px"></div>
+   <div class="flex" style="gap:8px;flex-wrap:wrap" id="voBtns"></div>
+   ${v.appliedToContract?`<div class="note" style="margin-top:8px">Applied to the contract on ${dmy(v.appliedAt)} — the Approved Variations / revised contract sum and the by-building BOQ already include this VO. It is locked; further changes need a new VO.</div>`:""}
+  </div>`;
+  $("#voBack").onclick=()=>{VIEW="vos";render();};
+  // measured lines editor
+  const LN=(v.lines||[]).map(l=>({...l}));
+  const drawLines=()=>{ const host=$("#voLines");
+    if(!LN.length){ host.innerHTML=""; recalcVo(); return; }
+    host.innerHTML=`<table style="margin-top:6px"><tr><th>Description</th><th style="width:70px">Unit</th><th style="width:90px">Qty</th><th style="width:110px">Rate</th><th class="num" style="width:120px">Amount</th><th style="width:30px"></th></tr>
+      ${LN.map((l,i)=>`<tr><td><input data-i="${i}" data-f="description" value="${esc(l.description||"")}"></td><td><input data-i="${i}" data-f="unit" value="${esc(l.unit||"")}"></td><td><input type="number" step="0.01" data-i="${i}" data-f="qty" value="${l.qty||""}"></td><td><input type="number" step="0.01" data-i="${i}" data-f="rate" value="${l.rate||""}"></td><td class="num">${fmt(r2(num(l.qty)*num(l.rate)))}</td><td><a href="#" data-rm="${i}" style="color:#c00">✕</a></td></tr>`).join("")}</table>`;
+    host.querySelectorAll("input[data-i]").forEach(inp=>inp.onchange=()=>{ LN[+inp.dataset.i][inp.dataset.f]=inp.dataset.f==="qty"||inp.dataset.f==="rate"?num(inp.value):inp.value; drawLines(); });
+    host.querySelectorAll("[data-rm]").forEach(a=>a.onclick=(e)=>{ e.preventDefault(); LN.splice(+a.dataset.rm,1); drawLines(); });
+    recalcVo(); };
+  const recalcVo=()=>{ if(LN.length){ const t=r2(LN.reduce((a,l)=>a+r2(num(l.qty)*num(l.rate)),0)); $("#vo_amount").value=t; $("#vo_amount").readOnly=true; } else $("#vo_amount").readOnly=false; };
+  $("#voAddLn").onclick=(e)=>{ e.preventDefault(); LN.push({description:"",unit:"",qty:0,rate:0}); drawLines(); };
+  drawLines();
+  // linked client IPC dropdown follows the chosen contract
+  const loadCerts=async ()=>{ const id=$("#vo_contract").value; const sel=$("#vo_certNo");
+    sel.innerHTML=`<option value="">— not yet certified —</option>`;
+    if(!id) return;
+    try{ const cc=(await api("clientcerts")).filter(x=>x.contractId===id&&x.status!=="Cancelled");
+      sel.innerHTML+=cc.map(x=>`<option ${v.certNo===x.no?"selected":""}>${esc(x.no)}</option>`).join(""); }catch(e){}
+  };
+  $("#vo_contract").onchange=loadCerts; loadCerts();
+  const gather=()=>({ key:v.key, contractId:$("#vo_contract").value, date:$("#vo_date").value, dateInstructed:$("#vo_dateInstructed").value,
+    type:$("#vo_type").value, instructionRef:$("#vo_instructionRef").value, title:$("#vo_title").value, description:$("#vo_description").value,
+    lines:LN, amount:num($("#vo_amount").value), clientApprovalRef:$("#vo_clientApprovalRef").value,
+    certNo:$("#vo_certNo").value, proformaRef:$("#vo_proformaRef").value, otherLinks:$("#vo_otherLinks").value, notes:$("#vo_notes").value });
+  const save=async (then)=>{ try{ const r=await api("vo",{method:"POST",body:gather()}); toast((isNew?"Variation "+r.no+" saved":"Saved")); if(then) await then(r); else voForm(r.key); }catch(e){ toast(e.message); } };
+  const act=async (key2,action,extra)=>{ try{ await api("vo/"+encodeURIComponent(key2)+"/status",{method:"POST",body:{action,...(extra||{})}}); voForm(key2); }catch(e){ toast(e.message); } };
+  const B=$("#voBtns"); const ceo=ME.role==="CEO"; let bh="";
+  if(!locked) bh+=`<button class="btn green" id="voSave">${isNew?"Save as draft":"Save changes"}</button>`;
+  if(!isNew&&["Draft","Rejected"].includes(v.status)) bh+=`<button class="btn gold" id="voSubmit">Submit to client</button>`;
+  if(!isNew&&v.status==="Submitted"&&ceo) bh+=`<button class="btn green" id="voApprove">Record client approval</button><button class="btn" style="background:#c0392b;color:#fff" id="voReject">Rejected by client</button>`;
+  if(!isNew&&v.status==="Approved"&&!v.appliedToContract&&ceo) bh+=`<button class="btn" id="voApply">Apply to contract value</button>`;
+  if(!isNew&&["Rejected","Submitted","Approved"].includes(v.status)&&ceo&&!v.appliedToContract) bh+=`<button class="btn ghost" id="voReopen">Reopen to draft</button>`;
+  if(!isNew) bh+=`<button class="btn ghost" id="voPrint">View / Print VO</button>`;
+  if(!isNew&&ceo&&!v.appliedToContract) bh+=`<button class="btn ghost" id="voDel" style="color:#c00">Delete</button>`;
+  B.innerHTML=bh;
+  if($("#voSave")) $("#voSave").onclick=()=>save();
+  if($("#voSubmit")) $("#voSubmit").onclick=()=>{ if(confirm("Mark this VO as SUBMITTED to the client? (save any edits first with Save changes)")) act(v.key,"submit"); };
+  if($("#voApprove")) $("#voApprove").onclick=()=>{ const ref=prompt("Client approval reference (letter / signed VO / email):",v.clientApprovalRef||""); if(ref===null) return; act(v.key,"approve",{clientApprovalRef:ref}); };
+  if($("#voReject")) $("#voReject").onclick=()=>{ if(confirm("Mark as REJECTED by the client?")) act(v.key,"reject"); };
+  if($("#voReopen")) $("#voReopen").onclick=()=>act(v.key,"reopen");
+  if($("#voApply")) $("#voApply").onclick=()=>{ const ct=CONTRACTS.find(c=>c.id===v.contractId)||{};
+    const delta=v.type==="omission"?-num(v.amount):num(v.amount);
+    const revised=r2(num(ct.contractSum)+num(ct.variations)+delta);
+    if(!confirm(`Apply ${v.no} to the contract?\n\nApproved Variations: ${fmt(ct.variations)} → ${fmt(r2(num(ct.variations)+delta))}\nRevised contract sum: ${fmt(revised)}\nA variation line is also added to the by-building BOQ.\n\nThis cannot be undone (a correction needs a new omission VO).`)) return;
+    api("vo/"+encodeURIComponent(v.key)+"/apply",{method:"POST"}).then(()=>{ toast("Applied — contract value updated"); voForm(v.key); }).catch(e=>toast(e.message)); };
+  if($("#voPrint")) $("#voPrint").onclick=()=>printVo(v);
+  if($("#voDel")) $("#voDel").onclick=async ()=>{ if(!confirm("Delete this variation order?")) return; try{ await api("vo/"+encodeURIComponent(v.key),{method:"DELETE"}); toast("Deleted"); VIEW="vos"; render(); }catch(e){ toast(e.message); } };
+}
+function printVo(v){
+  const ct=v.contract||CONTRACTS.find(c=>c.id===v.contractId)||{}, cl=v.client||{};
+  const ent=S.entities.find(e=>e.short===ct.entity)||{name:"MA GROUP",line2:"",line3:""};
+  const approved=v.status==="Approved";
+  const delta=v.type==="omission"?-num(v.amount):num(v.amount);
+  const priorVar=v.appliedToContract?r2(num(ct.variations)-delta):num(ct.variations);
+  const newVar=r2(priorVar+delta), revised=r2(num(ct.contractSum)+newVar);
+  const signImg=(approved&&ASSETS.sign)?`<img src="${ASSETS.sign}" style="height:44px;max-width:150px;object-fit:contain">`:"&nbsp;";
+  const stampImg=(approved&&ASSETS.stamp)?`<img src="${ASSETS.stamp}" alt="company stamp" style="position:absolute;height:90px;opacity:.82;left:5%;top:-12px;pointer-events:none">`:"";
+  const lnRows=(v.lines&&v.lines.length)?`<table><tr><td class="sec navy" colspan="5">MEASURED BREAKDOWN (AED)</td></tr>
+    <tr><td class="lab">Description</td><td>Unit</td><td style="text-align:right">Qty</td><td style="text-align:right">Rate</td><td style="text-align:right">Amount</td></tr>
+    ${v.lines.map(l=>`<tr><td>${esc(l.description)}</td><td>${esc(l.unit)}</td><td style="text-align:right">${fmt(l.qty)}</td><td style="text-align:right">${fmt(l.rate)}</td><td style="text-align:right">${fmt(l.amount)}</td></tr>`).join("")}
+    <tr class="tot"><td colspan="4"><b>TOTAL (ex-VAT)</b></td><td style="text-align:right"><b>${fmt(v.amount)}</b></td></tr></table>`:"";
+  $("#printArea").innerHTML=`<div class="cert">
+   ${certLetterhead(ent)}
+   <div class="title">Variation Order</div>
+   <div class="subtitle">${esc(ct.project||v.project||"")}</div>
+   <table class="meta"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup>
+     <tr><td class="lab">VO No.</td><td><b>${esc(v.no)}</b></td><td class="lab">VO Date</td><td>${dmy(v.date)}</td></tr>
+     <tr><td class="lab">Employer / Client</td><td colspan="3"><b>${esc(ct.mainContractor||cl.name||"")}</b></td></tr>
+     <tr><td class="lab">Contract Ref.</td><td>${esc(ct.subcontractRef||"—")}</td><td class="lab">Type</td><td><b style="${v.type==="omission"?"color:#c00":""}">${v.type==="omission"?"OMISSION (−)":"ADDITION (+)"}</b></td></tr>
+     <tr><td class="lab">Client instruction ref</td><td>${esc(v.instructionRef||"—")}</td><td class="lab">Instruction date</td><td>${v.dateInstructed?dmy(v.dateInstructed):"—"}</td></tr>
+     <tr><td class="lab">Status</td><td><b>${esc(v.status)}</b>${v.appliedToContract?" — applied to contract sum":""}</td><td class="lab">Client approval ref</td><td>${esc(v.clientApprovalRef||"—")}</td></tr>
+   </table>
+   <table><tr><td class="sec navy">SUBJECT &amp; SCOPE OF VARIATION</td></tr>
+     <tr><td><b>${esc(v.title)}</b>${v.description?`<div style="margin-top:5px;white-space:pre-wrap">${esc(v.description)}</div>`:""}</td></tr></table>
+   ${lnRows}
+   <table><tr><td class="sec navy" colspan="2">EFFECT ON CONTRACT VALUE (AED, ex-VAT)</td></tr>
+     <tr><td class="lab">Original contract sum</td><td style="text-align:right">${fmt(ct.contractSum)}</td></tr>
+     <tr><td class="lab">Approved variations (before this VO)</td><td style="text-align:right">${fmt(priorVar)}</td></tr>
+     <tr><td class="lab"><b>This variation — ${v.type==="omission"?"omission":"addition"}</b></td><td style="text-align:right"><b>${delta<0?"− ":""}${fmt(Math.abs(delta))}</b></td></tr>
+     <tr class="tot"><td><b>Revised contract sum${approved?"":" (subject to client approval)"}</b></td><td style="text-align:right"><b>${fmt(revised)}</b></td></tr>
+     <tr><td class="lab" style="font-style:italic">In words</td><td style="font-style:italic">${esc(words(Math.abs(delta)))} (this variation, ex-VAT)</td></tr></table>
+   <table><tr><td class="sec navy" colspan="2">LINKED RECORDS</td></tr>
+     <tr><td class="lab">Certified under client IPC</td><td>${esc(v.certNo||"Not yet certified — will be included in a forthcoming IPC")}</td></tr>
+     <tr><td class="lab">Proforma / tax invoice</td><td>${esc(v.proformaRef||"—")}</td></tr>
+     <tr><td class="lab">Other references</td><td>${esc(v.otherLinks||"—")}</td></tr></table>
+   <table><tr><td class="certify">This Variation Order is issued pursuant to the Contract. The varied works shall be valued as set out above and, once approved, shall be added to / omitted from the Contract Sum and certified through the interim payment certificates. VAT at the prevailing rate applies at the point of certification / invoicing. All other terms and conditions of the Contract remain unchanged.</td></tr></table>
+   <div style="position:relative">${stampImg}<table class="sig"><tr>
+     <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
+     <tr><td>Prepared &amp; Submitted by<br>MA Group — Quantity Surveyor</td><td>Reviewed by<br>Client — Project Manager</td><td>Approved by<br>Client — Authorised Signatory</td></tr></table></div>
+   ${certCredits()}
+   <div class="foot">MA Group Finance &nbsp;•&nbsp; Variation Order &nbsp;•&nbsp; ${esc(v.no)} &nbsp;•&nbsp; Status: ${esc(v.status)}${v.approvedBy?" (recorded by "+esc(v.approvedBy)+" on "+dmy(v.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
+  </div>`;
+  doPrint();
 }
 function importProjectJson(){
   const inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
