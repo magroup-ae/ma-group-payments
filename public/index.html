@@ -1181,9 +1181,24 @@ function doPrint(){
      @page { size:A4; margin:0; }
      html,body { margin:0; padding:0; background:#fff; }
      #printArea { display:block !important; position:static; }
-     #printArea .cert { width:210mm; max-width:none; margin:0 auto; padding:12mm 12mm; box-sizing:border-box; }
+     #printArea .cert { width:210mm; max-width:none; margin:0 auto; padding:0 12mm; box-sizing:border-box; }
      #printArea .pagebreak { page-break-before:always; height:0; }
-   </style></head><body class="printing-cert"><div id="printArea">${inner}</div></body></html>`;
+     /* Professional multi-page flow: the per-page top/bottom margin comes from the
+        repeating thead/tfoot spacers of the wrapper table (they print on EVERY page,
+        so page 2+ never starts as a cut-off strip at the paper edge). */
+     table.pgwrap { width:100%; border-collapse:collapse; page-break-inside:auto; }
+     table.pgwrap > thead td, table.pgwrap > tfoot td { height:11mm; padding:0; border:0; }
+     table.pgwrap > tbody > tr > td { padding:0; border:0; vertical-align:top; }
+     /* A certificate longer than one page is ALLOWED to break — but only cleanly:
+        never inside a section table, a signature block or a table row. Breaks fall
+        between sections, so page 2 opens with a complete section, not a sliced one. */
+     body.printing-cert #printArea .cert { page-break-inside:auto; break-inside:auto; }
+     #printArea .cert > table, #printArea .cert .amtbox, #printArea .cert .attnote,
+     #printArea .cert .hd, #printArea .cert .title, #printArea .cert .subtitle,
+     #printArea .cert .sig, #printArea .cert .foot { page-break-inside:avoid; break-inside:avoid; }
+     #printArea .cert tr { page-break-inside:avoid; break-inside:avoid; }
+     #printArea .cert .sec { page-break-after:avoid; break-after:avoid; }
+   </style></head><body class="printing-cert"><table class="pgwrap"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div id="printArea">${inner}</div></td></tr></tbody></table></body></html>`;
   let f=document.getElementById("printFrame"); if(f) f.remove();
   f=document.createElement("iframe"); f.id="printFrame";
   f.setAttribute("style","position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden");
