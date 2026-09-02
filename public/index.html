@@ -4273,7 +4273,8 @@ function compCertForm(r){
      <div><label>Party name (client / subcontractor)</label><input id="hc_partyName" value="${esc(r.partyName||"")}"></div>
      <div><label>Party TRN</label><input id="hc_partyTrn" value="${esc(r.partyTrn||"")}"></div>
      <div><label>Attention (contact person)</label><input id="hc_partyAttn" value="${esc(r.partyAttn||"")}"></div>
-     <div><label>Party email</label><input id="hc_partyEmail" type="email" value="${esc(r.partyEmail||"")}"></div>
+     <div><label>Party email (To)</label><input id="hc_partyEmail" type="email" value="${esc(r.partyEmail||"")}"></div>
+     <div style="grid-column:1/-1"><label>Additional recipients / CC <span class="muted">— separate with a comma; they receive the same email with both PDFs</span></label><input id="hc_cc" value="${esc((Array.isArray(r.cc)?r.cc.join(", "):r.cc)||"")}" placeholder="consultant@…, pm@…, accounts@…"></div>
      <div><label>Project</label><input id="hc_project" value="${esc(r.project||"")}"></div>
      <div><label>Location</label><input id="hc_location" value="${esc(r.location||"")}"></div>
      <div><label>Contract / PO ref.</label><input id="hc_contractRef" value="${esc(r.contractRef||"")}"></div>
@@ -4339,6 +4340,7 @@ function compCertForm(r){
     const sc=[...$("#hcScope").querySelectorAll("tr")].slice(1).map(tr=>({ ref:tr.querySelector(".hc_sref").value, description:tr.querySelector(".hc_sdesc").value, unit:tr.querySelector(".hc_sunit").value, qty:tr.querySelector(".hc_sqty").value, status:tr.querySelector(".hc_sst").value })).filter(l=>l.description.trim());
     return { id:r.id, type:isW?"WARRANTY":isDlp?"DLP":"COMPLETION", docNo:g("docNo"), date:g("date"), entity:g("ent"),
       partyType:g("ptype"), partyName:g("partyName"), partyTrn:g("partyTrn"), partyAttn:g("partyAttn"), partyEmail:g("partyEmail"),
+      cc:String(g("cc")||"").split(/[,;\s]+/).filter(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)),
       project:g("project"), location:g("location"), contractRef:g("contractRef"), contractDate:g("contractDate"),
       quotationRef:g("quotationRef"), quotationDate:g("quotationDate"), completionDate:g("completionDate"),
       dlpStart:g("dlpStart"), dlpEnd:g("dlpEnd"), retentionDue:g("retentionDue"), warrantyPeriod:g("warrantyPeriod"),
@@ -4390,11 +4392,16 @@ function compCertForm(r){
   if($("#hcDel")) $("#hcDel").onclick=async ()=>{ if(!confirm("Delete "+r.docNo+"? This cannot be undone."))return; try{ await api("compcert/"+r.id,{method:"DELETE"}); toast("Deleted"); vCompCerts(); }catch(e){ toast(e.message); } };
   if($("#hcSend")) $("#hcSend").onclick=async ()=>{ const to=($("#hc_partyEmail").value||"").trim();
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast("Enter the party email first"); return; }
+    const ccRaw=($("#hc_cc")?$("#hc_cc").value:"")||"";
+    const ccList=ccRaw.split(/[,;\s]+/).filter(Boolean);
+    const ccBad=ccList.filter(x=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+    if(ccBad.length){ toast("Check the CC addresses: "+ccBad.join(", ")); return; }
+    const cc=ccList.filter(x=>x.toLowerCase()!==to.toLowerCase());
     try{ const saved=await api("compcert",{method:"POST",body:gather()}); // save latest edits first
       const nPh=(saved.photos||r.photos||[]).length;
       // The certificate and the completion report always travel together in ONE email.
       const wantReport=(!isDlp&&!isW)||nPh>0;
-      if(!confirm(`Email to ${to}:\n\n• ${isW?"Warranty certificate":isDlp?"DLP certificate":"Completion certificate"} ${saved.docNo||""} (PDF)${wantReport?`\n• Project Completion Report (PDF)${nPh?` — including ${nPh} site photo${nPh===1?"":"s"}`:""}`:""}\n\nBoth documents are attached to the same email. Send now?`)) return;
+      if(!confirm(`Email to: ${to}${cc.length?`\nCC: ${cc.join(", ")}`:""}\n\n• ${isW?"Warranty certificate":isDlp?"DLP certificate":"Completion certificate"} ${saved.docNo||""} (PDF)${wantReport?`\n• Project Completion Report (PDF)${nPh?` — including ${nPh} site photo${nPh===1?"":"s"}`:""}`:""}\n\nBoth documents are attached to the same email. Send now?`)) return;
       const base=(saved.docNo||r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_");
       const pdfs=[];
       toast("Preparing certificate PDF…");
@@ -4408,8 +4415,8 @@ function compCertForm(r){
       const kb=Math.round(pdfs.reduce((a,p)=>a+p.base64.length,0)/1024*0.75);
       if(kb>4600){ toast("Attachments are "+ (kb/1024).toFixed(1) +" MB — too large to send. Remove a few photos and try again."); return; }
       toast("Sending "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" ("+(kb>=1024?(kb/1024).toFixed(1)+" MB":kb+" KB")+")…");
-      const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfs}});
-      toast("Sent to "+res.to+" — "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached"); compCertForm(await api("compcert/"+r.id));
+      const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,cc,pdfs}});
+      toast("Sent to "+res.to+(cc.length?" (cc "+cc.length+")":"")+" — "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached"); compCertForm(await api("compcert/"+r.id));
     }catch(e){ toast(e.message); } };
 }
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();

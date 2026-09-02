@@ -15546,6 +15546,9 @@ var api_default = async (req, context) => {
       entity: entObj.short, entityName: entObj.name, entityTRN: entityTRN(entObj),
       partyType: str("partyType") || "Client", partyName: str("partyName"), partyTrn: str("partyTrn"),
       partyAttn: str("partyAttn"), partyEmail: str("partyEmail"),
+      // Additional recipients — they receive the same email with both PDFs.
+      cc: (Array.isArray(b.cc) ? b.cc : String(b.cc ?? ex?.cc ?? "").split(/[,;\s]+/))
+        .map((x) => String(x || "").trim()).filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).slice(0, 12),
       project: str("project"), location: str("location"),
       contractRef: str("contractRef"), contractDate: str("contractDate"),
       quotationRef: str("quotationRef"), quotationDate: str("quotationDate"),
@@ -15641,6 +15644,8 @@ var api_default = async (req, context) => {
       let b = {}; try { b = await req.json(); } catch (e) {}
       const to = String(b.to || rec.partyEmail || "").trim();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err("Enter a valid recipient email", 400);
+      const ccList = [...new Set((Array.isArray(b.cc) ? b.cc : (b.cc !== void 0 ? String(b.cc).split(/[,;\s]+/) : (rec.cc || [])))
+        .map((x) => String(x || "").trim()).filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x) && x.toLowerCase() !== to.toLowerCase()))].slice(0, 12);
       const cfg = await getEmailCfg(s);
       const sign = await s.get("asset/sign").catch(() => "") || "";
       const stamp = await s.get("asset/stamp").catch(() => "") || "";
@@ -15666,13 +15671,13 @@ var api_default = async (req, context) => {
              <ol style="margin:6px 0 0 18px;padding:0;color:#333">${attachments.map((a) => `<li>${emEsc(a.filename)}${/report/i.test(a.filename) ? ` — Project Completion Report${nPhotos ? ` including ${nPhotos} site photograph${nPhotos === 1 ? "" : "s"}` : ""}` : ` — ${emEsc(label)}`}</li>`).join("")}</ol>
            </div>` : "";
       const html = encl + certHtml;
-      const r = await sendMail(s, cfg, { type: "awarddoc", to, toName: rec.partyAttn || rec.partyName, subject, html, attachments });
+      const r = await sendMail(s, cfg, { type: "awarddoc", to, toName: rec.partyAttn || rec.partyName, cc: ccList, subject, html, attachments });
       rec.status = rec.status === "Countersigned" ? "Countersigned" : "Issued";
-      rec.sentAt = now(); rec.partyEmail = to;
-      rec.audit = [...(rec.audit || []), { at: now(), by: me.name, action: "Emailed to " + to + (attachments ? " (PDF attached)" : "") }];
+      rec.sentAt = now(); rec.partyEmail = to; if (ccList.length) rec.cc = ccList;
+      rec.audit = [...(rec.audit || []), { at: now(), by: me.name, action: "Emailed to " + to + (ccList.length ? " (cc: " + ccList.join(", ") + ")" : "") + (attachments ? ` — ${attachments.length} PDF attached` : "") }];
       await s.setJSON("compcert/" + rec.id, rec);
       try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) {}
-      return json({ ok: true, status: r.status, to, attached: !!attachments });
+      return json({ ok: true, status: r.status, to, cc: ccList, attached: !!attachments, files: (attachments || []).map((a) => a.filename) });
     }
   }
   const awdHtml = path.match(/^award\/([^/]+)\/html$/);
