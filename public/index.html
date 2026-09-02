@@ -3274,26 +3274,31 @@ async function vBank(){
    Outgoing = cheques we issued (post-dated included); incoming = client cheques.
    The live bank balance already deducts every issued cheque, so the uncleared
    total is exactly the bridge back to the bank-statement balance. */
-let CHQ_DAY="", CHQ_RANGE="day", CHQ_DIR="", CHQ_ST="Due";
+let CHQ_FROM="", CHQ_TO="", CHQ_DIR="", CHQ_ST="Due", CHQ_PRESET="month";
 function chequeDiary(d){
   const host=$("#chqDiaryCard"); if(!host) return;
   const all=d.cheques||[], sum=d.chequeSummary||{};
   const today=(sum.today||new Date().toISOString().slice(0,10));
-  if(!CHQ_DAY) CHQ_DAY=today;
   const canClear=["Accounts","CEO"].includes(ME.role);
   const addDays=(iso,n)=>{ const t=new Date(iso+"T00:00:00"); t.setDate(t.getDate()+n); return t.toISOString().slice(0,10); };
   const dow=(iso)=>["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][new Date(iso+"T00:00:00").getDay()];
-  // date window for the chosen mode
-  let from=CHQ_DAY, to=CHQ_DAY, label="on "+dmy(CHQ_DAY)+" ("+dow(CHQ_DAY)+")";
-  if(CHQ_RANGE==="week"){ to=addDays(CHQ_DAY,6); label="from "+dmy(from)+" to "+dmy(to)+" (7 days)"; }
-  else if(CHQ_RANGE==="month"){ to=addDays(CHQ_DAY,29); label="from "+dmy(from)+" to "+dmy(to)+" (30 days)"; }
-  else if(CHQ_RANGE==="all"){ from="0000-01-01"; to="9999-12-31"; label="— all dates"; }
+  const monthStart=today.slice(0,8)+"01";
+  const monthEnd=(()=>{ const t=new Date(today+"T00:00:00"); return new Date(t.getFullYear(),t.getMonth()+1,0).toISOString().slice(0,10); })();
+  if(!CHQ_FROM){ CHQ_FROM=monthStart; CHQ_TO=monthEnd; }
+  const ALL=CHQ_PRESET==="all";
+  const from=ALL?"0000-01-01":CHQ_FROM, to=ALL?"9999-12-31":(CHQ_TO||CHQ_FROM);
+  const label=ALL?"all dates":(from===to?("on "+dmy(from)+" ("+dow(from)+")"):("from "+dmy(from)+" to "+dmy(to)));
   const inWin=c=>c.date&&c.date>=from&&c.date<=to;
   let list=all.filter(c=>inWin(c)&&(!CHQ_DIR||c.dir===CHQ_DIR)&&(!CHQ_ST||c.status===CHQ_ST));
   list.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(b.amount-a.amount));
-  const out=r2(list.filter(c=>c.dir==="out").reduce((t,c)=>t+num(c.amount),0));
-  const inn=r2(list.filter(c=>c.dir==="in").reduce((t,c)=>t+num(c.amount),0));
-  // per-account exposure for the window (outgoing only — what must be funded)
+  const T=(arr,dir,st)=>r2(arr.filter(c=>(!dir||c.dir===dir)&&(!st||c.status===st)).reduce((t,c)=>t+num(c.amount),0));
+  const N=(arr,dir,st)=>arr.filter(c=>(!dir||c.dir===dir)&&(!st||c.status===st)).length;
+  const win=all.filter(inWin);
+  const out=T(list,"out"), inn=T(list,"in");
+  // Grand totals across ALL dates — independent of the filters above.
+  const gOut=T(all,"out","Due"), gIn=T(all,"in","Due"), gOutN=N(all,"out","Due"), gInN=N(all,"in","Due");
+  const gClearedOut=T(all,"out","Cleared"), gRetOut=T(all,"out","Returned"), gRetN=N(all,"out","Returned")+N(all,"in","Returned");
+  const ovOut=r2(all.filter(c=>c.dir==="out"&&c.status==="Due"&&c.overdue).reduce((t,c)=>t+num(c.amount),0));
   const byBank={}; list.filter(c=>c.dir==="out").forEach(c=>{ const b=c.bank||"(no account)"; byBank[b]=r2((byBank[b]||0)+num(c.amount)); });
   const balOf=(nm)=>{ const a=(d.accounts||[]).find(x=>x.name===nm); return a?num(a.balance):null; };
   const stPill=c=>c.status==="Cleared"?`<span class="pill" style="background:var(--green);font-size:10px">Cleared${c.clearedAt?" "+dmy(c.clearedAt):""}</span>`
@@ -3301,24 +3306,21 @@ function chequeDiary(d){
     :c.overdue?`<span class="pill" style="background:#b45309;font-size:10px">Due — not cleared</span>`
     :`<span class="pill" style="background:var(--blue);font-size:10px">Due</span>`;
   const nextDays=[...new Set(all.filter(c=>c.status==="Due"&&c.date>=today).map(c=>c.date))].sort().slice(0,8);
+  const pre=(k,l,f,t)=>`<button class="btn ${CHQ_PRESET===k?"gold":"ghost"} chqPre" data-k="${k}" data-f="${f}" data-t="${t}" style="padding:4px 10px;font-size:11.5px">${l}</button>`;
   host.innerHTML=`
    <div class="flex" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Cheque diary — clearing &amp; due dates</h2>
-     <span class="muted">which cheques hit the bank on a given day</span>
+     <span class="muted">which cheques hit the bank between any two dates</span>
      <button class="btn ghost right" id="chqDiaryCsv">Export CSV</button></div>
    <div class="kpis" style="margin-top:10px">
+     <div class="kpi" style="border-top-color:var(--navy)"><div class="v" style="color:var(--navy)">AED ${fmt(gOut)}</div><div class="l">TOTAL uncleared cheques issued — all dates${gOutN?` (${gOutN} cheque${gOutN===1?"":"s"})`:""}</div></div>
+     <div class="kpi" style="border-top-color:var(--green)"><div class="v" style="color:var(--green)">AED ${fmt(gIn)}</div><div class="l">TOTAL client cheques not yet cleared${gInN?` (${gInN})`:""}</div></div>
+     <div class="kpi" style="border-top-color:#b45309"><div class="v" style="color:#b45309">AED ${fmt(ovOut)}</div><div class="l">Past due — issued, not yet cleared</div></div>
      <div class="kpi" style="border-top-color:var(--red)"><div class="v" style="color:var(--red)">AED ${fmt(sum.dueToday)}</div><div class="l">Due today (${dmy(today)})</div></div>
-     <div class="kpi" style="border-top-color:#b45309"><div class="v" style="color:#b45309">AED ${fmt(sum.overdueOut)}</div><div class="l">Past due — issued, not yet cleared</div></div>
-     <div class="kpi" style="border-top-color:var(--navy)"><div class="v" style="color:var(--navy)">AED ${fmt(sum.unclearedOut)}</div><div class="l">All uncleared cheques issued (PDC exposure)</div></div>
-     <div class="kpi" style="border-top-color:var(--green)"><div class="v" style="color:var(--green)">AED ${fmt(sum.unclearedIn)}</div><div class="l">Client cheques not yet cleared</div></div>
    </div>
-   <div class="note" style="margin-top:8px;font-size:11.5px">The live balance above already deducts every cheque you issued. So your <b>bank-statement balance ≈ live balance + AED ${fmt(sum.unclearedOut)}</b> (cheques not yet presented) <b>− AED ${fmt(sum.unclearedIn)}</b> (client cheques not yet credited). Mark each cheque <b>Cleared</b> as it appears on the statement to keep this exact.</div>
-   <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:10px;align-items:flex-end">
-     <div><label style="font-size:11px">Date</label><input type="date" id="chqDay" value="${esc(CHQ_DAY)}"></div>
-     <div><label style="font-size:11px">Window</label><select id="chqRange">
-       <option value="day" ${CHQ_RANGE==="day"?"selected":""}>That day only</option>
-       <option value="week" ${CHQ_RANGE==="week"?"selected":""}>That day + 7 days</option>
-       <option value="month" ${CHQ_RANGE==="month"?"selected":""}>That day + 30 days</option>
-       <option value="all" ${CHQ_RANGE==="all"?"selected":""}>All dates</option></select></div>
+   <div class="note" style="margin-top:8px;font-size:11.5px">The live balance above already deducts every cheque you issued. So your <b>bank-statement balance ≈ live balance + AED ${fmt(gOut)}</b> (issued, not yet presented) <b>− AED ${fmt(gIn)}</b> (client cheques not yet credited). Mark each cheque <b>Cleared</b> as it appears on the statement to keep this exact.${gRetN?` <b style="color:var(--red)">${gRetN} cheque(s) returned</b> — AED ${fmt(gRetOut)}.`:""}</div>
+   <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px;align-items:flex-end">
+     <div><label style="font-size:11px">From date</label><input type="date" id="chqFrom" value="${esc(CHQ_FROM)}" ${ALL?"disabled":""}></div>
+     <div><label style="font-size:11px">To date</label><input type="date" id="chqTo" value="${esc(CHQ_TO)}" ${ALL?"disabled":""}></div>
      <div><label style="font-size:11px">Direction</label><select id="chqDir">
        <option value="" ${!CHQ_DIR?"selected":""}>Out &amp; in</option>
        <option value="out" ${CHQ_DIR==="out"?"selected":""}>Issued by us (out)</option>
@@ -3328,12 +3330,20 @@ function chequeDiary(d){
        <option value="Cleared" ${CHQ_ST==="Cleared"?"selected":""}>Cleared</option>
        <option value="Returned" ${CHQ_ST==="Returned"?"selected":""}>Returned</option>
        <option value="" ${CHQ_ST===""?"selected":""}>Any status</option></select></div>
-     <div class="flex" style="gap:6px"><button class="btn ghost" id="chqToday">Today</button><button class="btn ghost" id="chqTom">Tomorrow</button></div>
+   </div>
+   <div class="flex" style="flex-wrap:wrap;gap:6px;margin-top:8px">
+     ${pre("today","Today",today,today)}
+     ${pre("tom","Tomorrow",addDays(today,1),addDays(today,1))}
+     ${pre("week","Next 7 days",today,addDays(today,6))}
+     ${pre("month","This month",monthStart,monthEnd)}
+     ${pre("next30","Next 30 days",today,addDays(today,29))}
+     ${pre("past","Past due (before today)","0000-01-01",addDays(today,-1))}
+     ${pre("all","All dates","","")}
    </div>
    ${nextDays.length?`<div class="flex" style="flex-wrap:wrap;gap:6px;margin-top:8px"><span class="muted" style="font-size:11px">Next dates with cheques due:</span>
      ${nextDays.map(dt=>{ const dOut=r2(all.filter(c=>c.date===dt&&c.status==="Due"&&c.dir==="out").reduce((t,c)=>t+num(c.amount),0));
         const dIn=r2(all.filter(c=>c.date===dt&&c.status==="Due"&&c.dir==="in").reduce((t,c)=>t+num(c.amount),0));
-        return `<button class="btn ${dt===CHQ_DAY?"gold":"ghost"} chqJump" data-d="${dt}" style="padding:4px 9px;font-size:11px">${dmy(dt)}${dOut?` · −${fmt(dOut)}`:""}${dIn?` · +${fmt(dIn)}`:""}</button>`; }).join("")}</div>`:""}
+        return `<button class="btn ${(!ALL&&from===dt&&to===dt)?"gold":"ghost"} chqJump" data-d="${dt}" style="padding:4px 9px;font-size:11px">${dmy(dt)}${dOut?` · −${fmt(dOut)}`:""}${dIn?` · +${fmt(dIn)}`:""}</button>`; }).join("")}</div>`:""}
    <div style="margin-top:10px;overflow-x:auto">
      <table><tr><th>Due date</th><th>Day</th><th>Dir.</th><th>Cheque No.</th><th>Bank account</th><th>Payee / party</th><th>Project</th><th>Cert / ref</th><th class="num">Amount (AED)</th><th>Status</th>${canClear?"<th></th>":""}</tr>
      ${list.length?list.map(c=>`<tr${c.overdue&&c.status==="Due"?' style="background:#fff8ec"':''}>
@@ -3348,27 +3358,40 @@ function chequeDiary(d){
            :`<a href="#" class="chqUndo" data-k="${esc(c.key)}" style="font-size:11px;color:#6b7280">undo</a>`}</td>`:""}
       </tr>`).join("")
       :`<tr><td colspan="${canClear?11:10}" class="muted">No cheques ${esc(label)}${CHQ_ST?" with status "+esc(CHQ_ST):""}.</td></tr>`}
-     ${list.length?`<tr class="tot"><td colspan="8"><b>TOTAL ${esc(label)}</b></td><td class="num"><b>${out?"−"+fmt(out):""}${out&&inn?" / ":""}${inn?"+"+fmt(inn):""}</b></td><td colspan="${canClear?2:1}"></td></tr>`:""}
+     ${list.length?`<tr class="tot"><td colspan="8"><b>TOTAL ${esc(label)} — ${list.length} cheque${list.length===1?"":"s"}</b></td><td class="num"><b>${out?"−"+fmt(out):""}${out&&inn?" / ":""}${inn?"+"+fmt(inn):""}</b></td><td colspan="${canClear?2:1}"></td></tr>`:""}
      </table></div>
-   ${Object.keys(byBank).length?`<div style="margin-top:8px"><b style="font-size:12px;color:var(--navy)">Funding required per account ${esc(label)}</b>
-     <table style="margin-top:4px"><tr><th>Account</th><th class="num">Cheques out in this window</th><th class="num">Live balance (already net of them)</th><th>Cover</th></tr>
+   <div style="margin-top:10px;overflow-x:auto"><b style="font-size:12px;color:var(--navy)">Totals ${esc(label)}</b>
+     <table style="margin-top:4px"><tr><th>Status</th><th class="num">Cheques issued (out)</th><th class="num">Client cheques (in)</th><th class="num">Net</th></tr>
+       ${["Due","Cleared","Returned"].map(st=>{ const o=T(win,"out",st), i2=T(win,"in",st), no=N(win,"out",st), ni=N(win,"in",st);
+         if(!o&&!i2) return ""; return `<tr><td>${st==="Due"?"Due / not cleared":st}</td><td class="num" style="color:var(--red)">${fmt(o)}${no?` <span class="muted">(${no})</span>`:""}</td><td class="num" style="color:var(--green)">${fmt(i2)}${ni?` <span class="muted">(${ni})</span>`:""}</td><td class="num">${fmt(r2(i2-o))}</td></tr>`; }).join("")}
+       <tr class="tot"><td><b>All statuses in this period</b></td><td class="num"><b>${fmt(T(win,"out",""))}</b></td><td class="num"><b>${fmt(T(win,"in",""))}</b></td><td class="num"><b>${fmt(r2(T(win,"in","")-T(win,"out","")))}</b></td></tr>
+       <tr><td class="lab"><b>GRAND TOTAL — uncleared, all dates</b></td><td class="num" style="color:var(--red)"><b>${fmt(gOut)}</b> <span class="muted">(${gOutN})</span></td><td class="num" style="color:var(--green)"><b>${fmt(gIn)}</b> <span class="muted">(${gInN})</span></td><td class="num"><b>${fmt(r2(gIn-gOut))}</b></td></tr>
+       <tr><td class="lab">Cleared to date (all dates)</td><td class="num">${fmt(gClearedOut)}</td><td class="num">${fmt(T(all,"in","Cleared"))}</td><td class="num"></td></tr>
+     </table></div>
+   ${Object.keys(byBank).length?`<div style="margin-top:10px"><b style="font-size:12px;color:var(--navy)">Funding required per account — ${esc(label)}</b>
+     <table style="margin-top:4px"><tr><th>Account</th><th class="num">Cheques out in this period</th><th class="num">Live balance (already net of them)</th><th>Cover</th></tr>
      ${Object.keys(byBank).sort().map(bk=>{ const bal=balOf(bk); const ok=bal==null?null:(bal>=0);
        return `<tr><td>${esc(bk)}</td><td class="num" style="color:var(--red)">${fmt(byBank[bk])}</td><td class="num" style="color:${ok===false?"var(--red)":"inherit"}">${bal==null?"—":fmt(bal)}</td><td>${ok==null?'<span class="muted">account not set</span>':ok?'<span style="color:var(--green)">✓ funded</span>':'<span style="color:var(--red)">⚠ short — fund the account</span>'}</td></tr>`;}).join("")}
      </table>
      <div class="muted" style="font-size:11px;margin-top:4px">These cheques are already deducted from the live balance, so a positive balance means the account can meet them. A negative balance means the account must be funded before the cheques are presented.</div></div>`:""}`;
-  const rerender=()=>{ CHQ_DAY=$("#chqDay").value||today; CHQ_RANGE=$("#chqRange").value; CHQ_DIR=$("#chqDir").value; CHQ_ST=$("#chqSt").value; chequeDiary(d); };
-  ["chqDay","chqRange","chqDir","chqSt"].forEach(id=>{ const el=$("#"+id); if(el) el.onchange=rerender; });
-  $("#chqToday").onclick=()=>{ CHQ_DAY=today; CHQ_RANGE="day"; chequeDiary(d); };
-  $("#chqTom").onclick=()=>{ CHQ_DAY=addDays(today,1); CHQ_RANGE="day"; chequeDiary(d); };
-  host.querySelectorAll(".chqJump").forEach(b=>b.onclick=()=>{ CHQ_DAY=b.dataset.d; CHQ_RANGE="day"; chequeDiary(d); });
+  const rerender=()=>{ CHQ_DIR=$("#chqDir").value; CHQ_ST=$("#chqSt").value;
+    if(!ALL){ CHQ_FROM=$("#chqFrom").value||CHQ_FROM; CHQ_TO=$("#chqTo").value||CHQ_FROM;
+      if(CHQ_TO<CHQ_FROM){ CHQ_TO=CHQ_FROM; toast("‘To’ date cannot be before ‘From’ — adjusted"); }
+      CHQ_PRESET=""; }
+    chequeDiary(d); };
+  ["chqFrom","chqTo","chqDir","chqSt"].forEach(id=>{ const el=$("#"+id); if(el) el.onchange=rerender; });
+  host.querySelectorAll(".chqPre").forEach(b=>b.onclick=()=>{ CHQ_PRESET=b.dataset.k;
+    if(b.dataset.k!=="all"){ CHQ_FROM=b.dataset.f; CHQ_TO=b.dataset.t; } chequeDiary(d); });
+  host.querySelectorAll(".chqJump").forEach(b=>b.onclick=()=>{ CHQ_PRESET=""; CHQ_FROM=b.dataset.d; CHQ_TO=b.dataset.d; chequeDiary(d); });
   const setSt=async (key,status,clearedAt)=>{ try{ await api("cheque/status",{method:"POST",body:{key,status,clearedAt}}); toast(status==="Due"?"Reset to due":"Marked "+status.toLowerCase()); vBank(); }catch(e){ toast(e.message); } };
   host.querySelectorAll(".chqClear").forEach(b=>b.onclick=()=>{ const dt=prompt("Date the cheque cleared the bank (YYYY-MM-DD):", b.dataset.d||today); if(dt===null) return; setSt(b.dataset.k,"Cleared",dt.trim()||today); });
   host.querySelectorAll(".chqRet").forEach(a=>a.onclick=e=>{ e.preventDefault(); if(!confirm("Mark this cheque as RETURNED / bounced?")) return; setSt(a.dataset.k,"Returned",today); });
   host.querySelectorAll(".chqUndo").forEach(a=>a.onclick=e=>{ e.preventDefault(); setSt(a.dataset.k,"Due",""); });
   $("#chqDiaryCsv").onclick=()=>{ const rows=[["Due date","Direction","Cheque No.","Bank","Payee/Party","Project","Cert","Amount","Status","Cleared on"]]
-      .concat(list.map(c=>[c.date,c.dir==="out"?"OUT":"IN",c.ref,c.bank,c.party,c.project,c.certNo,c.amount,c.status,c.clearedAt||""]));
+      .concat(list.map(c=>[c.date,c.dir==="out"?"OUT":"IN",c.ref,c.bank,c.party,c.project,c.certNo,c.amount,c.status,c.clearedAt||""]))
+      .concat([[],["TOTAL "+label,"","","","","","",r2(inn-out),"",""],["GRAND TOTAL uncleared (all dates) OUT","","","","","","",gOut,"",""],["GRAND TOTAL uncleared (all dates) IN","","","","","","",gIn,"",""]]);
     const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
-    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cheque_Diary_"+CHQ_DAY+".csv"; a.click(); };
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="MA_Cheque_Diary_"+(ALL?"all":from+"_to_"+to)+".csv"; a.click(); };
 }
 
 /* ---------- contracts / LOA ---------- */
