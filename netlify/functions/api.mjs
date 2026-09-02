@@ -14482,6 +14482,45 @@ function MAPG_RUN(){
     var nEl=src.querySelector('table.pt b'); var dNo=nEl?nEl.textContent:'';
     var foot=src.querySelector('.mah-foot'); if(foot&&foot.parentNode) foot.parentNode.removeChild(foot);
     src.style.maxWidth=(182*MM)+'px'; src.style.padding='0'; src.style.margin='0';
+    // ---- Single-page mode (data-fit="1"): a certificate must read as ONE page.
+    // The content is uniformly scaled down (never below 62%) so everything —
+    // letterhead, particulars, scope, declaration, signatures — lands on one A4
+    // sheet. If even the floor scale will not fit, normal pagination takes over.
+    if(src.getAttribute('data-fit')==='1'){
+      var holder=document.createElement('div');
+      while(src.firstChild) holder.appendChild(src.firstChild);
+      if(foot) holder.appendChild(foot);
+      var pg1=document.createElement('div'); pg1.className='mapg last';
+      var body1=document.createElement('div'); body1.className='mapg-body'; body1.style.overflow='visible';
+      var scaler=document.createElement('div'); scaler.style.transformOrigin='top left';
+      scaler.appendChild(holder); body1.appendChild(scaler); pg1.appendChild(body1);
+      if(src.parentNode) src.parentNode.removeChild(src);
+      document.body.appendChild(pg1);
+      document.body.className=(document.body.className+' mapg-on').trim();
+      var avail=capFirst+NUMH; // no page-number strip needed on a one-page document
+      var k=1, fits=false;
+      for(var it=0; it<7; it++){
+        scaler.style.width=(100/k)+'%';
+        scaler.style.transform='scale('+k+')';
+        var hh=holder.getBoundingClientRect().height;
+        if(hh<=avail){ fits=true; break; }
+        var nk=k*(avail/hh)*0.985;
+        if(nk<0.62){ k=0.62; scaler.style.width=(100/k)+'%'; scaler.style.transform='scale('+k+')';
+          fits=holder.getBoundingClientRect().height<=avail; break; }
+        k=nk;
+      }
+      if(fits){ body1.style.overflow='hidden'; window.MAPG_DONE=true; return; }
+      // Too much content even at the floor scale — restore and paginate normally.
+      scaler.style.width=''; scaler.style.transform='';
+      if(pg1.parentNode) pg1.parentNode.removeChild(pg1);
+      document.body.className=document.body.className.replace(/\\s*mapg-on/,'');
+      var back=document.createElement('div'); back.className='page';
+      back.style.maxWidth=(182*MM)+'px'; back.style.padding='0'; back.style.margin='0';
+      while(holder.firstChild) back.appendChild(holder.firstChild);
+      document.body.appendChild(back);
+      src=back;
+      foot=src.querySelector('.mah-foot'); if(foot&&foot.parentNode) foot.parentNode.removeChild(foot);
+    }
     var blocks=[].slice.call(src.children);
     var H=function(el){ var r=el.getBoundingClientRect(); var cs=window.getComputedStyle(el);
       return r.height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0); };
@@ -14680,27 +14719,30 @@ function buildCompCertHtml(rec, cfg, assets) {
   const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:90px;opacity:.85;object-fit:contain">` : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.docNo)} — ${title}</title>
 <style>
-  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12.5px;line-height:1.55}
-  .page{max-width:820px;margin:0 auto;padding:26px 34px}
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:11.6px;line-height:1.42}
+  .page{max-width:820px;margin:0 auto;padding:18px 26px}
   ${MAH_CSS}
-  .band{background:#183048;color:#fff;text-align:center;padding:10px 12px;margin-top:12px}
-  .band .t{font-size:17px;font-weight:800;letter-spacing:1.4px}
-  .band .s{font-size:10.5px;color:#d8e0ea;margin-top:2px}
-  .goldrule{height:3px;background:#cc9c30;margin-bottom:14px}
-  table.pt{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:12px}
-  table.pt td,table.pt th{border:1px solid #d9dfe8;padding:5px 9px;vertical-align:top;text-align:left}
-  table.pt td.k{background:#f4f6f9;color:#5b6472;width:170px;font-weight:600}
-  table.pt th{background:#183048;color:#fff;font-size:11px}
+  .mah-logo{height:52px}
+  .band{background:#183048;color:#fff;text-align:center;padding:7px 12px;margin-top:9px}
+  .band .t{font-size:15.5px;font-weight:800;letter-spacing:1.3px}
+  .band .s{font-size:10px;color:#d8e0ea;margin-top:1px}
+  .goldrule{height:3px;background:#cc9c30;margin-bottom:10px}
+  table.pt{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:11.2px}
+  table.pt td,table.pt th{border:1px solid #d9dfe8;padding:3.5px 8px;vertical-align:top;text-align:left}
+  table.pt td.k{background:#f4f6f9;color:#5b6472;width:165px;font-weight:600}
+  table.pt th{background:#183048;color:#fff;font-size:10.5px}
   td.num{text-align:right}
-  .sec{color:#183048;font-size:13px;font-weight:800;margin:14px 0 4px;border-left:4px solid #cc9c30;padding-left:8px}
-  .decl{border:1px solid #d9dfe8;border-left:4px solid #183048;padding:12px 14px;margin:8px 0;font-size:12.3px}
-  table.sig{width:100%;border-collapse:collapse;margin-top:20px;font-size:11.5px}
-  table.sig td{border:1px solid #d9dfe8;padding:10px 12px;width:50%;vertical-align:top}
-  .sh{color:#5b6472;font-weight:700;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
-  .sn{font-weight:800;color:#183048;margin:3px 0 8px}
-  .sl{color:#444;font-size:11px;margin-top:6px}
+  .sec{color:#183048;font-size:12px;font-weight:800;margin:9px 0 3px;border-left:4px solid #cc9c30;padding-left:8px}
+  .decl{border:1px solid #d9dfe8;border-left:4px solid #183048;padding:8px 11px;margin:5px 0;font-size:11.4px}
+  .decl p{margin:0 0 5px}
+  table.sig{width:100%;border-collapse:collapse;margin-top:11px;font-size:11px}
+  table.sig td{border:1px solid #d9dfe8;padding:8px 10px;width:50%;vertical-align:top}
+  .sh{color:#5b6472;font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase}
+  .sn{font-weight:800;color:#183048;margin:2px 0 5px}
+  .sl{color:#444;font-size:10.5px;margin-top:4px}
+  .mah-foot{margin-top:12px}
   ${MAPG_CSS}
-</style></head><body><div class="page">
+</style></head><body><div class="page" data-fit="1">
   ${mahHeader(cfg, ent)}
   <div class="band"><div class="t">${title}</div><div class="s">${sub}</div></div><div class="goldrule"></div>
   <table class="pt">
