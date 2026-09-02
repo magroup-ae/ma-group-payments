@@ -262,7 +262,10 @@ async function htmlToPdfBase64(html,opts={}){
   // letterhead and "Page N of M" — render each of those pages to its own PDF
   // page so the PDF is identical to the printed document.
   for(let i=0;i<40 && !(ifr.contentWindow&&ifr.contentWindow.MAPG_DONE) && !idoc.querySelector(".mapg");i++) await new Promise(r=>setTimeout(r,80));
-  const mapg=[...idoc.querySelectorAll(".mapg")];
+  // App-generated documents (certificates, VOs, comparison sheets) paginate with
+  // the same engine used for printing, so the PDF matches the printed pages.
+  try{ if(!idoc.querySelector(".mapg")&&!idoc.querySelector(".pg")&&idoc.getElementById("printArea")&&typeof paginatePrint==="function") paginatePrint(idoc,ifr.contentWindow); }catch(e){}
+  const mapg=[...idoc.querySelectorAll(".mapg,.pg")];
   if(mapg.length){
     const { jsPDF }=window.jspdf; const probe=new jsPDF({unit:"pt",format:"a4"});
     const pw=probe.internal.pageSize.getWidth(), ph=probe.internal.pageSize.getHeight();
@@ -747,9 +750,12 @@ function vCerts(){
   $("#main").innerHTML = `<div class="card"><div class="flex"><h2 style="margin:0">Certificates</h2>
     ${projFilterHtml()}
     <input id="q" placeholder="Search…" style="max-width:220px;margin-left:14px">
-    ${canCreate?`<button class="btn gold right" id="newBtn">+ New Certificate</button>`:""}</div>
+    <div class="right flex"><button class="btn ghost" id="scCsv">⤓ Excel / CSV</button>${canCreate?`<button class="btn gold" id="newBtn">+ New Certificate</button>`:""}</div></div>
     <div style="height:10px"></div><div id="list">${certTable(base())}</div></div>`;
   bindRows(); bindProjFilter(vCerts);
+  if($("#scCsv")) $("#scCsv").onclick=()=>exportCsv("MA_Supplier_IPCs"+(PROJ_FILTER?"_"+PROJ_FILTER:""),
+    ["Cert No.","Date","Project","Supplier","Trade","Invoice(s)","Gross","Retention","Advance recovery","Net","VAT","Payable","Status","Payment mode","Payment ref","Payment date"],
+    base().map(c=>{const k=c.calc||{},p=c.payment||{};return [c.no,c.date,c.project,c.supplier,c.trade||"",c.invoiceNo||"",k.gross||0,k.retention||0,k.advanceRecovery||0,k.net||c.net||0,k.vat||0,k.payable||c.payable||0,c.status,p.mode||"",p.ref||"",p.date||""];}));
   $("#q").oninput=e=>{ const q=e.target.value.toLowerCase(); $("#list").innerHTML=certTable(base().filter(c=>JSON.stringify(c).toLowerCase().includes(q))); bindRows(); };
   if(canCreate) $("#newBtn").onclick=()=>{ if(!SUPS.length){ toast("Add a supplier first"); VIEW="sups"; render(); return; } certForm(null); };
 }
@@ -966,7 +972,7 @@ async function openCert(no){
       <div class="right flex">
         ${canEdit?`<button class="btn ghost" id="editBtn">Edit</button>`:""}
         ${(!canEdit&&ME.role==="CEO"&&c.status!=="Cancelled")?`<button class="btn ghost" id="ceoEditBtn" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}
-        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button>${chequeBtn}${amendChqBtn}${amendAmtBtn}${cashBtn}${rvBtn}${proofBtn}${revBtn}
+        <button class="btn" id="printBtn">${pm==="Cash"?"Print certificate + voucher":"Print certificate"}</button><button class="btn ghost" id="dlBtn">⤓ PDF</button>${chequeBtn}${amendChqBtn}${amendAmtBtn}${cashBtn}${rvBtn}${proofBtn}${revBtn}
         ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("cert",c.no,c.no)}
       </div></div>
     ${(c.payment && Math.abs(num(c.payment.amount)-num(K.payable))>0.01)?`<div class="note" style="margin-top:12px;background:#fff4e5;border-left:4px solid #bf9000">
@@ -1011,6 +1017,7 @@ async function openCert(no){
   bindAttach(c);
   bindReceipt(c);
   $("#printBtn").onclick=()=>printCert(c);
+  if($("#dlBtn")) $("#dlBtn").onclick=()=>downloadDoc(c.no,()=>printCert(c));
   if($("#chqBtn") && !$("#chqBtn").disabled) $("#chqBtn").onclick=()=>{
     if(chqPrinted && ME.role==="CEO"){
       ceoUnlock(async ()=>{ printCheque(c); try{ await api("cert/"+encodeURIComponent(c.no)+"/printed",{method:"POST"}); }catch(e){} toast("Cheque reprinted — logged"); });
@@ -1220,6 +1227,49 @@ function printCert(c){
   </div>${(c.payment&&c.payment.mode==="Cash")?`<div class="pagebreak"></div>`+voucherHtml(c):""}`;
   doPrint();
 }
+// Shared A4 page styling for printed documents and for the PDF renderer, so a
+// downloaded PDF is byte-for-byte the same layout as the printed page.
+const PG_CSS=`
+  html,body { margin:0; padding:0; background:#fff; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  #printArea { display:block !important; position:static; }
+  #printArea .cert { width:186mm; max-width:none; margin:0 auto; padding:0; box-sizing:border-box; box-shadow:none; border:0; }
+  #printArea .pagebreak { page-break-before:always; height:0; }
+  .pg { width:210mm; height:295mm; box-sizing:border-box; padding:10mm 12mm 7mm; margin:0 auto; display:flex; flex-direction:column; overflow:hidden; page-break-after:always; }
+  .pg.last { page-break-after:auto; }
+  .pgbody { flex:1 1 auto; overflow:hidden; }
+  .pgcont { display:flex; align-items:center; gap:10px; border-bottom:2.5px solid #cc9c30; padding-bottom:8px; margin-bottom:12px; }
+  .pgcont img { height:11mm; }
+  .pgcont .en { font-size:12px; font-weight:800; color:#183048; letter-spacing:.3px; }
+  .pgcont .rt { margin-left:auto; text-align:right; font-size:9.5px; color:#555; line-height:1.5; }
+  .pgcont .rt b { color:#183048; font-size:10.5px; }
+  .pgnum { flex:0 0 auto; display:flex; justify-content:space-between; font-size:8.5px; color:#8a8f98; border-top:1px solid #e3e7ee; padding-top:5px; margin-top:8px; }
+`;
+// When set, the next doPrint() produces a downloadable PDF instead of opening the
+// print dialog. Any document that renders through #printArea can therefore be
+// saved as a file with no extra code: PDF_OUT="name"; printX(...);
+let PDF_OUT="";
+function downloadDoc(name,fn){ PDF_OUT=name||"document"; try{ fn(); }catch(e){ PDF_OUT=""; toast(e.message); } }
+// Save any table as CSV (opens directly in Excel).
+function exportCsv(filename,headers,rows){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const csv=[headers.map(q).join(",")].concat(rows.map(r=>r.map(q).join(","))).join("\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}));
+  a.download=String(filename).replace(/[^A-Za-z0-9._-]+/g,"_")+".csv"; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(a.href); }catch(e){} },20000);
+  toast("Exported "+filename+".csv");
+}
+// Download a server-rendered corporate document (RFQ, LOA / subcontract,
+// completion certificate…) as a PDF — same pagination as the printed page.
+async function downloadServerDoc(apiPath,name){
+  try{ toast("Building PDF…");
+    const html=await apiText(apiPath);
+    const b64=await htmlToPdfBase64(html,{budget:6e6});
+    downloadPdfB64(String(name||"document").replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf",b64);
+    toast("Downloaded "+name+".pdf");
+  }catch(e){ toast("PDF failed: "+e.message); }
+}
 function doPrint(){
   // Print inside an isolated iframe with @page margin:0 (suppresses the browser's
   // own header/footer). Before printing, the content is PAGINATED into explicit A4
@@ -1229,22 +1279,19 @@ function doPrint(){
   const styleTags=[...document.querySelectorAll("style")].map(s=>s.outerHTML).join("");
   const base=location.origin+location.pathname;
   const inner=$("#printArea").innerHTML;
+  if(PDF_OUT){ const nm=PDF_OUT; PDF_OUT="";
+    (async ()=>{ try{ toast("Building PDF…");
+      const doc=`<!doctype html><html><head><meta charset="utf-8"><base href="${base}">${styleTags}
+        <style>${PG_CSS}
+        </style></head><body class="printing-cert"><div id="printArea">${inner}</div></body></html>`;
+      const b64=await htmlToPdfBase64(doc,{budget:6e6});
+      downloadPdfB64(nm.replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf",b64);
+      toast("Downloaded "+nm+".pdf");
+    }catch(e){ toast("PDF failed: "+e.message); } })();
+    return;
+  }
   const html=`<!doctype html><html><head><meta charset="utf-8"><base href="${base}">${styleTags}
-   <style>
-     @page { size:A4; margin:0; }
-     html,body { margin:0; padding:0; background:#fff; }
-     * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-     #printArea { display:block !important; position:static; }
-     #printArea .cert { width:186mm; max-width:none; margin:0 auto; padding:0; box-sizing:border-box; box-shadow:none; border:0; }
-     .pg { width:210mm; height:295mm; box-sizing:border-box; padding:10mm 12mm 7mm; margin:0 auto; display:flex; flex-direction:column; overflow:hidden; page-break-after:always; }
-     .pg.last { page-break-after:auto; }
-     .pgbody { flex:1 1 auto; overflow:hidden; }
-     .pgcont { display:flex; align-items:center; gap:10px; border-bottom:2.5px solid #cc9c30; padding-bottom:8px; margin-bottom:12px; }
-     .pgcont img { height:11mm; }
-     .pgcont .en { font-size:12px; font-weight:800; color:#183048; letter-spacing:.3px; }
-     .pgcont .rt { margin-left:auto; text-align:right; font-size:9.5px; color:#555; line-height:1.5; }
-     .pgcont .rt b { color:#183048; font-size:10.5px; }
-     .pgnum { flex:0 0 auto; display:flex; justify-content:space-between; font-size:8.5px; color:#8a8f98; border-top:1px solid #e3e7ee; padding-top:5px; margin-top:8px; }
+   <style>@page { size:A4; margin:0; } ${PG_CSS}
    </style></head><body class="printing-cert"><div id="printArea">${inner}</div></body></html>`;
   let f=document.getElementById("printFrame"); if(f) f.remove();
   f=document.createElement("iframe"); f.id="printFrame";
@@ -2070,12 +2117,15 @@ async function vClientCerts(){
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Client Payment Certificates</h2>
     ${projFilterHtml()}
     <span class="muted">interim payment certificates you issue to clients (before the proforma invoice)</span>
-    <div class="right flex">${can?`<button class="btn ghost" id="impProj">Import project (JSON)</button>`:""}${can?`<button class="btn gold" id="newCC2">+ New certificate</button>`:""}</div></div>
+    <div class="right flex"><button class="btn ghost" id="ccCsv">⤓ Excel / CSV</button>${can?`<button class="btn ghost" id="impProj">Import project (JSON)</button>`:""}${can?`<button class="btn gold" id="newCC2">+ New certificate</button>`:""}</div></div>
     <div style="height:8px"></div><div id="ccList" class="muted">Loading…</div></div>`;
   bindProjFilter(vClientCerts);
   let list; try{ [list,CONTRACTS]=await Promise.all([api("clientcerts"),api("contracts")]); }catch(e){ $("#ccList").textContent=e.message; return; }
   const cmap={}; CONTRACTS.forEach(c=>cmap[c.id]=c);
   if(can) $("#newCC2").onclick=()=>clientCertForm(null);
+  $("#ccCsv").onclick=()=>exportCsv("MA_Client_IPCs"+(PROJ_FILTER?"_"+PROJ_FILTER:""),
+    ["Cert No.","Date","Project","Client","Period from","Period to","Gross cumulative","Net this cert","Payable incl VAT","Status"],
+    list.map(c=>[c.no,c.date,cmap[c.contractId]?.project||"",cmap[c.contractId]?.clientName||"",c.periodFrom||"",c.periodTo||"",c.gross||0,c.net||0,c.payable||0,c.status]));
   if(can) $("#impProj").onclick=importProjectJson;
   list=list.filter(c=>projMatch(cmap[c.contractId]?.project));
   if(!list.length){ $("#ccList").innerHTML=`<div class="muted">No client certificates${PROJ_FILTER?" for "+esc(PROJ_FILTER):""} yet. Create your first certificate — every project from Settings is available in the form.</div>`; return; }
@@ -2090,11 +2140,14 @@ async function vVos(){
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Variation Orders</h2>
     ${projFilterHtml()}
     <span class="muted">client-side variations — issue, submit, record approval, then apply to the contract value</span>
-    <div class="right flex">${canDo?`<button class="btn gold" id="newVo">+ New variation</button>`:""}</div></div>
+    <div class="right flex"><button class="btn ghost" id="voCsv">⤓ Excel / CSV</button>${canDo?`<button class="btn gold" id="newVo">+ New variation</button>`:""}</div></div>
     <div style="height:8px"></div><div id="voList" class="muted">Loading…</div></div>`;
   bindProjFilter(vVos);
   let list; try{ [list,CONTRACTS]=await Promise.all([api("vos"),api("contracts")]); }catch(e){ $("#voList").textContent=e.message; return; }
   if(canDo) $("#newVo").onclick=()=>voForm(null);
+  if($("#voCsv")) $("#voCsv").onclick=()=>exportCsv("MA_Variation_Orders"+(PROJ_FILTER?"_"+PROJ_FILTER:""),
+    ["VO No.","Date","Project","Title","Type","Value ex-VAT","Client instruction ref","Client approval ref","Certified under IPC","Proforma / invoice","Status","Applied to contract"],
+    (list||[]).map(v=>[v.no,v.date,v.project,v.title,v.type==="omission"?"Omission (-)":"Addition (+)",(v.type==="omission"?-num(v.amount):num(v.amount)),v.instructionRef||"",v.clientApprovalRef||"",v.certNo||"",v.proformaRef||"",v.status,v.appliedToContract?"Yes":"No"]));
   list=list.filter(v=>projMatch(v.project));
   if(!list.length){ $("#voList").innerHTML=`<div class="muted">No variation orders${PROJ_FILTER?" for "+esc(PROJ_FILTER):""} yet. A VO records extra / omitted works instructed by the client: draft it, submit it, record the client's approval, then apply it to the contract value so IPCs pick it up.</div>`; return; }
   const sgn=v=>v.type==="omission"?-num(v.amount):num(v.amount);
@@ -2181,7 +2234,7 @@ async function voForm(key){
   if(!isNew&&v.status==="Submitted"&&ceo) bh+=`<button class="btn green" id="voApprove">Record client approval</button><button class="btn" style="background:#c0392b;color:#fff" id="voReject">Rejected by client</button>`;
   if(!isNew&&v.status==="Approved"&&!v.appliedToContract&&ceo) bh+=`<button class="btn" id="voApply">Apply to contract value</button>`;
   if(!isNew&&["Rejected","Submitted","Approved"].includes(v.status)&&ceo&&!v.appliedToContract) bh+=`<button class="btn ghost" id="voReopen">Reopen to draft</button>`;
-  if(!isNew) bh+=`<button class="btn ghost" id="voPrint">View / Print VO</button>`;
+  if(!isNew) bh+=`<button class="btn ghost" id="voPrint">View / Print VO</button><button class="btn ghost" id="voDl">⤓ PDF</button>`;
   if(!isNew&&ceo&&!v.appliedToContract) bh+=`<button class="btn ghost" id="voDel" style="color:#c00">Delete</button>`;
   B.innerHTML=bh;
   if($("#voSave")) $("#voSave").onclick=()=>save();
@@ -2195,6 +2248,7 @@ async function voForm(key){
     if(!confirm(`Apply ${v.no} to the contract?\n\nApproved Variations: ${fmt(ct.variations)} → ${fmt(r2(num(ct.variations)+delta))}\nRevised contract sum: ${fmt(revised)}\nA variation line is also added to the by-building BOQ.\n\nThis cannot be undone (a correction needs a new omission VO).`)) return;
     api("vo/"+encodeURIComponent(v.key)+"/apply",{method:"POST"}).then(()=>{ toast("Applied — contract value updated"); voForm(v.key); }).catch(e=>toast(e.message)); };
   if($("#voPrint")) $("#voPrint").onclick=()=>printVo(v);
+  if($("#voDl")) $("#voDl").onclick=()=>downloadDoc(v.no,()=>printVo(v));
   if($("#voDel")) $("#voDel").onclick=async ()=>{ if(!confirm("Delete this variation order?")) return; try{ await api("vo/"+encodeURIComponent(v.key),{method:"DELETE"}); toast("Deleted"); VIEW="vos"; render(); }catch(e){ toast(e.message); } };
 }
 function printVo(v){
@@ -2426,8 +2480,8 @@ async function openClientCert(no){
   const row=(l,v)=>`<tr><td class="lab">${l}</td><td class="num">${v}</td></tr>`;
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">${esc(c.no)}</h2><span class="pill st-${c.status}">${c.status}</span>
      <span class="muted">${esc(ct.project||"")} · ${esc(c.client?.name||"")}</span>
-     <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}${(!canEdit&&ME.role==="CEO"&&["Issued","Approved"].includes(c.status))?`<button class="btn ghost" id="ccCeoEdit" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}<button class="btn" id="ccPrint">Print certificate</button>
-       ${["Issued","Approved"].includes(c.status)?`<button class="btn gold" id="ccProforma">Proforma invoice</button>`:""}
+     <div class="right flex">${canEdit?`<button class="btn ghost" id="ccEdit">Edit</button>`:""}${(!canEdit&&ME.role==="CEO"&&["Issued","Approved"].includes(c.status))?`<button class="btn ghost" id="ccCeoEdit" style="color:var(--gold);border-color:var(--gold)">Edit 🔒 (CEO)</button>`:""}<button class="btn" id="ccPrint">Print certificate</button><button class="btn ghost" id="ccDl">⤓ PDF</button>
+       ${["Issued","Approved"].includes(c.status)?`<button class="btn gold" id="ccProforma">Proforma invoice</button><button class="btn ghost" id="ccProformaDl">⤓ PDF</button>`:""}
        ${["Issued","Approved"].includes(c.status)&&["CEO","PM","QS","Accounts"].includes(ME.role)?`<button class="btn green" id="ccReceipt">+ Client payment</button>`:""}
        ${acts.map(([a,l,cl])=>`<button class="${cl}" data-a="${a}">${l}</button>`).join("")}${delBtn("clientcert",c.key||c.no,c.no)}<button class="btn ghost" id="ccBack">Back</button></div></div>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
@@ -2460,8 +2514,11 @@ async function openClientCert(no){
   if($("#ccReceipt")) $("#ccReceipt").onclick=()=>clientReceiptForm(c,loadReceipts);
   wireDelBtns(()=>{VIEW="ccerts";render();});
   $("#ccPrint").onclick=()=>printClientIPC(c);
+  if($("#ccDl")) $("#ccDl").onclick=()=>downloadDoc(c.no,()=>printClientIPC(c));
   if($("#ccProforma")) $("#ccProforma").onclick=async ()=>{ toast("Preparing proforma…");
     try{ const pf=await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/proforma",{method:"POST"}); printProforma(pf); }catch(e){ toast(e.message); } };
+  if($("#ccProformaDl")) $("#ccProformaDl").onclick=async ()=>{ toast("Preparing proforma…");
+    try{ const pf=await api("clientcert/"+encodeURIComponent(c.key||c.no)+"/proforma",{method:"POST"}); downloadDoc((pf.proforma&&pf.proforma.no)||("Proforma_"+c.no),()=>printProforma(pf)); }catch(e){ toast(e.message); } };
   if(canEdit) $("#ccEdit").onclick=()=>clientCertEdit(c);
   if($("#ccCeoEdit")) $("#ccCeoEdit").onclick=()=>ceoUnlock(()=>clientCertEdit(c));
   $("#main").querySelectorAll("[data-a]").forEach(b=>b.onclick=async ()=>{ let comment;
@@ -3476,6 +3533,7 @@ async function vAwards(){
         <td><span class="pill" style="background:${stColors[a.status]||'#5B6B85'}">${esc(a.status)}</span>${a.sentAt?`<br><span class="muted" style="font-size:10px">sent ${dmy(a.sentAt)}</span>`:""}${a.advanceCertNo?`<br><span class="pill" style="background:#7A5C00;font-size:9px" title="Down payment certificate">DP ${esc(a.advanceCertNo)}</span>`:((+a.advanceAmount>0&&a.status==="Countersigned")?`<br><span class="muted" style="font-size:9px;color:var(--red)">down payment pending</span>`:"")}</td>
         <td style="white-space:nowrap">
           <button class="btn ghost aw_view" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">View / Print</button>
+          <button class="btn ghost aw_dl" data-id="${esc(a.id)}" data-no="${esc(a.docNo)}" style="padding:4px 9px;font-size:12px">⤓ PDF</button>
           ${a.status!=="Countersigned"?`<button class="btn ghost aw_edit" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Edit / amend</button>`:""}
           <button class="btn ghost aw_send" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">${a.status==="Issued"?"Send by email":"Re-send"}</button>
           ${a.status!=="Countersigned"?`<button class="btn ghost aw_recv" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px">Mark signed →</button>`:""}
@@ -3485,6 +3543,7 @@ async function vAwards(){
           ${ME.role==="CEO"?`<button class="btn ghost aw_del" data-id="${esc(a.id)}" style="padding:4px 9px;font-size:12px;color:var(--red)">Delete</button>`:""}
         </td></tr>`).join("")}</table></div>`;
     h.querySelectorAll(".aw_view").forEach(b=>b.onclick=()=>openAwardDoc(b.dataset.id,true));
+    h.querySelectorAll(".aw_dl").forEach(b=>b.onclick=()=>downloadServerDoc("award/"+b.dataset.id+"/html", b.dataset.no||"Award"));
     h.querySelectorAll(".aw_edit").forEach(b=>b.onclick=async ()=>{ try{ const rec=await api("award/"+b.dataset.id); AW_EDIT=rec; await vAwards(); window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ toast(e.message); } });
     h.querySelectorAll(".aw_send").forEach(b=>b.onclick=async ()=>{ const a=items.find(x=>x.id===b.dataset.id); if(!confirm(`Email this ${a.type==="LOA"?"Letter of Award":"Subcontract Agreement"} to ${esc(a.supplierName)} for signature within ${a.signBackHours||24} hours?`)) return;
       try{
@@ -3771,6 +3830,7 @@ async function rfqDetail(){
     <div class="flex"><h3 style="margin:0">${esc(r.rfqNo)} <span class="pill" style="background:#5B6B85">${esc(r.status)}</span></h3>
       <div class="right flex" style="gap:6px">
         <button class="btn ghost" id="rd_print">View / Print</button>
+        <button class="btn ghost" id="rd_dl">⤓ PDF</button>
         ${(r.quotes||[]).some(q=>num(q.amount)>0)?`<button class="btn ${r.eval&&r.eval.status==="Approved"?"ghost":"gold"}" id="rd_eval">${r.eval?(r.eval.status==="Approved"?"Evaluation ✓":"Continue evaluation"):"Evaluate bidders"}</button>`:""}
         ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn ghost" id="rd_edit">Edit</button>`:""}
         ${r.status!=="Awarded"&&r.status!=="Cancelled"?`<button class="btn gold" id="rd_send">${r.status==="Draft"?"Send":"Re-send"}</button>`:""}
@@ -3796,6 +3856,7 @@ async function rfqDetail(){
   </div>`;
   $("#rd_back").onclick=()=>{ RFQ_CUR=null; procRfqs(); };
   if($("#rd_eval")) $("#rd_eval").onclick=()=>procEvalForm();
+  if($("#rd_dl")) $("#rd_dl").onclick=()=>downloadServerDoc("rfq/"+r.id+"/html", r.rfqNo);
   $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); waitPaginateThenPrint(w); }catch(e){toast(e.message);} };
   if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
   if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?\nAll recipients are in BCC — addresses stay private.`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
@@ -3969,7 +4030,7 @@ function procEvalForm(){
     recommendation:$("#ev_recom").value, conditions:$("#ev_cond").value });
   const B=$("#ev_btns"); const ceo=ME.role==="CEO"; let h="";
   if(!locked) h+=`<button class="btn green" id="ev_save">Save evaluation</button>`;
-  h+=`<button class="btn ghost" id="ev_print">View / Print comparison sheet</button>`;
+  h+=`<button class="btn ghost" id="ev_print">View / Print comparison sheet</button><button class="btn ghost" id="ev_dl">⤓ PDF</button>`;
   if(ev.status!=="Approved"&&ceo) h+=`<button class="btn gold" id="ev_approve">Approve evaluation (CEO)</button>`;
   if(ev.status==="Approved"&&ceo&&r.status!=="Awarded") h+=`<button class="btn ghost" id="ev_reopen">Reopen</button>`;
   if(ev.status==="Approved"&&r.status!=="Awarded") h+=`<button class="btn" id="ev_award">Proceed to award →</button>`;
@@ -3978,6 +4039,7 @@ function procEvalForm(){
     const i=RFQS.findIndex(x=>x.id===r.id); if(i>=0) RFQS[i]={...RFQS[i],eval:RFQ_CUR.eval}; return RFQ_CUR; };
   if($("#ev_save")) $("#ev_save").onclick=async ()=>{ try{ await save(); toast("Evaluation saved"); procEvalForm(); }catch(e){ toast(e.message); } };
   if($("#ev_print")) $("#ev_print").onclick=async ()=>{ try{ if(!locked) await save(); printEvalSheet(RFQ_CUR); }catch(e){ toast(e.message); } };
+  if($("#ev_dl")) $("#ev_dl").onclick=async ()=>{ try{ if(!locked) await save(); downloadDoc(r.rfqNo+"_Evaluation",()=>printEvalSheet(RFQ_CUR)); }catch(e){ toast(e.message); } };
   if($("#ev_approve")) $("#ev_approve").onclick=async ()=>{ try{ await save();
       const rec=RFQ_CUR.eval||{}; if(!confirm(`Approve this evaluation?\n\nRecommended: ${rec.recommendedName||"—"} at AED ${fmt(rec.recommendedAmount)}\nScore: highest weighted of ${(rec.vendors||[]).filter(v=>!v.excluded).length} qualified bidder(s).\n\nOnce approved the award can be raised against this recommendation.`)) return;
       await api("rfq/"+r.id+"/eval/status",{method:"POST",body:{action:"approve"}}); RFQ_CUR=await api("rfq/"+r.id); toast("Evaluation approved"); procEvalForm(); }catch(e){ toast(e.message); } };
