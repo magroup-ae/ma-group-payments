@@ -14095,23 +14095,38 @@ async function computeTreasury(s) {
     getAllJSON(s, "bankmove/")
   ]);
   const acc = {};
-  const ensure = (name) => { name = name || "(unallocated)"; if (!acc[name]) acc[name] = { name, opening: 0, openingDate: "", inflow: 0, outflow: 0 }; return acc[name]; };
+  const ensure = (name) => { name = name || "(unallocated)"; if (!acc[name]) acc[name] = { name, opening: 0, openingDate: "", inflow: 0, outflow: 0, preIn: 0, preOut: 0 }; return acc[name]; };
   for (const nm of (settings.banks || [])) { const a = ensure(nm); a.opening = num(opening[nm] && opening[nm].balance); a.openingDate = (opening[nm] && opening[nm].date) || ""; }
+  // A movement DATED BEFORE the account's opening-balance date is already
+  // contained in that opening figure (it is the bank-statement balance on that
+  // day), so counting it again would double-count. Such rows stay visible in the
+  // ledger, flagged, but never move the live balance.
+  const isPre = (a, date) => !!(a.openingDate && date && String(date).slice(0, 10) < String(a.openingDate).slice(0, 10));
+  const post = (a, date, inAmt, outAmt) => {
+    if (isPre(a, date)) { a.preIn += num(inAmt); a.preOut += num(outAmt); return true; }
+    a.inflow += num(inAmt); a.outflow += num(outAmt); return false;
+  };
   const ledger = [];
-  for (const r of register) { if (!r) continue; const a = ensure(r.bank); const amt = num(r.amount); a.outflow += amt; ledger.push({ date: r.date || "", account: a.name, kind: "Payment", ref: r.ref || "", party: r.payee || r.supplier || "", note: "IPC " + (r.no || ""), certNo: r.no || "", inAmt: 0, outAmt: amt }); }
-  for (const rc of receipts) { if (!rc) continue; const a = ensure(rc.bank); const amt = num(rc.amount); a.inflow += amt; ledger.push({ date: rc.date || "", account: a.name, kind: "Receipt", ref: rc.ref || "", party: rc.project || "", note: rc.isAdvance ? "Advance received" : rc.isRetentionRelease ? "Retention release" : "Client receipt", inAmt: amt, outAmt: 0 }); }
+  for (const r of register) { if (!r) continue; const a = ensure(r.bank); const amt = num(r.amount);
+    const pre = post(a, r.date, 0, amt);
+    ledger.push({ date: r.date || "", account: a.name, kind: "Payment", ref: r.ref || "", party: r.payee || r.supplier || "", note: "IPC " + (r.no || ""), certNo: r.no || "", inAmt: 0, outAmt: amt, preOpening: pre }); }
+  for (const rc of receipts) { if (!rc) continue; const a = ensure(rc.bank); const amt = num(rc.amount);
+    const pre = post(a, rc.date, amt, 0);
+    ledger.push({ date: rc.date || "", account: a.name, kind: "Receipt", ref: rc.ref || "", party: rc.project || "", note: rc.isAdvance ? "Advance received" : rc.isRetentionRelease ? "Retention release" : "Client receipt", inAmt: amt, outAmt: 0, preOpening: pre }); }
   for (const m of moves) { if (!m) continue; const amt = num(m.amount); const t = m.type;
     if (t === "transfer") {
-      const from = ensure(m.account), to = ensure(m.toAccount); from.outflow += amt; to.inflow += amt;
-      ledger.push({ date: m.date || "", account: from.name, kind: "Transfer out", ref: m.ref || "", party: to.name, note: m.description || "", inAmt: 0, outAmt: amt });
-      ledger.push({ date: m.date || "", account: to.name, kind: "Transfer in", ref: m.ref || "", party: from.name, note: m.description || "", inAmt: amt, outAmt: 0 });
+      const from = ensure(m.account), to = ensure(m.toAccount);
+      const preF = post(from, m.date, 0, amt), preT = post(to, m.date, amt, 0);
+      ledger.push({ date: m.date || "", account: from.name, kind: "Transfer out", ref: m.ref || "", party: to.name, note: m.description || "", inAmt: 0, outAmt: amt, preOpening: preF });
+      ledger.push({ date: m.date || "", account: to.name, kind: "Transfer in", ref: m.ref || "", party: from.name, note: m.description || "", inAmt: amt, outAmt: 0, preOpening: preT });
     } else {
       const a = ensure(m.account); const isIn = (t === "deposit" || t === "adjust-in");
-      if (isIn) a.inflow += amt; else a.outflow += amt;
-      ledger.push({ date: m.date || "", account: a.name, kind: t === "deposit" ? "Deposit" : t === "charge" ? "Bank charge" : t === "withdrawal" ? "Withdrawal" : "Adjustment", ref: m.ref || "", party: "", note: m.description || "", inAmt: isIn ? amt : 0, outAmt: isIn ? 0 : amt, id: m.id });
+      const pre = post(a, m.date, isIn ? amt : 0, isIn ? 0 : amt);
+      ledger.push({ date: m.date || "", account: a.name, kind: t === "deposit" ? "Deposit" : t === "charge" ? "Bank charge" : t === "withdrawal" ? "Withdrawal" : "Adjustment", ref: m.ref || "", party: "", note: m.description || "", inAmt: isIn ? amt : 0, outAmt: isIn ? 0 : amt, id: m.id, preOpening: pre });
     }
   }
-  const accounts = Object.values(acc).map((a) => ({ ...a, opening: r2(a.opening), inflow: r2(a.inflow), outflow: r2(a.outflow), balance: r2(a.opening + a.inflow - a.outflow) }));
+  const accounts = Object.values(acc).map((a) => ({ ...a, opening: r2(a.opening), inflow: r2(a.inflow), outflow: r2(a.outflow), preIn: r2(a.preIn), preOut: r2(a.preOut), preCount: 0, balance: r2(a.opening + a.inflow - a.outflow) }));
+  for (const e of ledger) { if (e.preOpening) { const a = accounts.find((x) => x.name === e.account); if (a) a.preCount++; } }
   accounts.sort((x, y) => x.name === "(unallocated)" ? 1 : y.name === "(unallocated)" ? -1 : x.name.localeCompare(y.name));
   // Running balance per account (bank-statement style): order each account's
   // movements oldest→newest, carry the balance forward, and add an Opening line.
@@ -14122,13 +14137,24 @@ async function computeTreasury(s) {
     const a = acc[name] || { opening: 0, openingDate: "" };
     const arr = byAcc[name].slice().sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
     let run = num(a.opening);
+    // Rows before the opening date are shown for reference but carry no running
+    // balance — the opening figure already includes them.
+    for (const e of arr) if (e.preOpening) { e.balanceAfter = null; withRun.push(e); }
     withRun.push({ date: a.openingDate || "", account: name, kind: "Opening balance", ref: "", party: "", note: "", inAmt: 0, outAmt: 0, balanceAfter: r2(run), opening: true });
-    for (const e of arr) { run = r2(run + num(e.inAmt) - num(e.outAmt)); e.balanceAfter = run; withRun.push(e); }
+    for (const e of arr) { if (e.preOpening) continue; run = r2(run + num(e.inAmt) - num(e.outAmt)); e.balanceAfter = run; withRun.push(e); }
   }
   withRun.forEach((e, i) => e._i = i);
   withRun.sort((x, y) => x.date < y.date ? 1 : x.date > y.date ? -1 : y._i - x._i);
   for (const e of withRun) delete e._i;
-  const totalBalance = r2(accounts.reduce((t, a) => t + a.balance, 0));
+  // The headline figure is the money in REAL bank accounts. Payments/receipts
+  // recorded without a bank account sit in "(unallocated)" and must never inflate
+  // it — they are reported separately so they can be assigned to an account.
+  const realAccounts = accounts.filter((a) => a.name !== "(unallocated)");
+  const totalBalance = r2(realAccounts.reduce((t, a) => t + a.balance, 0));
+  const un = accounts.find((a) => a.name === "(unallocated)");
+  const unallocated = un ? { inflow: un.inflow, outflow: un.outflow, net: r2(un.inflow - un.outflow) } : { inflow: 0, outflow: 0, net: 0 };
+  const preOpeningTotal = r2(accounts.reduce((t, a) => t + num(a.preIn) + num(a.preOut), 0));
+  const preOpeningCount = accounts.reduce((t, a) => t + num(a.preCount), 0);
   // ---- Cheque diary: what clears / falls due on a given day ----
   // Outgoing = cheques we issued (payment register, mode Cheque); incoming =
   // client cheques received. Each carries a status the finance team maintains
@@ -14169,7 +14195,7 @@ async function computeTreasury(s) {
     dueToday: r2(pend.filter((c) => c.dir === "out" && c.date === today).reduce((t, c) => t + c.amount, 0)),
     count: pend.length
   };
-  return { accounts, totalBalance, ledger: withRun.slice(0, 400), cheques, chequeSummary };
+  return { accounts, totalBalance, unallocated, preOpeningTotal, preOpeningCount, ledger: withRun.slice(0, 400), cheques, chequeSummary };
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
