@@ -4500,7 +4500,7 @@ function compCertForm(r){
      <div><label>Date of completion</label><input id="hc_completionDate" type="date" value="${esc((r.completionDate||"").slice(0,10))}"></div>
      ${isDlp?`<div><label>DLP start</label><input id="hc_dlpStart" type="date" value="${esc((r.dlpStart||"").slice(0,10))}"></div>
      <div><label>DLP end</label><input id="hc_dlpEnd" type="date" value="${esc((r.dlpEnd||"").slice(0,10))}"></div>
-     <div><label>Retention releasable (text)</label><input id="hc_retentionDue" value="${esc(r.retentionDue||"")}" placeholder="e.g. AED 25,000.00 (final 5%)"></div>`:""}
+     <div style="grid-column:1/-1"><label>Retention release statement <span class="muted">(no amounts — wording only)</span></label><input id="hc_retentionDue" value="${esc(r.retentionDue||"")}" placeholder="e.g. Final retention to be released in accordance with the contract"></div>`:""}
      ${isW?`<div><label>Warranty start (completion date)</label><input id="hc_dlpStart" type="date" value="${esc((r.dlpStart||"").slice(0,10))}"></div>
      <div><label>Warranty end</label><input id="hc_dlpEnd" type="date" value="${esc((r.dlpEnd||"").slice(0,10))}"></div>
      <div><label>Warranty period (text)</label><input id="hc_warrantyPeriod" value="${esc(r.warrantyPeriod||"12 months")}" placeholder="e.g. 12 months / 1 year"></div>`:""}
@@ -4508,12 +4508,7 @@ function compCertForm(r){
    <h3>Scope of works</h3>
    <div style="overflow-x:auto"><table id="hcScope"><tr><th>#</th><th>Description</th><th>Unit</th><th>Qty</th><th>Status</th><th></th></tr>${scope.map(srow).join("")}</table></div>
    <div class="flex" style="margin-top:6px"><button class="btn ghost" id="hcAddRow">+ Add line</button></div>
-   <h3>Contract value <span class="muted" style="font-size:11px;font-weight:400">(leave 0 to omit the value section)</span></h3><div class="grid">
-     <div><label>Value excl. VAT (AED)</label><input id="hc_valueExVat" type="number" step="0.01" value="${r.valueExVat||0}"></div>
-     <div><label>VAT %</label><input id="hc_vatPct" type="number" step="0.5" value="${Math.round((r.vatPct!=null?r.vatPct:0.05)*100)}"></div>
-     <div><label>Variations to date</label><input id="hc_variations" value="${esc(r.variations||"NIL")}"></div>
-     <div style="grid-column:1/-1"><label>Payment terms (optional)</label><input id="hc_paymentTerms" value="${esc(r.paymentTerms||"")}"></div>
-   </div>
+   <div class="note" style="margin-top:10px">This is a <b>technical completion document</b> — no contract values, rates or amounts are shown on the certificate or the report. Commercial matters remain in the payment certificates and invoices.</div>
    <h3>Declaration — editable clauses</h3>
    <div class="muted" style="font-size:11px;margin-bottom:6px">Placeholders {COMPLETION_DATE}, {DLP_START}, {DLP_END} are replaced automatically on the printed certificate.${isDlp?"":" The acceptance-without-reservation / variation clause protects against later scope claims — edit with care."}</div>
    ${clauses.map((c,i)=>`<div style="margin-bottom:6px"><label>Clause ${i+1}</label><textarea class="hc_clause" style="width:100%;min-height:58px">${esc(c)}</textarea></div>`).join("")}
@@ -4544,12 +4539,11 @@ function compCertForm(r){
     if(pc) pc.onchange=async ()=>{ const ct=CONTRACTS.find(x=>x.id===pc.value); if(!ct) return;
       $("#hc_ptype").value="Client"; $("#hc_partyName").value=ct.clientName||ct.mainContractor||""; $("#hc_project").value=ct.project||"";
       $("#hc_contractRef").value=ct.subcontractRef||""; $("#hc_quotationRef").value=ct.offerRef||"";
-      $("#hc_valueExVat").value=r2(num(ct.contractSum)+num(ct.variations))||0;
       try{ const cl=await api("clients"); const c2=cl.find(x=>x.id===ct.clientId); if(c2){ $("#hc_partyTrn").value=c2.trn||""; $("#hc_partyEmail").value=c2.email||""; $("#hc_partyAttn").value=c2.contactName||""; } }catch(e){} };
     if(ps) ps.onchange=()=>{ const sp=SUPS.find(x=>x.id===ps.value); if(!sp) return;
       $("#hc_ptype").value="Subcontractor"; $("#hc_partyName").value=sp.name||""; $("#hc_partyTrn").value=sp.trn||"";
       $("#hc_partyEmail").value=sp.email||""; $("#hc_partyAttn").value=sp.contactName||""; $("#hc_project").value=sp.project||$("#hc_project").value;
-      $("#hc_contractRef").value=sp.lpoRef||sp.subcontractRef||""; $("#hc_valueExVat").value=num(sp.contractValue)||0; }; })();
+      $("#hc_contractRef").value=sp.lpoRef||sp.subcontractRef||""; }; })();
   const bindDel=()=>document.querySelectorAll(".hc_sdel").forEach(a=>a.onclick=e=>{ e.preventDefault(); a.closest("tr").remove(); }); bindDel();
   $("#hcAddRow").onclick=()=>{ const t=$("#hcScope"); const tr=document.createElement("tr"); tr.innerHTML=srow({ref:String(t.rows.length),description:"",unit:"",qty:"",status:"Completed"},t.rows.length-1); t.appendChild(tr); bindDel(); };
   const gather=()=>{ const g=id=>{const el=$("#hc_"+id); return el?el.value:"";};
@@ -4560,8 +4554,7 @@ function compCertForm(r){
       project:g("project"), location:g("location"), contractRef:g("contractRef"), contractDate:g("contractDate"),
       quotationRef:g("quotationRef"), quotationDate:g("quotationDate"), completionDate:g("completionDate"),
       dlpStart:g("dlpStart"), dlpEnd:g("dlpEnd"), retentionDue:g("retentionDue"), warrantyPeriod:g("warrantyPeriod"),
-      scope:sc, valueExVat:+g("valueExVat")||0, vatPct:(+g("vatPct")||0)/100,
-      variations:g("variations")||"NIL", paymentTerms:g("paymentTerms"),
+      scope:sc,
       clauses:[...document.querySelectorAll(".hc_clause")].map(t=>t.value), notes:g("notes"), reportIntro:g("reportIntro") }; };
   // ---- report photos ----
   const renderPhotos=()=>{ const host=$("#hcPhotos"); if(!host) return;

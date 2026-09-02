@@ -14665,7 +14665,6 @@ function buildCompCertHtml(rec, cfg, assets) {
   const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
   const title = isW ? "WARRANTY CERTIFICATE" : isDlp ? "DEFECTS LIABILITY COMPLETION CERTIFICATE" : "CERTIFICATE OF COMPLETION";
   const sub = isW ? "Warranty of Works — Fit-Out / Construction" : isDlp ? "Certificate of Making Good Defects — end of Defects Liability Period" : "Completion & Handover of Works";
-  const vEx = num(rec.valueExVat), vat = r2(vEx * (rec.vatPct != null ? num(rec.vatPct) : 0.05)), vTot = r2(vEx + vat);
   const scopeRows = (rec.scope || []).filter((l) => l && (l.description || "").trim()).map((l, i) =>
     `<tr><td>${esc(l.ref || i + 1)}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty || "—")}</td><td>${esc(l.status || "Completed")}</td></tr>`).join("")
     || `<tr><td>1</td><td>As per the referenced contract / purchase order and approved quotation.</td><td>—</td><td class="num">—</td><td>Completed</td></tr>`;
@@ -14721,15 +14720,8 @@ function buildCompCertHtml(rec, cfg, assets) {
   </table>
   <div class="sec">2. SCOPE OF WORKS ${isW ? "COVERED BY THIS WARRANTY" : isDlp ? "COVERED" : "COMPLETED"}</div>
   <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:60px">Unit</th><th style="width:60px">Qty</th><th style="width:110px">Status</th></tr>${scopeRows}</table>
-  ${vEx > 0 ? `<div class="sec">3. CONTRACT VALUE</div>
-  <table class="pt">
-    <tr><td class="k">Contract value (excl. VAT)</td><td class="num">${money(vEx)}</td><td class="k">VAT @ ${Math.round((rec.vatPct != null ? num(rec.vatPct) : 0.05) * 100)}%</td><td class="num">${money(vat)}</td></tr>
-    <tr><td class="k">Total (incl. VAT)</td><td class="num"><b>${money(vTot)}</b></td><td class="k">Variations to date</td><td>${esc(rec.variations || "NIL")}</td></tr>
-    <tr><td class="k">Amount in words</td><td colspan="3" style="font-style:italic">${esc(amountWords(vTot))}</td></tr>
-    ${rec.paymentTerms ? `<tr><td class="k">Payment terms</td><td colspan="3">${esc(rec.paymentTerms)}</td></tr>` : ""}
-    ${isDlp && rec.retentionDue ? `<tr><td class="k">Retention releasable</td><td colspan="3"><b>${esc(rec.retentionDue)}</b></td></tr>` : ""}
-  </table>` : (isDlp && rec.retentionDue ? `<div class="sec">3. RETENTION</div><table class="pt"><tr><td class="k">Retention releasable</td><td><b>${esc(rec.retentionDue)}</b></td></tr></table>` : "")}
-  <div class="sec">${vEx > 0 || (isDlp && rec.retentionDue) ? "4" : "3"}. ${isW ? "WARRANTY, TERMS &amp; CONDITIONS" : "DECLARATION"}</div>
+  ${isDlp && rec.retentionDue ? `<div class="sec">3. RETENTION</div><table class="pt"><tr><td class="k">Retention release</td><td>${esc(rec.retentionDue)}</td></tr></table>` : ""}
+  <div class="sec">${(isDlp && rec.retentionDue) ? "4" : "3"}. ${isW ? "WARRANTY, TERMS &amp; CONDITIONS" : "DECLARATION"}</div>
   <div class="decl">${clauses}</div>
   ${rec.notes ? `<div class="decl" style="border-left-color:#cc9c30"><b>Remarks / exceptions:</b> ${esc(rec.notes)}</div>` : ""}
   <table class="sig"><tr>
@@ -14752,7 +14744,6 @@ function buildCompReportHtml(rec, cfg, assets) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
   const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
   const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
-  const vEx = num(rec.valueExVat), vat = r2(vEx * (rec.vatPct != null ? num(rec.vatPct) : 0.05)), vTot = r2(vEx + vat);
   const photos = Array.isArray(rec.photos) ? rec.photos : [];
   const scopeRows = (rec.scope || []).filter((l) => l && (l.description || "").trim()).map((l, i) =>
     `<tr><td>${esc(l.ref || i + 1)}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty || "—")}</td><td>${esc(l.status || "Completed")}</td></tr>`).join("")
@@ -14801,7 +14792,7 @@ function buildCompReportHtml(rec, cfg, assets) {
     <tr><td class="k">Contractor</td><td colspan="3">${esc(ent)}${entTrn ? " · TRN " + esc(entTrn) : ""}</td></tr>
     <tr><td class="k">Contract / PO Ref.</td><td>${esc(rec.contractRef || "—")}${rec.contractDate ? " dated " + dt(rec.contractDate) : ""}</td><td class="k">Quotation Ref.</td><td>${esc(rec.quotationRef || "—")}${rec.quotationDate ? " dated " + dt(rec.quotationDate) : ""}</td></tr>
     <tr><td class="k">Date of Completion</td><td><b>${dt(rec.completionDate)}</b></td><td class="k">Certificate</td><td>${esc(rec.docNo)} — ${dt(rec.date)}</td></tr>
-    ${vEx > 0 ? `<tr><td class="k">Contract Value</td><td>${money(vEx)} excl. VAT</td><td class="k">Incl. VAT ${Math.round((rec.vatPct != null ? num(rec.vatPct) : 0.05) * 100)}%</td><td><b>${money(vTot)}</b></td></tr>` : ""}
+
   </table>
   <div class="sec">3. SCOPE OF WORKS COMPLETED</div>
   <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:60px">Unit</th><th style="width:60px">Qty</th><th style="width:110px">Status</th></tr>${scopeRows}</table>
