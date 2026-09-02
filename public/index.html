@@ -240,8 +240,16 @@ async function openAwardDoc(id, doPrint){
 }
 // Render a full HTML document to a multi-page A4 PDF in the browser and return its
 // base64 (no data-URI prefix). Used to attach the LOA/Contract PDF to the email.
-async function htmlToPdfBase64(html){
+// Render an HTML document to a base64 PDF in the browser.
+// Long documents (a completion report with many site photos) are the hard case:
+// a single tall canvas can exceed the browser's canvas-area limit and come back
+// blank, and an over-large PDF is rejected by the upload limit. So the render
+// scale is capped by canvas area and, if the PDF exceeds `budget` bytes, it is
+// rebuilt at progressively lower quality until it fits.
+const PDF_MAX_CANVAS_PX=1.4e7; // safe canvas area across Safari / Chrome
+async function htmlToPdfBase64(html,opts={}){
   await loadScript("jspdf.umd.min.js"); await loadScript("html2canvas.min.js");
+  const budget=opts.budget||3.6e6; // bytes of base64
   const RW=820; // render width (~A4 @ 96dpi with margin)
   const ifr=document.createElement("iframe");
   ifr.style.cssText="position:fixed;left:-10000px;top:0;width:"+RW+"px;height:1160px;border:0;background:#fff";
@@ -249,26 +257,49 @@ async function htmlToPdfBase64(html){
   const idoc=ifr.contentDocument||ifr.contentWindow.document;
   idoc.open(); idoc.write(html); idoc.close();
   await new Promise(r=>setTimeout(r,350));
-  try{ await Promise.all([...idoc.images].map(im=>im.complete?1:new Promise(res=>{im.onload=im.onerror=res; setTimeout(res,1500);}))); }catch(e){}
+  try{ await Promise.all([...idoc.images].map(im=>im.complete?1:new Promise(res=>{im.onload=im.onerror=res; setTimeout(res,2500);}))); }catch(e){}
   const target=idoc.querySelector(".cert")||idoc.querySelector(".page")||idoc.body;
-  const canvas=await html2canvas(target,{scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:RW,scrollX:0,scrollY:0});
+  const hCss=Math.max(target.scrollHeight||0,600);
+  // Cap the scale so width×height stays inside the canvas-area limit.
+  let scale=Math.min(2,Math.sqrt(PDF_MAX_CANVAS_PX/(RW*hCss)));
+  if(!(scale>0.5)) scale=0.5;
+  const canvas=await html2canvas(target,{scale,useCORS:true,backgroundColor:"#ffffff",windowWidth:RW,scrollX:0,scrollY:0});
   try{ document.body.removeChild(ifr); }catch(e){}
-  const { jsPDF }=window.jspdf; const pdf=new jsPDF({unit:"pt",format:"a4",compress:true});
-  const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
-  const M=24, cw=pw-M*2; const ratio=cw/canvas.width; const pageCanvasPx=(ph-M*2)/ratio;
-  let pos=0, first=true;
-  while(pos<canvas.height){
-    const sh=Math.min(pageCanvasPx, canvas.height-pos);
-    const slice=document.createElement("canvas"); slice.width=canvas.width; slice.height=Math.ceil(sh);
-    const ctx=slice.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,slice.width,slice.height);
-    ctx.drawImage(canvas,0,pos,canvas.width,sh,0,0,canvas.width,sh);
-    if(!first) pdf.addPage(); first=false;
-    pdf.addImage(slice.toDataURL("image/jpeg",0.9),"JPEG",M,M,cw,sh*ratio);
-    pos+=sh;
-  }
-  return pdf.output("datauristring").split(",")[1];
+  if(!canvas.width||!canvas.height) throw new Error("The page could not be rendered (too long for the browser)");
+  const build=(q,shrink)=>{
+    const { jsPDF }=window.jspdf; const pdf=new jsPDF({unit:"pt",format:"a4",compress:true});
+    const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+    const M=24, cw=pw-M*2; const ratio=cw/canvas.width; const pageCanvasPx=(ph-M*2)/ratio;
+    let pos=0, first=true;
+    while(pos<canvas.height){
+      const sh=Math.min(pageCanvasPx, canvas.height-pos);
+      const sw=Math.round(canvas.width*shrink), shp=Math.max(1,Math.round(sh*shrink));
+      const slice=document.createElement("canvas"); slice.width=sw; slice.height=shp;
+      const ctx=slice.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,sw,shp);
+      ctx.drawImage(canvas,0,pos,canvas.width,sh,0,0,sw,shp);
+      if(!first) pdf.addPage(); first=false;
+      pdf.addImage(slice.toDataURL("image/jpeg",q),"JPEG",M,M,cw,sh*ratio);
+      pos+=sh;
+    }
+    return pdf.output("datauristring").split(",")[1];
+  };
+  const steps=[[0.9,1],[0.78,1],[0.7,0.8],[0.6,0.65],[0.5,0.5]];
+  let out="";
+  for(const [q,sk] of steps){ out=build(q,sk); if(out.length<=budget) return out; }
+  return out; // best effort — the caller reports the size
 }
 
+// Save a base64 PDF to the user's device as a real file download.
+function downloadPdfB64(name,b64){
+  try{
+    const bin=atob(b64); const arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([arr],{type:"application/pdf"}));
+    const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(e){} },30000);
+    return true;
+  }catch(e){ toast("Download failed: "+e.message); return false; }
+}
 const ONES=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
 const TENS=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
 function grp(n){ let s=""; if(n>=100){ s=ONES[Math.floor(n/100)]+" Hundred "; n%=100; } if(n>=20){ s+=TENS[Math.floor(n/10)]; if(n%10) s+=" "+ONES[n%10]; } else if(n>0) s+=ONES[n]; return s.trim(); }
@@ -4283,6 +4314,7 @@ function compCertForm(r){
      ${r.id&&ME.role==="CEO"&&r.status!=="Draft"?`<button class="btn ghost" id="hcReopen">Reopen to draft 🔒</button>`:""}
      ${r.id?`<button class="btn" id="hcPrint">View / Print certificate</button>`:""}
      ${r.id?`<button class="btn" id="hcReport">View / Print report</button>`:""}
+     ${r.id?`<button class="btn ghost" id="hcDl">⤓ Download PDF</button>`:""}
      ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (certificate + report PDF)</button>`:""}
      ${r.id&&ME.role==="CEO"?`<button class="btn red" id="hcDel">Delete</button>`:""}
    </div>
@@ -4340,24 +4372,44 @@ function compCertForm(r){
   if($("#hcReopen")) $("#hcReopen").onclick=async ()=>{ if(!confirm("Reopen "+(r.docNo||"this certificate")+" to Draft for editing?"))return;
     try{ const saved=await api("compcert",{method:"POST",body:{...gather(),status:"Draft"}}); toast(saved.docNo+" reopened to draft"); compCertForm(saved); }catch(e){ toast(e.message); } };
   if($("#hcPrint")) $("#hcPrint").onclick=()=>openCompCertDoc(r.id,true);
+  if($("#hcDl")) $("#hcDl").onclick=async ()=>{
+    try{ const saved=await api("compcert",{method:"POST",body:gather()});
+      const nPh=(saved.photos||r.photos||[]).length;
+      const wantReport=(!isDlp&&!isW)||nPh>0;
+      const base=(saved.docNo||r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_");
+      toast("Building certificate PDF…");
+      const ch=await apiText("compcert/"+r.id+"/html");
+      downloadPdfB64(base+".pdf", await htmlToPdfBase64(ch,{budget:1.4e6}));
+      if(wantReport){ toast("Building completion report PDF"+(nPh?" ("+nPh+" photos)":"")+"…");
+        try{ const rh=await apiText("compcert/"+r.id+"/report");
+          downloadPdfB64(base+"_Completion_Report.pdf", await htmlToPdfBase64(rh,{budget:6e6}));
+          toast("Downloaded — certificate + completion report");
+        }catch(e){ toast("Certificate downloaded. Report PDF failed: "+e.message); } }
+      else toast("Downloaded "+base+".pdf");
+    }catch(e){ toast(e.message); } };
   if($("#hcDel")) $("#hcDel").onclick=async ()=>{ if(!confirm("Delete "+r.docNo+"? This cannot be undone."))return; try{ await api("compcert/"+r.id,{method:"DELETE"}); toast("Deleted"); vCompCerts(); }catch(e){ toast(e.message); } };
   if($("#hcSend")) $("#hcSend").onclick=async ()=>{ const to=($("#hc_partyEmail").value||"").trim();
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast("Enter the party email first"); return; }
-    if(!confirm(`Email this ${isW?"warranty certificate":isDlp?"DLP certificate":"completion certificate"} (with PDF attached) to ${to}?`)) return;
-    try{ await api("compcert",{method:"POST",body:gather()}); // save latest edits first
-      const base=(r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_");
+    try{ const saved=await api("compcert",{method:"POST",body:gather()}); // save latest edits first
+      const nPh=(saved.photos||r.photos||[]).length;
+      // The certificate and the completion report always travel together in ONE email.
+      const wantReport=(!isDlp&&!isW)||nPh>0;
+      if(!confirm(`Email to ${to}:\n\n• ${isW?"Warranty certificate":isDlp?"DLP certificate":"Completion certificate"} ${saved.docNo||""} (PDF)${wantReport?`\n• Project Completion Report (PDF)${nPh?` — including ${nPh} site photo${nPh===1?"":"s"}`:""}`:""}\n\nBoth documents are attached to the same email. Send now?`)) return;
+      const base=(saved.docNo||r.docNo||"certificate").replace(/[^A-Za-z0-9._-]+/g,"_");
       const pdfs=[];
       toast("Preparing certificate PDF…");
-      try{ const html=await apiText("compcert/"+r.id+"/html"); pdfs.push({name:base+".pdf", base64:await htmlToPdfBase64(html)}); }
+      try{ const html=await apiText("compcert/"+r.id+"/html"); pdfs.push({name:base+".pdf", base64:await htmlToPdfBase64(html,{budget:1.4e6})}); }
       catch(e){ if(!confirm("Could not build the certificate PDF ("+e.message+"). Send without it?")) return; }
-      // Attach the Project Completion Report too (always for completion certs, and
-      // whenever photos are attached on the other types).
-      const wantReport=(!isDlp&&!isW)||((r.photos||[]).length>0);
-      if(wantReport){ toast("Preparing report PDF…");
-        try{ const rh=await apiText("compcert/"+r.id+"/report"); pdfs.push({name:base+"_Completion_Report.pdf", base64:await htmlToPdfBase64(rh)}); }
-        catch(e){ toast("Report PDF skipped: "+e.message); } }
-      toast("Sending…"); const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfs}});
-      toast("Sent to "+res.to+(res.attached?" ("+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached)":"")); compCertForm(await api("compcert/"+r.id));
+      if(wantReport){ toast("Preparing completion report PDF"+(nPh?" ("+nPh+" photos)":"")+"… this can take a moment");
+        try{ const rh=await apiText("compcert/"+r.id+"/report");
+          const rb=await htmlToPdfBase64(rh,{budget:3.2e6});
+          pdfs.push({name:base+"_Completion_Report.pdf", base64:rb});
+        }catch(e){ if(!confirm("The completion report PDF could not be built ("+e.message+").\n\nSend the certificate on its own?\n\nCancel = stop, so you can reduce the number of photos and try again.")) return; } }
+      const kb=Math.round(pdfs.reduce((a,p)=>a+p.base64.length,0)/1024*0.75);
+      if(kb>4600){ toast("Attachments are "+ (kb/1024).toFixed(1) +" MB — too large to send. Remove a few photos and try again."); return; }
+      toast("Sending "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" ("+(kb>=1024?(kb/1024).toFixed(1)+" MB":kb+" KB")+")…");
+      const res=await api("compcert/"+r.id+"/send",{method:"POST",body:{to,pdfs}});
+      toast("Sent to "+res.to+" — "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached"); compCertForm(await api("compcert/"+r.id));
     }catch(e){ toast(e.message); } };
 }
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();

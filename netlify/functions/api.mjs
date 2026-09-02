@@ -15644,9 +15644,8 @@ var api_default = async (req, context) => {
       const cfg = await getEmailCfg(s);
       const sign = await s.get("asset/sign").catch(() => "") || "";
       const stamp = await s.get("asset/stamp").catch(() => "") || "";
-      const html = buildCompCertHtml(rec, cfg, { sign, stamp });
-      const label = rec.type === "DLP" ? "Defects Liability Completion Certificate" : "Certificate of Completion";
-      const subject = `${label} ${rec.docNo} — ${rec.project || ""}`;
+      const certHtml = buildCompCertHtml(rec, cfg, { sign, stamp });
+      const label = rec.type === "DLP" ? "Defects Liability Completion Certificate" : rec.type === "WARRANTY" ? "Warranty Certificate" : "Certificate of Completion";
       let attachments;
       const pdfs = Array.isArray(b.pdfs) ? b.pdfs.filter((p) => p && p.base64) : (b.pdfBase64 ? [{ name: b.pdfName, base64: b.pdfBase64 }] : []);
       if (pdfs.length) {
@@ -15655,6 +15654,18 @@ var api_default = async (req, context) => {
           content: Buffer.from(String(p.base64), "base64"), contentType: "application/pdf"
         }));
       }
+      // Both documents go out in ONE email: the certificate and, where photos /
+      // a completion report exist, the Project Completion Report — listed as
+      // enclosures at the head of the message so the recipient sees both.
+      const hasReport = (attachments || []).some((a) => /report/i.test(a.filename));
+      const nPhotos = (rec.photos || []).length;
+      const subject = `${label} ${rec.docNo} — ${rec.project || ""}${hasReport ? " (incl. Completion Report)" : ""}`;
+      const encl = attachments && attachments.length
+        ? `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F3864;border:1px solid #e3e7ee;border-left:4px solid #cc9c30;background:#f7f9fc;padding:12px 14px;margin:0 0 14px">
+             <b>Enclosures — attached to this email</b>
+             <ol style="margin:6px 0 0 18px;padding:0;color:#333">${attachments.map((a) => `<li>${emEsc(a.filename)}${/report/i.test(a.filename) ? ` — Project Completion Report${nPhotos ? ` including ${nPhotos} site photograph${nPhotos === 1 ? "" : "s"}` : ""}` : ` — ${emEsc(label)}`}</li>`).join("")}</ol>
+           </div>` : "";
+      const html = encl + certHtml;
       const r = await sendMail(s, cfg, { type: "awarddoc", to, toName: rec.partyAttn || rec.partyName, subject, html, attachments });
       rec.status = rec.status === "Countersigned" ? "Countersigned" : "Issued";
       rec.sentAt = now(); rec.partyEmail = to;
