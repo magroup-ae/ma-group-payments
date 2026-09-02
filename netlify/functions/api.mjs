@@ -14378,6 +14378,131 @@ function mahFooter(entName) {
     <div class="mah-foot-cr">Office No. 1, Al Basha Plaza Building, Nad Al Hamar, P.O. Box 455277, Dubai, United Arab Emirates &nbsp;|&nbsp; T 800 62044 &nbsp;|&nbsp; info@maagroup.ae &nbsp;|&nbsp; www.maagroup.ae</div></div>`;
 }
 var MAH_CSS = `.mah{display:flex;align-items:center;gap:16px;border:0}.mah-logo{height:62px;width:auto;max-width:165px;object-fit:contain}.mah-co{flex:1;text-align:right}.mah-tag{color:#C6A252;font-size:10px;font-weight:700;letter-spacing:1.6px}.mah-n1{color:#1F3864;font-size:15px;font-weight:800;margin-top:3px}.mah-ad{color:#6b7280;font-size:9.5px;line-height:1.5}.mah-rule{height:3px;margin:9px 0 4px;background:linear-gradient(to right,#C6A252 0 30%,#1F3864 30% 100%)}.mah-sec{color:#C6A252;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;margin:16px 0 4px}.mah-foot{margin-top:20px}.mah-foot-rule{height:2px;background:#C6A252;margin-bottom:6px}.mah-foot-co{text-align:center;color:#1F3864;font-weight:800;font-size:10px}.mah-foot-cr{text-align:center;color:#6b7280;font-size:8.6px;line-height:1.5;margin-top:2px}`;
+/* ---------- Corporate document pagination ----------
+   Turns a flowing corporate document into true A4 pages: content is packed page
+   by page, page 2 onward opens with a compact repeated letterhead marked
+   "continued", every page carries "Page N of M", and breaks fall between blocks
+   or between whole table rows (with the table's header row repeated) — never
+   through the middle of a table, a photo or a signature block. */
+var MAPG_CSS = `
+@page{size:A4;margin:0}
+.mapg{width:210mm;height:297mm;padding:12mm 14mm 9mm;margin:0 auto 10px;background:#fff;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page}
+.mapg.last{page-break-after:auto;break-after:auto}
+.mapg-body{flex:1 1 auto;overflow:hidden}
+.mapg-cont{display:flex;align-items:center;gap:12px;border-bottom:2.5px solid #C6A252;padding-bottom:7px;margin-bottom:11px}
+.mapg-cont img{height:11mm;width:auto;max-width:40mm;object-fit:contain}
+.mapg-cont .n{font-size:12px;font-weight:800;color:#1F3864;line-height:1.3}
+.mapg-cont .r{margin-left:auto;text-align:right;font-size:9.5px;color:#6b7280;line-height:1.45}
+.mapg-cont .r b{color:#1F3864;font-size:10.5px}
+.mapg-num{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;font-size:8.6px;color:#8a8f98;border-top:1px solid #e3e7ee;padding-top:5px;margin-top:8px}
+.mapg-num b{color:#1F3864;font-weight:700}
+@media screen{body.mapg-on{background:#eceff3;padding:14px 0}.mapg{box-shadow:0 2px 14px rgba(0,0,0,.16)}}
+@media print{body.mapg-on{background:#fff;padding:0}.mapg{margin:0;box-shadow:none}}
+`;
+var MAPG_JS = `<script>
+window.MAPG_DONE=false;
+function MAPG_RUN(){
+  try{
+    var src=document.querySelector('.page'); if(!src||document.querySelector('.mapg')) { window.MAPG_DONE=true; return; }
+    var pb=document.createElement('div'); pb.style.cssText='width:100mm;position:absolute;visibility:hidden;left:-9999px'; document.body.appendChild(pb);
+    var MM=pb.getBoundingClientRect().width/100; pb.parentNode.removeChild(pb);
+    if(!(MM>0)){ window.MAPG_DONE=true; return; }
+    var PGH=297*MM, PADT=12*MM, PADB=9*MM, NUMH=7*MM, CONTH=20*MM;
+    var capFirst=PGH-PADT-PADB-NUMH, capCont=capFirst-CONTH;
+    var logoEl=src.querySelector('.mah-logo'), nameEl=src.querySelector('.mah-n1');
+    var logo=logoEl?logoEl.getAttribute('src'):'';
+    var coName=nameEl?nameEl.textContent:'';
+    var tEl=src.querySelector('.band .t'); var dTitle=tEl?tEl.textContent:(document.title||'');
+    var nEl=src.querySelector('table.pt b'); var dNo=nEl?nEl.textContent:'';
+    var foot=src.querySelector('.mah-foot'); if(foot&&foot.parentNode) foot.parentNode.removeChild(foot);
+    src.style.maxWidth=(182*MM)+'px'; src.style.padding='0'; src.style.margin='0';
+    var blocks=[].slice.call(src.children);
+    var H=function(el){ var r=el.getBoundingClientRect(); var cs=window.getComputedStyle(el);
+      return r.height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0); };
+    var pages=[], cur=[], curH=0, idx=0;
+    var cap=function(){ return idx===0?capFirst:capCont; };
+    var isHead=function(el){ var c=' '+String(el.className||'')+' '; return c.indexOf(' sec ')>=0||c.indexOf(' mah-sec ')>=0||c.indexOf(' band ')>=0||c.indexOf(' goldrule ')>=0; };
+    // A section heading never ends a page on its own — it travels with the block
+    // that follows it, so a page never opens with orphaned content.
+    var carry=[];
+    var flush=function(){
+      carry=[];
+      while(cur.length>1&&isHead(cur[cur.length-1])) carry.unshift(cur.pop());
+      if(cur.length){ pages.push(cur); idx++; }
+      cur=[]; curH=0;
+      for(var z=0;z<carry.length;z++){ cur.push(carry[z]); curH+=H(carry[z]); }
+    };
+    var addTall=function(el){
+      if(el.tagName==='TABLE'&&el.rows&&el.rows.length>3){
+        var rows=[].slice.call(el.rows), hdr=[], i;
+        for(i=0;i<rows.length;i++){ if(rows[i].querySelector('th')) hdr.push(rows[i]); else break; }
+        var hdrH=0; for(i=0;i<hdr.length;i++) hdrH+=hdr[i].getBoundingClientRect().height;
+        var rh=rows.map(function(x){ return x.getBoundingClientRect().height; });
+        var part=document.createElement('table'); part.className=el.className; part.style.cssText=el.style.cssText;
+        var ph=0, n=0;
+        for(i=0;i<rows.length;i++){
+          if(curH+ph+rh[i]>cap()&&n>hdr.length){ cur.push(part); flush();
+            part=document.createElement('table'); part.className=el.className; part.style.cssText=el.style.cssText;
+            for(var k=0;k<hdr.length;k++) part.appendChild(hdr[k].cloneNode(true));
+            ph=hdrH; n=hdr.length; }
+          part.appendChild(rows[i]); ph+=rh[i]; n++;
+        }
+        cur.push(part); curH+=ph; return true;
+      }
+      if(el.className&&String(el.className).indexOf('phgrid')>=0){
+        var kids=[].slice.call(el.children);
+        var g=el.cloneNode(false), gh=0, rowH=0, c=0;
+        for(var j=0;j<kids.length;j++){
+          var kh=kids[j].getBoundingClientRect().height+10;
+          if(c%2===0){ rowH=kh; } else { rowH=Math.max(rowH,kh); }
+          var add=(c%2===0)?kh:0;
+          if(curH+gh+add>cap()&&g.children.length){ cur.push(g); flush(); g=el.cloneNode(false); gh=0; c=0; add=kh; }
+          g.appendChild(kids[j]); if(c%2===0) gh+=kh; c++;
+        }
+        if(g.children.length){ cur.push(g); curH+=gh; }
+        return true;
+      }
+      return false;
+    };
+    for(var b=0;b<blocks.length;b++){
+      var el=blocks[b], h=H(el);
+      if(h>cap()){ if(curH>0&&cur.length) flush(); if(addTall(el)) continue; }
+      if(curH+h>cap()&&cur.length) flush();
+      cur.push(el); curH+=h;
+    }
+    flush();
+    if(!pages.length){ window.MAPG_DONE=true; return; }
+    var host=document.createElement('div');
+    for(var p=0;p<pages.length;p++){
+      var pg=document.createElement('div'); pg.className='mapg'+(p===pages.length-1?' last':'');
+      if(p>0){ var ch=document.createElement('div'); ch.className='mapg-cont';
+        ch.innerHTML=(logo?'<img src="'+logo+'" alt="">':'')+'<div class="n">'+coName+'</div>'+
+          '<div class="r"><b>'+dTitle+'</b>'+(dNo?' &nbsp;·&nbsp; '+dNo:'')+'<br>continued from previous page</div>';
+        pg.appendChild(ch); }
+      var body=document.createElement('div'); body.className='mapg-body';
+      for(var q=0;q<pages[p].length;q++) body.appendChild(pages[p][q]);
+      if(p===pages.length-1&&foot) body.appendChild(foot);
+      pg.appendChild(body);
+      var nm=document.createElement('div'); nm.className='mapg-num';
+      nm.innerHTML='<span>'+dTitle+(dNo?' &nbsp;·&nbsp; '+dNo:'')+'</span><span>Page <b>'+(p+1)+'</b> of <b>'+pages.length+'</b></span>';
+      pg.appendChild(nm);
+      host.appendChild(pg);
+    }
+    if(src.parentNode) src.parentNode.removeChild(src);
+    document.body.appendChild(host);
+    document.body.className=(document.body.className+' mapg-on').trim();
+  }catch(e){}
+  window.MAPG_DONE=true;
+}
+(function(){
+  var imgs=[].slice.call(document.images), left=imgs.length, done=false;
+  var go=function(){ if(done) return; done=true; setTimeout(MAPG_RUN,30); };
+  if(!left) return go();
+  var tick=function(){ if(--left<=0) go(); };
+  for(var i=0;i<imgs.length;i++){ if(imgs[i].complete) tick(); else { imgs[i].onload=tick; imgs[i].onerror=tick; } }
+  setTimeout(go,2500);
+})();
+<\/script>`;
 function buildRfqHtml(rec, cfg, vendor) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
   const ent = rec.entityName || "MA Group – Marvellous Art LLC";
@@ -14414,6 +14539,7 @@ function buildRfqHtml(rec, cfg, vendor) {
   .note{background:#fff8e6;border-left:4px solid #bf9000;border-radius:4px;padding:9px 13px;margin:10px 0;font-size:12px}
   .sig{margin-top:22px;font-size:12px}
   ${MAH_CSS}
+  ${MAPG_CSS}
 </style></head><body><div class="page">
   ${mahHeader(cfg, ent)}
   <div class="mah-sec">Procurement — Enquiry / RFQ</div>
@@ -14441,7 +14567,7 @@ function buildRfqHtml(rec, cfg, vendor) {
   <div class="sig">Best regards,<br><b>Procurement Department</b><br>${esc(ent)}</div>
   <div style="margin-top:6px;color:#98a2b3;font-size:9px;text-align:center">This Request for Quotation is confidential and intended only for the addressed vendor. ${esc(rec.rfqNo)} · Generated by the MA Group Procurement System.</div>
   ${mahFooter(ent)}
-</div></body></html>`;
+</div>${MAPG_JS}</body></html>`;
 }
 
 // ===================== COMPLETION & DLP CERTIFICATES =====================
@@ -14508,6 +14634,7 @@ function buildCompCertHtml(rec, cfg, assets) {
   .sh{color:#5b6472;font-weight:700;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
   .sn{font-weight:800;color:#183048;margin:3px 0 8px}
   .sl{color:#444;font-size:11px;margin-top:6px}
+  ${MAPG_CSS}
 </style></head><body><div class="page">
   ${mahHeader(cfg, ent)}
   <div class="band"><div class="t">${title}</div><div class="s">${sub}</div></div><div class="goldrule"></div>
@@ -14549,7 +14676,7 @@ function buildCompCertHtml(rec, cfg, assets) {
   </tr></table>
   <div style="color:#7a8494;font-size:9.5px;margin-top:8px">Issued in duplicate — one signed original to be retained by each party. ${isW ? "Warranty claims are to be notified in writing to info@maagroup.ae within the warranty period." : isDlp ? "" : "This certificate is a completion record only; warranty and defects liability, where applicable, remain governed by the approved quotation / purchase order terms."}</div>
   ${mahFooter(ent)}
-</div></body></html>`;
+</div>${MAPG_JS}</body></html>`;
 }
 
 // Professional Project Completion Report — accompanies the Completion Certificate:
@@ -14595,6 +14722,7 @@ function buildCompReportHtml(rec, cfg, assets) {
   .sn{font-weight:800;color:#183048;margin:3px 0 8px}
   .sl{color:#444;font-size:11px;margin-top:6px}
   @media print{ .ph img{height:230px} }
+  ${MAPG_CSS}
 </style></head><body><div class="page">
   ${mahHeader(cfg, ent)}
   <div class="band"><div class="t">PROJECT COMPLETION REPORT</div><div class="s">Accompanying Certificate No. ${esc(rec.docNo)} · ${dt(rec.date)}</div></div><div class="goldrule"></div>
@@ -14625,7 +14753,7 @@ function buildCompReportHtml(rec, cfg, assets) {
       <div class="sl">Name: ______________________________</div><div class="sl">Title: ______________________________</div><div class="sl">Signature &amp; Date</div></td>
   </tr></table>
   ${mahFooter(ent)}
-</div></body></html>`;
+</div>${MAPG_JS}</body></html>`;
 }
 function buildAwardDocHtml(rec, cfg, assets) {
   const isAgr = rec.type === "AGREEMENT";
@@ -14776,6 +14904,7 @@ function buildAwardDocHtml(rec, cfg, assets) {
   .note{background:#fff8e6;border-left:4px solid #bf9000;padding:9px 13px;border-radius:4px;font-size:11.5px;margin:12px 0}
   @media print{.page{max-width:none;padding:12mm}}
 ${MAH_CSS}
+  ${MAPG_CSS}
 </style></head><body><div class="page">
   ${mahHeader(cfg, ent)}
   <div class="title">${isAgr ? "SUBCONTRACT AGREEMENT" : "LETTER OF AWARD"}</div>
@@ -14789,7 +14918,7 @@ ${MAH_CSS}
   <div class="note"><b>Action required:</b> Please print, <b>sign and stamp</b> this document and return a scanned copy to <b>${esc(cfg && cfg.replyTo || "info@maagroup.ae")}</b> within <b>${hrs} hours</b>. Commencement of any works constitutes acceptance of these terms.</div>
   ${sigBlock}
   ${mahFooter(ent)}
-</div></body></html>`;
+</div>${MAPG_JS}</body></html>`;
 }
 // ---- Per-project contract terms ----
 // A subcontractor can hold DIFFERENT contracts on DIFFERENT projects. Terms and the

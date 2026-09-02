@@ -235,7 +235,7 @@ async function openAwardDoc(id, doPrint){
   try{ const html=await apiText("award/"+id+"/html"); const w=window.open("","_blank");
     if(!w){ toast("Allow pop-ups to view the document"); return; }
     w.document.open(); w.document.write(html); w.document.close();
-    if(doPrint){ setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 400); }
+    if(doPrint) waitPaginateThenPrint(w);
   }catch(e){ toast(e.message); }
 }
 // Render a full HTML document to a multi-page A4 PDF in the browser and return its
@@ -252,12 +252,31 @@ async function htmlToPdfBase64(html,opts={}){
   const budget=opts.budget||3.6e6; // bytes of base64
   const RW=820; // render width (~A4 @ 96dpi with margin)
   const ifr=document.createElement("iframe");
-  ifr.style.cssText="position:fixed;left:-10000px;top:0;width:"+RW+"px;height:1160px;border:0;background:#fff";
+  ifr.style.cssText="position:fixed;left:-10000px;top:0;width:"+(RW+60)+"px;height:1200px;border:0;background:#fff";
   document.body.appendChild(ifr);
   const idoc=ifr.contentDocument||ifr.contentWindow.document;
   idoc.open(); idoc.write(html); idoc.close();
   await new Promise(r=>setTimeout(r,350));
   try{ await Promise.all([...idoc.images].map(im=>im.complete?1:new Promise(res=>{im.onload=im.onerror=res; setTimeout(res,2500);}))); }catch(e){}
+  // Corporate documents paginate themselves into A4 pages with a repeated
+  // letterhead and "Page N of M" — render each of those pages to its own PDF
+  // page so the PDF is identical to the printed document.
+  for(let i=0;i<40 && !(ifr.contentWindow&&ifr.contentWindow.MAPG_DONE) && !idoc.querySelector(".mapg");i++) await new Promise(r=>setTimeout(r,80));
+  const mapg=[...idoc.querySelectorAll(".mapg")];
+  if(mapg.length){
+    const { jsPDF }=window.jspdf; const probe=new jsPDF({unit:"pt",format:"a4"});
+    const pw=probe.internal.pageSize.getWidth(), ph=probe.internal.pageSize.getHeight();
+    const a=Math.max(1,mapg[0].scrollWidth*mapg[0].scrollHeight);
+    const sc=Math.max(0.8,Math.min(2,Math.sqrt(PDF_MAX_CANVAS_PX/a)));
+    const shots=[];
+    for(const pg of mapg) shots.push(await html2canvas(pg,{scale:sc,useCORS:true,backgroundColor:"#ffffff",windowWidth:pg.scrollWidth,scrollX:0,scrollY:0}));
+    try{ document.body.removeChild(ifr); }catch(e){}
+    const emit=(q)=>{ const d=new jsPDF({unit:"pt",format:"a4",compress:true});
+      shots.forEach((cv,i)=>{ if(i) d.addPage(); d.addImage(cv.toDataURL("image/jpeg",q),"JPEG",0,0,pw,ph); });
+      return d.output("datauristring").split(",")[1]; };
+    let o=""; for(const q of [0.9,0.8,0.7,0.6,0.5]){ o=emit(q); if(o.length<=budget) return o; }
+    return o;
+  }
   const target=idoc.querySelector(".cert")||idoc.querySelector(".page")||idoc.body;
   const hCss=Math.max(target.scrollHeight||0,600);
   // Cap the scale so width×height stays inside the canvas-area limit.
@@ -3651,7 +3670,7 @@ async function rfqDetail(){
   </div>`;
   $("#rd_back").onclick=()=>{ RFQ_CUR=null; procRfqs(); };
   if($("#rd_eval")) $("#rd_eval").onclick=()=>procEvalForm();
-  $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); setTimeout(()=>{try{w.focus();w.print();}catch(e){}},400); }catch(e){toast(e.message);} };
+  $("#rd_print").onclick=async()=>{ try{ const html=await apiText("rfq/"+r.id+"/html"); const w=window.open("","_blank"); if(!w){toast("Allow pop-ups");return;} w.document.open();w.document.write(html);w.document.close(); waitPaginateThenPrint(w); }catch(e){toast(e.message);} };
   if($("#rd_edit"))$("#rd_edit").onclick=()=>{ IW=JSON.parse(JSON.stringify(r)); RFQ_CUR=null; PROC_TAB="issue"; vProc(); };
   if($("#rd_send"))$("#rd_send").onclick=async()=>{ const sel=(r.vendorIds||[]); const withE=sel.filter(id=>{const v=procVById(id);return v&&/@/.test(v.email||"");}).length; if(!confirm(`Send ${r.rfqNo} to ${withE} vendor(s) by email now?\nAll recipients are in BCC — addresses stay private.`))return; try{ toast("Sending…"); const rr=await api("rfq/"+r.id+"/send",{method:"POST"}); RFQ_CUR=await api("rfq/"+r.id); toast("Sent to "+rr.emailed); rfqDetail(); }catch(e){toast(e.message);} };
   b.querySelectorAll(".rd_file").forEach(a=>a.onclick=e=>{ e.preventDefault(); openRfqFile(r.id,a.dataset.i,a.dataset.n); });
@@ -4233,8 +4252,17 @@ async function openCompCertDoc(id,doPrintIt){
   try{ const html=await apiText("compcert/"+id+"/html"); const w=window.open("","_blank");
     if(!w){ toast("Allow pop-ups to view the document"); return; }
     w.document.open(); w.document.write(html); w.document.close();
-    if(doPrintIt){ setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },400); }
+    if(doPrintIt) waitPaginateThenPrint(w);
   }catch(e){ toast(e.message); }
+}
+// Corporate documents paginate themselves into A4 pages (repeated letterhead on
+// page 2+, "Page N of M"). Wait for that before opening the print dialog.
+function waitPaginateThenPrint(w){
+  let n=0;
+  const go=()=>{ try{ w.focus(); w.print(); }catch(e){} };
+  const tick=()=>{ let ready=false; try{ ready=!!w.MAPG_DONE||!!(w.document&&w.document.querySelector(".mapg")); }catch(e){ ready=true; }
+    if(ready||n++>60) setTimeout(go,120); else setTimeout(tick,80); };
+  setTimeout(tick,150);
 }
 function compCertForm(r){
   r=r||{}; const isDlp=r.type==="DLP", isW=r.type==="WARRANTY"; const isNew=!r.id;
@@ -4315,7 +4343,7 @@ function compCertForm(r){
      ${r.id&&ME.role==="CEO"&&r.status!=="Draft"?`<button class="btn ghost" id="hcReopen">Reopen to draft 🔒</button>`:""}
      ${r.id?`<button class="btn" id="hcPrint">View / Print certificate</button>`:""}
      ${r.id?`<button class="btn" id="hcReport">View / Print report</button>`:""}
-     ${r.id?`<button class="btn ghost" id="hcDl">⤓ Download PDF</button>`:""}
+     ${r.id?`<button class="btn ghost" id="hcDl">⤓ Download PDF (certificate + report)</button>`:""}
      ${r.id&&canEdit?`<button class="btn gold" id="hcSend">Email to party (certificate + report PDF)</button>`:""}
      ${r.id&&ME.role==="CEO"?`<button class="btn red" id="hcDel">Delete</button>`:""}
    </div>
@@ -4367,7 +4395,7 @@ function compCertForm(r){
       msg.textContent=""; $("#hcPhFile").value="";
       try{ r=await api("compcert/"+r.id); }catch(e2){}
       renderPhotos(); toast("Photos uploaded"); }; }
-  if($("#hcReport")) $("#hcReport").onclick=async ()=>{ try{ const html=await apiText("compcert/"+r.id+"/report"); const w=window.open("","_blank"); if(!w){ toast("Allow pop-ups to view the report"); return; } w.document.open(); w.document.write(html); w.document.close(); setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} },500); }catch(e){ toast(e.message); } };
+  if($("#hcReport")) $("#hcReport").onclick=async ()=>{ try{ const html=await apiText("compcert/"+r.id+"/report"); const w=window.open("","_blank"); if(!w){ toast("Allow pop-ups to view the report"); return; } w.document.open(); w.document.write(html); w.document.close(); waitPaginateThenPrint(w); }catch(e){ toast(e.message); } };
   if($("#hcSave")) $("#hcSave").onclick=async ()=>{ try{ const saved=await api("compcert",{method:"POST",body:gather()}); toast(saved.docNo+" saved"+(saved.status==="Draft"?" as draft":"")); compCertForm(saved); }catch(e){ toast(e.message); } };
   if($("#hcSubmit")) $("#hcSubmit").onclick=async ()=>{ if(!confirm("Submit "+(r.docNo||"this certificate")+" and mark it as ISSUED? It becomes part of the official register."))return;
     try{ const saved=await api("compcert",{method:"POST",body:{...gather(),status:"Issued"}}); toast(saved.docNo+" issued"); compCertForm(saved); }catch(e){ toast(e.message); } };
