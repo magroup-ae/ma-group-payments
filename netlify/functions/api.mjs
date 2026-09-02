@@ -14129,7 +14129,47 @@ async function computeTreasury(s) {
   withRun.sort((x, y) => x.date < y.date ? 1 : x.date > y.date ? -1 : y._i - x._i);
   for (const e of withRun) delete e._i;
   const totalBalance = r2(accounts.reduce((t, a) => t + a.balance, 0));
-  return { accounts, totalBalance, ledger: withRun.slice(0, 400) };
+  // ---- Cheque diary: what clears / falls due on a given day ----
+  // Outgoing = cheques we issued (payment register, mode Cheque); incoming =
+  // client cheques received. Each carries a status the finance team maintains
+  // (Due → Cleared, or Returned), so the bank statement can be reconciled:
+  // statement balance = live balance + cheques issued but not yet cleared.
+  const chqSt = await s.get("chequestatus", { type: "json" }) || {};
+  const today = now().slice(0, 10);
+  const cheques = [];
+  for (const r of register) {
+    if (!r || String(r.mode || "") !== "Cheque") continue;
+    const key = "out:" + (r.no || r.ref || r.sr);
+    const st = chqSt[key] || {};
+    cheques.push({
+      key, dir: "out", date: String(r.date || "").slice(0, 10), ref: r.ref || "", bank: r.bank || "",
+      party: r.payee || r.supplier || "", project: r.project || "", certNo: r.no || "", amount: num(r.amount),
+      status: st.status || "Due", clearedAt: st.clearedAt || "", note: st.note || "",
+      overdue: (st.status || "Due") === "Due" && String(r.date || "").slice(0, 10) && String(r.date || "").slice(0, 10) < today
+    });
+  }
+  for (const rc of receipts) {
+    if (!rc || !/cheque/i.test(String(rc.mode || ""))) continue;
+    const key = "in:" + rc.id;
+    const st = chqSt[key] || {};
+    cheques.push({
+      key, dir: "in", date: String(rc.date || "").slice(0, 10), ref: rc.ref || "", bank: rc.bank || "",
+      party: rc.project || "", project: rc.project || "", certNo: rc.certNo || "", amount: num(rc.amount),
+      status: st.status || "Due", clearedAt: st.clearedAt || "", note: st.note || "",
+      overdue: (st.status || "Due") === "Due" && String(rc.date || "").slice(0, 10) && String(rc.date || "").slice(0, 10) < today
+    });
+  }
+  cheques.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const pend = cheques.filter((c) => c.status === "Due");
+  const chequeSummary = {
+    today,
+    unclearedOut: r2(pend.filter((c) => c.dir === "out").reduce((t, c) => t + c.amount, 0)),
+    unclearedIn: r2(pend.filter((c) => c.dir === "in").reduce((t, c) => t + c.amount, 0)),
+    overdueOut: r2(pend.filter((c) => c.dir === "out" && c.overdue).reduce((t, c) => t + c.amount, 0)),
+    dueToday: r2(pend.filter((c) => c.dir === "out" && c.date === today).reduce((t, c) => t + c.amount, 0)),
+    count: pend.length
+  };
+  return { accounts, totalBalance, ledger: withRun.slice(0, 400), cheques, chequeSummary };
 }
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
@@ -17142,6 +17182,20 @@ var api_default = async (req, context) => {
   if (path === "treasury" && req.method === "GET") {
     if (!can("pnl") && !can("pay")) return err("Not permitted", 403);
     return json(await computeTreasury(s));
+  }
+  // Mark a cheque cleared / returned (or back to due) — the finance team keeps
+  // this in step with the bank statement.
+  if (path === "cheque/status" && req.method === "POST") {
+    if (!can("pay") && !can("admin")) return err("Not permitted", 403);
+    const b = await req.json();
+    const key = String(b.key || "");
+    if (!/^(out|in):/.test(key)) return err("Unknown cheque");
+    const status = ["Due", "Cleared", "Returned"].includes(String(b.status)) ? String(b.status) : "Due";
+    const map = await s.get("chequestatus", { type: "json" }) || {};
+    if (status === "Due") delete map[key];
+    else map[key] = { status, clearedAt: String(b.clearedAt || now().slice(0, 10)).slice(0, 10), note: String(b.note || ""), by: me.name, at: now() };
+    await s.setJSON("chequestatus", map);
+    return json({ ok: true, key, status });
   }
   if (path === "bankopening" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
