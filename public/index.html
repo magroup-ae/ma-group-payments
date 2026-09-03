@@ -2965,6 +2965,11 @@ function renderPnl(d){
         <tr><td class="lab">Advance / down payment — received (logged)</td><td class="num" style="color:${num(d.advanceReceived)>0?'#2E7D32':'#7a8494'}">${fmt(d.advanceReceived)}</td></tr>
         <tr><td class="lab">Less: recovered to date (from IPCs)</td><td class="num">(${fmt(d.advanceRecovered)})</td></tr>
         <tr style="background:#eef2f8;font-weight:700"><td>Advance outstanding to recover (liability)</td><td class="num" style="color:var(--gold)">${fmt(d.advanceOutstanding)}</td></tr>
+        ${(num(d.advanceRecovered)>0&&num(d.advanceReceived)<=0)?`<tr><td colspan="2" style="background:#fff8e6;border-left:4px solid #bf9000;font-size:11.5px;color:#7a5c00">
+          ⚠ <b>The IPCs are recovering an advance of AED ${fmt(d.advanceRecovered)}, but no advance receipt is logged.</b>
+          Either the down payment was received and never recorded — log it in <b>Client IPCs → the project → Record client payment</b> with <b>“Advance / down payment”</b> ticked — or no advance was ever received, in which case the contract's advance amount should be set to 0 in <b>Clients → contract</b>, because every certificate is currently deducting money the client never advanced.</td></tr>`:""}
+        ${(num(d.advanceReceived)>0&&num(d.advanceAgreed)>0&&Math.abs(num(d.advanceReceived)-num(d.advanceAgreed))>1)?`<tr><td colspan="2" style="background:#f4f6fb;border-left:4px solid var(--navy);font-size:11.5px">
+          ℹ Advance received (${fmt(d.advanceReceived)}) differs from the agreed advance (${fmt(d.advanceAgreed)}) by ${fmt(Math.abs(num(d.advanceReceived)-num(d.advanceAgreed)))} — check the contract terms or the logged receipt.</td></tr>`:""}
         ${(num(d.advanceUtilised)>0||num(d.advanceAgreed)>0)?`<tr><td colspan="2" style="height:8px;border:0"></td></tr>
         <tr style="font-weight:600"><td colspan="2">Down-payment facility utilisation</td></tr>
         <tr><td class="lab" style="padding-left:18px">Advance / down payment — agreed facility</td><td class="num">${fmt(d.advanceAgreed)}</td></tr>

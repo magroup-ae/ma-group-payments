@@ -14223,7 +14223,10 @@ async function computePnl(s, project) {
   const projContracts = contracts.filter((c) => !project || c.project === project);
   const cids = new Set(projContracts.map((c) => c.id));
   let collectedAll = 0, advanceReceiptSum = 0;
-  for (const rc of receipts) { if (!rc) continue; if (project && rc.project !== project) continue; const amt = num(rc.amount); collectedAll += amt; if (rc.type === "advance") advanceReceiptSum += amt; }
+  // Client receipts store the advance flag as `isAdvance` (the older `type`
+  // spelling is still honoured), so an advance / down payment logged by the team
+  // is recognised here instead of silently reading as a progress collection.
+  for (const rc of receipts) { if (!rc) continue; if (project && rc.project !== project) continue; const amt = num(rc.amount); collectedAll += amt; if (rc.isAdvance || rc.type === "advance") advanceReceiptSum += amt; }
   // Per-contract LATEST cumulative position (taken at the highest-gross IPC),
   // plus cumulative billing (net + VAT) summed across that contract's IPCs.
   const maxGross = {}, latestRetention = {}, latestAdvRec = {}, latestMos = {}, latestWork = {};
