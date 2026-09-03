@@ -13568,6 +13568,40 @@ async function ensureInit() {
     settings.histSquarePayV1 = true;
     await s.setJSON("settings", settings);
   }
+  // The Square 2.0 advance / down payment was received BEFORE this system went
+  // live, so it was never logged — while every IPC has been recovering it. That
+  // made "advance received" read zero against a real recovery. Record it once,
+  // dated to the contract, flagged as an advance. It sits before the bank
+  // opening date, so it does not disturb the live bank balance.
+  if (!settings.histSquareAdvanceV1) {
+    try {
+      const contracts = await getAllJSON(s, "contract/");
+      const k = contracts.find((c) => /squar/i.test(c.project || ""));
+      if (k && num(k.advanceAmount) > 0) {
+        const rs = (await getAllJSON(s, "clientreceipt/")).filter((r) => r && (r.contractId === k.id || (r.project && r.project === k.project)));
+        const already = rs.some((r) => r.isAdvance || r.type === "advance");
+        if (!already) {
+          const id = await nextId(s, settings, "clientReceiptSeq", "CR", "clientreceipt/", 4);
+          const rec = {
+            id, seq: Number(String(id).replace(/\D/g, "")) || 0,
+            contractId: k.id, clientId: k.clientId, project: k.project, certNo: "",
+            date: "2026-06-12",
+            amount: r2(num(k.advanceAmount)), mode: "Bank Transfer",
+            ref: String(k.subcontractRef || k.offerRef || "Advance payment"),
+            // Book it to the main account so it is classified, not "unallocated";
+            // being dated before the opening balance it never moves the balance.
+            bank: String((settings.banks || [])[0] || ""),
+            isRetentionRelease: false, isAdvance: true,
+            notes: "Advance / down payment received before this system went live — recorded retrospectively so the advance recovered on each IPC reconciles to cash actually received.",
+            createdBy: "System", createdAt: now(), updatedAt: now(), updatedBy: "System"
+          };
+          await s.setJSON("clientreceipt/" + id, rec);
+        }
+      }
+    } catch (e) {}
+    settings.histSquareAdvanceV1 = true;
+    await s.setJSON("settings", settings);
+  }
   return { settings, users };
 }
 async function getAllJSON(s, prefix) {
