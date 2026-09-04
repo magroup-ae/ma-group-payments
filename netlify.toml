@@ -13,3 +13,8 @@
 # (export const config = { path: "/api/*" }). We deliberately DO NOT add a
 # redirect to /.netlify/functions/api/* — that legacy path is not exposed for
 # v2 path-routed functions and force-redirecting to it breaks all /api calls.
+
+[[headers]]
+  for = "/site.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
