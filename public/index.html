@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MA Group Finance</title>
+<title>MA Group</title>
 <style>
   :root { --navy:#1F3864; --blue:#2E75B6; --gold:#BF9000; --green:#375623; --red:#C00000; --grey:#f4f5f7; }
   * { box-sizing:border-box; }
@@ -385,7 +385,7 @@ function fileToDataUrl(file, cb, opts={}){
 function renderLogin(){
   document.body.style.background="";
   root.innerHTML = `<div class="login-wrap"><div class="login">
-    <img src="logo.png" alt="MA Group"><h1>MA GROUP<br><span style="font-size:12px;font-weight:400;color:#777">Finance</span></h1>
+    <img src="logo.png" alt="MA Group"><h1>MA GROUP<br><span style="font-size:12px;font-weight:400;color:#777">Management system</span></h1>
     <div style="text-align:left"><label>User</label><select id="lu"></select>
     <div style="height:10px"></div><label>PIN</label><input id="lp" type="password" inputmode="numeric" placeholder="••••"></div>
     <div style="height:16px"></div><button class="btn gold" style="width:100%" id="lb">Sign in</button>
@@ -407,7 +407,7 @@ function renderPolicyGate(){
   const today=new Date().toISOString().slice(0,10);
   const signImg=ASSETS&&ASSETS.sign?`<img src="${ASSETS.sign}" alt="signature" style="height:54px;max-width:180px;object-fit:contain;display:block">`:`<div style="height:54px"></div>`;
   const stampImg=ASSETS&&ASSETS.stamp?`<img src="${ASSETS.stamp}" alt="company stamp" style="height:100px;opacity:.85;object-fit:contain">`:"";
-  root.innerHTML=`<header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Finance</div><div class="sp"></div><div class="u">${esc(ME.name)} · ${esc(ME.title||ME.role)}</div></header>
+  root.innerHTML=`<header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP</div><div class="sp"></div><div class="u">${esc(ME.name)} · ${esc(ME.title||ME.role)}</div></header>
    <div style="max-width:860px;margin:22px auto;padding:0 16px">
     <div class="card">
      <div class="muted" style="margin-bottom:10px">This is an official MA Group undertaking. Please read it in full, then confirm and sign at the bottom. You cannot access the system until you sign.</div>
@@ -471,6 +471,7 @@ const ICONS={
   ops:ICO('<circle cx="9" cy="7" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M17 4v4M15 6h4"/><path d="M15 13h6M15 17h6M15 21h4"/>'),
   assets:ICO('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
   hocerts:ICO('<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>'),
+  marketing:ICO('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>'),
   announce:ICO('<path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6"/>'),
   settings:ICO('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>')
 };
@@ -478,6 +479,10 @@ function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
   const r=ME.role;
   const has=(...roles)=>roles.includes(r);
+  // Department logins see only their own pages. HR & Admin → operations cost,
+  // assets, expenses, suppliers, announcements. Marketing → marketing pages.
+  const DEPT_PAGES={ HR:["ops","assets","expenses","sups","announce"], Marketing:["marketing","announce"] };
+  const allowed=(k)=>!DEPT_PAGES[r]||DEPT_PAGES[r].includes(k);
   // Menu grouped the way the business actually works: money in, money out,
   // finance & control, delivery, then administration.
   const GROUPS=[
@@ -505,17 +510,21 @@ function render(){
       ["assets","Assets"]]],
     ["Delivery & aftercare", [
       ...(has("CEO","PM","QS")?[["hocerts","Completion / DLP"]]:[])]],
+    ["Marketing & communication", [
+      ...(has("CEO","Marketing")?[["marketing","Marketing"]]:[]),
+      ...(has("CEO","HR","Marketing")?[["announce","Announcements"]]:[])]],
     ["Administration", [
-      ...(r==="CEO"?[["announce","Announcements"]]:[]),
       ...(r==="CEO"?[["settings","Settings"]]:[])]]
-  ].map(([g,items])=>[g,items.filter(Boolean)]).filter(([,items])=>items.length);
-  const titleOf=(()=>{ for(const [,items] of GROUPS) for(const [k,l] of items) if(k===VIEW) return l; return "MA Group Finance"; })();
+  ].map(([g,items])=>[g,items.filter(Boolean).filter(([k])=>allowed(k))]).filter(([,items])=>items.length);
+  // Land department users on their first page instead of the finance dashboard.
+  if(!GROUPS.some(([,items])=>items.some(([k])=>k===VIEW))) VIEW=({HR:"ops",Marketing:"marketing"})[r]||GROUPS[0][1][0][0];
+  const titleOf=(()=>{ for(const [,items] of GROUPS) for(const [k,l] of items) if(k===VIEW) return l; return "MA Group"; })();
   const collapsed=localStorage.getItem("ma_sb")==="1";
   document.body.classList.toggle("sb-collapsed",collapsed);
   document.body.classList.remove("sb-open");
   root.innerHTML = `
   <aside class="sb">
-    <div class="sb-top"><img src="logo.png" alt=""><div class="nm">MA GROUP<span>FINANCE</span></div></div>
+    <div class="sb-top"><img src="logo.png" alt=""><div class="nm">MA GROUP<span>MANAGEMENT SYSTEM</span></div></div>
     <div class="sb-scroll">
       ${GROUPS.map(([g,items])=>`${g?`<div class="grp">${esc(g)}</div>`:`<div style="height:6px"></div>`}
         ${items.map(([k,l])=>`<button class="nv ${VIEW===k?"on":""}" data-v="${k}" title="${esc(l)}"><span class="ic">${ICONS[k]||""}</span><span class="lb">${esc(l)}</span></button>`).join("")}`).join("")}
@@ -544,7 +553,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, ops:vOps, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, ops:vOps, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, marketing:vMarketing, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -1333,7 +1342,7 @@ function printCert(c){
    ${stampImg}
    </div>
    ${certCredits()}
-   <div class="foot">Generated by the MA Group Finance — ${esc(c.no)} — status: ${esc(c.status)}${approved?" — approved & signed electronically":""} — printed ${dmy(new Date())}</div>
+   <div class="foot">Generated by the MA Group management system — ${esc(c.no)} — status: ${esc(c.status)}${approved?" — approved & signed electronically":""} — printed ${dmy(new Date())}</div>
   </div>${(c.payment&&c.payment.mode==="Cash")?`<div class="pagebreak"></div>`+voucherHtml(c):""}`;
   doPrint();
 }
@@ -1498,7 +1507,7 @@ function voucherHtml(c){
     <div class="muted" style="font-size:8.5px;margin:4px 0">Collection is on Tuesdays only, 1:00–4:00 PM, by an authorised representative whose Emirates ID is registered under the company name (original EID presented). The original TAX invoice and a signed &amp; stamped receipt voucher are mandatory at collection.</div>
     <table class="sig" style="margin-top:12px"><tr><td class="nm">&nbsp;</td><td class="nm"></td><td class="nm"></td></tr>
     <tr><td>Received by (Payee) — sign, stamp &amp; EID</td><td>Paid by (Cash Custodian)</td><td>Approved by</td></tr></table>
-    <div class="foot">MA Group Finance — petty cash voucher — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
+    <div class="foot">MA Group — petty cash voucher — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
 }
 function printPettyCash(c){ $("#printArea").innerHTML=voucherHtml(c); doPrint(); }
 /* ---------- payment receipt / acknowledgement voucher ---------- */
@@ -1524,7 +1533,7 @@ function receiptVoucherHtml(c){
     <div class="note" style="font-size:9px;border-left:3px solid var(--gold);padding:6px 10px;background:#fff8e6;margin:6px 0">Collection of cash &amp; cheques is on <b>Tuesdays only, 1:00–4:00 PM</b>, by an authorised representative whose <b>Emirates ID is registered under the company name</b> (original EID presented). The <b>original TAX invoice</b> and a <b>signed &amp; stamped receipt voucher</b> are mandatory for every payment.</div>
     <table class="sig" style="margin-top:16px"><tr><td class="nm">&nbsp;</td><td class="nm">&nbsp;</td></tr>
     <tr><td>Receiver’s signature &amp; company stamp</td><td>Released by (MA Group Accounts)</td></tr></table>
-    <div class="foot">MA Group Finance — payment receipt &amp; acknowledgement — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
+    <div class="foot">MA Group — payment receipt &amp; acknowledgement — ${esc(c.no)} — printed ${dmy(new Date())}</div></div>`;
 }
 function printReceiptVoucher(c){ $("#printArea").innerHTML=receiptVoucherHtml(c); doPrint(); }
 
@@ -1693,7 +1702,7 @@ function printSupplierStatement(s,a,ordered){
     <tr class="tot"><td>Cert No.</td><td>Date</td><td>Project</td><td style="text-align:right">This Cert</td><td style="text-align:right">Cumulative</td><td style="text-align:right">Retention</td><td>Status</td></tr>
     ${rows}</table>
     <div style="font-size:9px;font-style:italic;margin-top:6px">Retention is released after completion / taking-over or on expiry of the DLP per contract. ${esc(s.retentionRelease||"")}</div>
-    <div class="foot">MA Group Finance — supplier statement — printed ${dmy(new Date())}</div></div>`;
+    <div class="foot">MA Group — supplier statement — printed ${dmy(new Date())}</div></div>`;
   document.body.classList.add("printing-cert");
   const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
   window.addEventListener("afterprint",done); window.print();
@@ -1855,7 +1864,7 @@ function printSupplierReg(s){
     <tr><td colspan="4" style="font-size:9.5px;font-style:italic">We confirm the above information is correct and attach copies of our trade licence, TRN certificate and bank letter. We agree to MA Group's payment and retention terms.</td></tr></table>
     <table class="sig" style="margin-top:22px"><tr><td class="nm">&nbsp;</td><td class="nm"></td></tr>
     <tr><td>Supplier — Name / Signature / Stamp / Date</td><td>MA Group — Registered by / Date</td></tr></table>
-    <div class="foot">MA Group Finance — supplier registration — printed ${dmy(new Date())}</div></div>`;
+    <div class="foot">MA Group — supplier registration — printed ${dmy(new Date())}</div></div>`;
   document.body.classList.add("printing-cert");
   const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
   window.addEventListener("afterprint",done); window.print();
@@ -1926,7 +1935,7 @@ function printProjectReport(stats,T){
     ${rows}
     <tr class="pay"><td>TOTAL</td><td style="text-align:right">${fmt(stats.reduce((a,p)=>a+p.certifiedNet,0))}</td><td style="text-align:right">${fmt(T.payable)}</td><td style="text-align:right">${fmt(T.paid)}</td><td style="text-align:right">${fmt(T.retention)}</td><td style="text-align:right">${fmt(T.advance)}</td></tr></table>
     <div style="font-size:9.5px;font-style:italic;margin-top:6px">Retention held is withheld from suppliers and released after completion / taking-over or on expiry of the Defects Liability Period, per each supplier's contract terms. Suppliers marked "No retention" have none.</div>
-    <div class="foot">MA Group Finance — project monitoring — printed ${dmy(new Date())}</div></div>`;
+    <div class="foot">MA Group — project monitoring — printed ${dmy(new Date())}</div></div>`;
   document.body.classList.add("printing-cert");
   const done=()=>{ document.body.classList.remove("printing-cert"); window.removeEventListener("afterprint",done); };
   window.addEventListener("afterprint",done); window.print();
@@ -2403,7 +2412,7 @@ function printVo(v){
      <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
      <tr><td>Prepared &amp; Submitted by<br>MA Group — Quantity Surveyor</td><td>Reviewed by<br>Client — Project Manager</td><td>Approved by<br>Client — Authorised Signatory</td></tr></table></div>
    ${certCredits()}
-   <div class="foot">MA Group Finance &nbsp;•&nbsp; Variation Order &nbsp;•&nbsp; ${esc(v.no)} &nbsp;•&nbsp; Status: ${esc(v.status)}${v.approvedBy?" (recorded by "+esc(v.approvedBy)+" on "+dmy(v.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
+   <div class="foot">MA Group &nbsp;•&nbsp; Variation Order &nbsp;•&nbsp; ${esc(v.no)} &nbsp;•&nbsp; Status: ${esc(v.status)}${v.approvedBy?" (recorded by "+esc(v.approvedBy)+" on "+dmy(v.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
   </div>`;
   doPrint();
 }
@@ -2732,7 +2741,7 @@ function printClientIPC(c){
      <td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td><td class="nm"></td><td class="nm"></td></tr>
      <tr><td>Prepared &amp; Certified by<br>MA Group — Quantity Surveyor</td><td>Reviewed by<br>Client — Project Manager</td><td>Approved by<br>Client — Authorised Signatory</td></tr></table></div>
    ${certCredits()}
-   <div class="foot">MA Group Finance &nbsp;•&nbsp; Interim Payment Certificate (Client) &nbsp;•&nbsp; ${esc(c.no)} &nbsp;•&nbsp; Status: ${esc(c.status)}${isApproved&&c.approvedBy?" (approved by "+esc(c.approvedBy)+" on "+dmy(c.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated certificate issued under the MA Group financial control system.</div>
+   <div class="foot">MA Group &nbsp;•&nbsp; Interim Payment Certificate (Client) &nbsp;•&nbsp; ${esc(c.no)} &nbsp;•&nbsp; Status: ${esc(c.status)}${isApproved&&c.approvedBy?" (approved by "+esc(c.approvedBy)+" on "+dmy(c.approvedAt)+")":""} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated certificate issued under the MA Group financial control system.</div>
   </div>`;
   doPrint();
 }
@@ -2771,7 +2780,7 @@ function printProforma(c){
    <table><tr><td class="certify">This is a proforma invoice issued for advance information and payment processing against the referenced payment certificate. A tax invoice will be issued upon receipt of payment / certification in accordance with UAE VAT regulations. Kindly quote the proforma reference <b>${esc(pf.no||"")}</b> on your remittance.</td></tr></table>
    <div style="position:relative"><table class="sig"><tr><td class="nm">&nbsp;</td><td class="nm"></td></tr>
      <tr><td>Prepared by — MA Group (Accounts)</td><td>Authorised Signatory</td></tr></table></div>
-   <div class="foot">MA Group Finance &nbsp;•&nbsp; Proforma Invoice ${esc(pf.no||"")} &nbsp;•&nbsp; against ${esc(c.no)} &nbsp;•&nbsp; Printed ${dmy(new Date())}</div>
+   <div class="foot">MA Group &nbsp;•&nbsp; Proforma Invoice ${esc(pf.no||"")} &nbsp;•&nbsp; against ${esc(c.no)} &nbsp;•&nbsp; Printed ${dmy(new Date())}</div>
   </div>`;
   doPrint();
 }
@@ -3208,6 +3217,16 @@ async function parseLpoPdf(file){
 }
 /* ---------- Operations cost / HR management ---------- */
 const HQ_NAME="MA HQ – Operations";
+const DEPTS=[
+  {role:"Accounts",name:"Finance / Accounts",desc:"payments, cheques, bank, expenses, P&L, operations cost"},
+  {role:"HR",name:"HR & Admin",desc:"payroll & staff assignment, fixed expenses, assets, announcements"},
+  {role:"PM",name:"Projects — Project Manager",desc:"clients, IPCs, variations, procurement, contracts, DLP; checks certificates"},
+  {role:"QS",name:"Projects — Quantity Surveyor",desc:"creates certificates, BOQ/budget, procurement & evaluations"},
+  {role:"Marketing",name:"Marketing",desc:"posts, campaigns, audiences (CEO approves & publishes)"},
+  {role:"Clerk",name:"Admin & data entry",desc:"enters expenses, suppliers, clients, assets — no approvals"},
+  {role:"Secretary",name:"Secretary",desc:"suppliers, clients, assets, operations register"},
+  {role:"CEO",name:"CEO / full access",desc:"everything incl. settings and approvals"}];
+const DEPT_OF=Object.fromEntries(DEPTS.map(d=>[d.role,d.name]));
 let OPS_TAB="overview", OPS_MONTH=new Date().toISOString().slice(0,7), OPS=null, OPS_STAFF_EDIT=null;
 const opsCan={ edit:()=>["CEO","Accounts","Secretary"].includes(ME.role), payroll:()=>["CEO","Accounts"].includes(ME.role), post:()=>["CEO","Accounts"].includes(ME.role) };
 function monthLabel(m){ if(!m) return "—"; const [y,mo]=m.split("-"); return new Date(Date.UTC(+y,+mo-1,1)).toLocaleString("en-GB",{month:"long",year:"numeric",timeZone:"UTC"}); }
@@ -4498,7 +4517,7 @@ function printEvalSheet(r){
      <td class="nm" style="vertical-align:bottom;padding-top:6px">&nbsp;</td><td class="nm"></td><td class="nm" style="vertical-align:bottom;padding-top:6px">${signImg}</td></tr>
      <tr><td>Prepared by<br>MA Group — Quantity Surveyor${ev.preparedBy?"<br><span style='font-weight:400;font-size:8px'>"+esc(ev.preparedBy)+"</span>":""}</td><td>Reviewed by<br>Project Manager</td><td>Approved by<br>Chief Executive Officer${ev.approvedBy?"<br><span style='font-weight:400;font-size:8px'>"+esc(ev.approvedBy)+" · "+dmy(ev.approvedAt)+"</span>":""}</td></tr></table></div>
    ${certCredits()}
-   <div class="foot">MA Group Finance &nbsp;•&nbsp; Evaluation &amp; Comparison Sheet &nbsp;•&nbsp; ${esc(r.rfqNo)} &nbsp;•&nbsp; Status: ${esc(ev.status||"Draft")} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
+   <div class="foot">MA Group &nbsp;•&nbsp; Evaluation &amp; Comparison Sheet &nbsp;•&nbsp; ${esc(r.rfqNo)} &nbsp;•&nbsp; Status: ${esc(ev.status||"Draft")} &nbsp;•&nbsp; Printed ${dmy(new Date())}<br>This is a computer-generated document issued under the MA Group financial control system.</div>
   </div>`;
   doPrint();
 }
@@ -4540,8 +4559,186 @@ const ANN_CATS=["Payment & Certification","General Information","Instruction / N
 const ANN_TEMPLATES={
   "Payment & Certification":`Dear Valued Partner,\n\nThis is to remind all suppliers and subcontractors that payment submittals for certification must be submitted on or before the 25th of each month, to allow our team to review and verify them.\n\nAll verified payments will be released after the 10th of the following month.\n\nEach submittal must be accompanied by the works report and the attendance sheet signed and verified by the MA Group site engineer. No tax invoice will be accepted without these attachments.`
 };
+/* ---------- marketing: posts, approvals, publishing, broadcasts, audiences ---------- */
+let MKT=null, MKT_TAB="posts", MKT_EDIT=null, MKT_FILTER="", MKT_AUD=null;
+const mktCan={ edit:()=>["CEO","Marketing"].includes(ME.role), approve:()=>ME.role==="CEO", publish:()=>ME.role==="CEO" };
+const MKT_LIMITS={linkedin:3000,instagram:2200,facebook:5000,whatsapp:1024,email:0};
+function mktPill(st){ const m={Draft:"st-Draft",Review:"st-Submitted",Approved:"st-Approved",Scheduled:"st-Issued",Published:"st-Paid",Failed:"st-Rejected",Cancelled:"st-Cancelled"}; return `<span class="pill ${m[st]||"st-Draft"}">${esc(st)}</span>`; }
+function mktChName(c){ const x=(MKT&&MKT.channels||[]).find(k=>k.code===c); return x?x.name:c; }
+function mktChIcon(c){ return {linkedin:"in",instagram:"IG",facebook:"f",whatsapp:"WA",email:"@"}[c]||c; }
+function mktWhen(p){ return p.scheduledAt?new Date(p.scheduledAt).toLocaleString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"; }
+async function vMarketing(){
+  const sub=(k,l)=>`<button class="btn ${MKT_TAB===k?'gold':'ghost'}" data-tab="${k}">${l}</button>`;
+  $("#main").innerHTML=`<div class="card"><div class="flex" style="flex-wrap:wrap;gap:8px">
+     <h2 style="margin:0">Marketing</h2><span class="muted">LinkedIn · Instagram · Facebook · WhatsApp · e-mail — plan, approve, publish, measure</span>
+     <div class="right flex" style="gap:6px;flex-wrap:wrap">${sub("posts","Posts & calendar")}${mktCan.edit()?sub("new","+ New post"):""}${sub("audiences","Audiences")}${sub("connect","Connections")}</div></div>
+     <div id="mkBody" class="muted" style="margin-top:12px">Loading…</div></div>`;
+  $("#main").querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ MKT_TAB=b.dataset.tab; if(MKT_TAB==="new") MKT_EDIT={}; vMarketing(); });
+  try{ MKT=await api("mkt"); }catch(e){ $("#mkBody").textContent=e.message; return; }
+  const el=$("#mkBody"); el.classList.remove("muted");
+  if(MKT_TAB==="posts") renderMktPosts(el);
+  else if(MKT_TAB==="new") await renderMktForm(el, MKT_EDIT||{});
+  else if(MKT_TAB==="audiences") renderMktAudiences(el);
+  else renderMktConnect(el);
+}
+function renderMktPosts(el){
+  const d=MKT, k=d.kpi;
+  const posts=d.posts.filter(p=>!MKT_FILTER||p.status===MKT_FILTER||p.channels.includes(MKT_FILTER));
+  const upcoming=d.posts.filter(p=>p.status==="Scheduled").sort((a,b)=>String(a.scheduledAt).localeCompare(String(b.scheduledAt))).slice(0,6);
+  const chips=[["","All"],["Draft","Draft"],["Review","In review"],["Approved","Approved"],["Scheduled","Scheduled"],["Published","Published"],["Failed","Failed"],["linkedin","LinkedIn"],["instagram","Instagram"],["facebook","Facebook"],["whatsapp","WhatsApp"],["email","E-mail"]];
+  el.innerHTML=`
+   <div class="kpis">
+     <div class="kpi"><div class="v">${k.published}</div><div class="l">Published</div></div>
+     <div class="kpi" style="border-top-color:var(--navy)"><div class="v">${k.scheduled}</div><div class="l">Scheduled</div></div>
+     <div class="kpi" style="border-top-color:var(--gold)"><div class="v">${k.review}</div><div class="l">Awaiting CEO approval</div></div>
+     <div class="kpi"><div class="v">${k.draft}</div><div class="l">Drafts</div></div>
+     <div class="kpi ${k.failed?'alert':''}"><div class="v">${k.failed}</div><div class="l">Failed — needs attention</div></div>
+   </div>
+   ${upcoming.length?`<div class="card" style="margin:12px 0 0;background:#f8f9fc"><h3 style="margin:0 0 6px">Next up</h3>${upcoming.map(p=>`<div class="flex" style="gap:8px;font-size:12.5px;padding:3px 0"><b style="min-width:130px">${mktWhen(p)}</b> ${p.channels.map(c=>`<span class="pill" style="background:#1f3864">${mktChIcon(c)}</span>`).join(" ")} <a href="#" data-open="${p.id}">${esc(p.title)}</a></div>`).join("")}</div>`:""}
+   <div class="flex" style="flex-wrap:wrap;gap:6px;margin:12px 0 8px">${chips.map(([v,l])=>`<button class="btn ${MKT_FILTER===v?'gold':'ghost'}" data-f="${v}" style="padding:4px 10px;font-size:12px">${l}</button>`).join("")}<button class="btn ghost right" id="mkCsv" style="padding:4px 10px;font-size:12px">Export CSV</button></div>
+   <div style="overflow-x:auto"><table>
+    <tr><th>ID</th><th>Title</th><th>Type</th><th>Channels</th><th>When</th><th>Status</th><th>Result</th><th>By</th></tr>
+    ${posts.map(p=>`<tr class="click" data-open="${p.id}"><td>${esc(p.id)}</td><td><b>${esc(p.title)}</b>${p.campaign?`<br><span class="muted" style="font-size:11px">${esc(p.campaign)}</span>`:""}</td><td>${esc(p.type)}</td><td>${p.channels.map(c=>`<span class="pill" style="background:${p.published&&p.published[c]?'#375623':p.failed&&p.failed[c]?'#9c2b2b':'#1f3864'}" title="${esc(mktChName(c))}${p.failed&&p.failed[c]?' — '+esc(p.failed[c].error):''}">${mktChIcon(c)}</span>`).join(" ")}</td><td>${mktWhen(p)}</td><td>${mktPill(p.status)}</td><td style="font-size:11.5px">${Object.entries(p.published||{}).map(([c,v])=>`${mktChIcon(c)} ${v.count!=null?v.count+" sent":"✓"}`).join(" · ")||"—"}</td><td>${esc(p.createdBy||"")}</td></tr>`).join("")||`<tr><td colspan="8" class="muted">No posts yet — press <b>+ New post</b> to plan the first one.</td></tr>`}
+   </table></div>`;
+  el.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{ MKT_FILTER=b.dataset.f; renderMktPosts(el); });
+  el.querySelectorAll("[data-open]").forEach(x=>x.onclick=async e=>{ e.preventDefault(); await openMktPost(x.dataset.open); });
+  $("#mkCsv").onclick=()=>exportCsv("MA_Marketing_Posts.csv",["ID","Title","Type","Campaign","Channels","Scheduled","Status","Published","Created by","Created"],d.posts.map(p=>[p.id,p.title,p.type,p.campaign,p.channels.join(" "),p.scheduledAt||"",p.status,Object.keys(p.published||{}).join(" "),p.createdBy,p.createdAt]));
+}
+async function openMktPost(id){
+  let p; try{ p=await api("mkt/post/"+id); }catch(e){ toast(e.message); return; }
+  MKT_TAB="new"; MKT_EDIT=p; await vMarketing();
+}
+// Downscale pictures in the browser so a phone photo (5–10 MB) becomes a
+// web-ready JPEG (≤ 1600 px) before it is stored and sent to the platforms.
+function mktShrink(file){ return new Promise((res,rej)=>{ if(!/^image\//.test(file.type)){ const r=new FileReader(); r.onload=()=>res({name:file.name,data:r.result}); r.onerror=rej; r.readAsDataURL(file); return; }
+  const img=new Image(); const u=URL.createObjectURL(file); img.onload=()=>{ const max=1600; let w=img.width,h=img.height; if(w>max||h>max){ const k=Math.min(max/w,max/h); w=Math.round(w*k); h=Math.round(h*k); } const c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").drawImage(img,0,0,w,h); URL.revokeObjectURL(u); res({name:file.name.replace(/\.[^.]+$/,"")+".jpg",data:c.toDataURL("image/jpeg",0.86)}); }; img.onerror=rej; img.src=u; }); }
+async function renderMktForm(el,p){
+  await loadCostMeta();
+  const isNew=!p.id, ro=!mktCan.edit()||p.status==="Published";
+  const st=MKT.status;
+  const media=(p.media||[]).map(m=>({...m,keep:true}));
+  const projOpts=`<option value="">—</option>`+(COSTMETA.projects||[]).map(x=>`<option ${x===p.project?"selected":""}>${esc(x)}</option>`).join("");
+  const audOpts=`<option value="">— choose —</option>`+[...MKT.builtIn,...MKT.audiences].map(a=>`<option value="${esc(a.id)}" ${a.id===p.audienceId?"selected":""}>${esc(a.name)}${a.count!=null?" ("+a.count+")":""}</option>`).join("");
+  const chBox=MKT.channels.map(c=>`<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-weight:500"><input type="checkbox" class="mk-ch" value="${c.code}" ${(p.channels||[]).includes(c.code)?"checked":""} ${ro?"disabled":""}> ${esc(c.name)} ${st[c.code]&&st[c.code].ready?'<span class="pill st-Paid" style="font-size:9px">linked</span>':'<span class="pill st-Draft" style="font-size:9px" title="'+esc(st[c.code]?st[c.code].need:"")+'">not linked</span>'}</label>`).join("");
+  const sched=p.scheduledAt?new Date(p.scheduledAt):null; const pad=n=>String(n).padStart(2,"0");
+  const schedVal=sched?`${sched.getFullYear()}-${pad(sched.getMonth()+1)}-${pad(sched.getDate())}T${pad(sched.getHours())}:${pad(sched.getMinutes())}`:"";
+  el.innerHTML=`
+   <div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">${isNew?"New post":esc(p.id)+" — "+esc(p.title)}</h3>${p.status?mktPill(p.status):""}<span class="muted" style="font-size:12px">${p.approvedBy?"approved by "+esc(p.approvedBy)+" on "+dmy(p.approvedAt):""}</span>
+     <button class="btn ghost right" id="mkBack">← Back to posts</button></div>
+   <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-top:10px">
+    <div>
+     <div class="grid">
+      <div style="grid-column:1/-1"><label>Title (internal)</label><input id="mk_title" value="${esc(p.title||"")}" ${ro?"disabled":""} placeholder="e.g. The Square 2.0 — handover"></div>
+      <div><label>Type</label><select id="mk_type" ${ro?"disabled":""}>${MKT.types.map(t=>`<option ${t===p.type?"selected":""}>${esc(t)}</option>`).join("")}</select></div>
+      <div><label>Campaign</label><input id="mk_camp" value="${esc(p.campaign||"")}" ${ro?"disabled":""} placeholder="e.g. Q4 2026 fit-out showcase"></div>
+      <div><label>Related project</label><select id="mk_proj" ${ro?"disabled":""}>${projOpts}</select></div>
+      <div><label>Schedule (Dubai time)</label><input id="mk_when" type="datetime-local" value="${schedVal}" ${ro?"disabled":""}></div>
+     </div>
+     <label style="margin-top:8px">Channels</label><div>${chBox}</div>
+     <label>Message / caption</label><textarea id="mk_body" rows="8" ${ro?"disabled":""} placeholder="Write the post text. Emojis are fine. Line breaks are kept.">${esc(p.body||"")}</textarea>
+     <div class="muted" id="mk_count" style="font-size:11px;margin-top:-4px"></div>
+     <div class="grid" style="margin-top:6px">
+      <div><label>Hashtags</label><input id="mk_tags" value="${esc(p.hashtags||"")}" ${ro?"disabled":""} placeholder="#MAGroup #FitOut #Dubai"></div>
+      <div><label>Link (optional)</label><input id="mk_link" value="${esc(p.link||"")}" ${ro?"disabled":""} placeholder="https://maagroup.ae/…"></div>
+     </div>
+     <label>Pictures (JPEG/PNG, up to 4 — resized automatically)</label>
+     <div class="flex" style="flex-wrap:wrap;gap:8px" id="mk_media">${media.map((m,i)=>`<div style="position:relative">${m.preview?`<img src="${m.preview}" style="height:90px;border-radius:6px;border:1px solid #ddd">`:`<div style="height:90px;width:120px;border:1px dashed #bbb;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px">${esc(m.name)}</div>`}${ro?"":`<a href="#" data-rm="${i}" style="position:absolute;top:2px;right:6px;color:#b00;font-weight:700">×</a>`}</div>`).join("")}${ro?"":`<label class="btn ghost" style="cursor:pointer">+ Add picture<input type="file" id="mk_file" accept="image/*" multiple style="display:none"></label>`}</div>
+     <div class="card" style="margin:12px 0 0;background:#f8f9fc"><h3 style="margin:0 0 6px">Direct channels — audience</h3>
+      <div class="grid">
+       <div><label>Audience (WhatsApp / e-mail)</label><select id="mk_aud" ${ro?"disabled":""}>${audOpts}</select></div>
+       <div><label>E-mail subject</label><input id="mk_subj" value="${esc(p.emailSubject||"")}" ${ro?"disabled":""} placeholder="defaults to the title"></div>
+       <div><label>WhatsApp template name</label><input id="mk_tpl" value="${esc(p.waTemplate||MKT.waTemplate||"")}" ${ro?"disabled":""} placeholder="approved template, e.g. ma_update"></div>
+       <div><label>Template language</label><input id="mk_lang" value="${esc(p.waLang||"en")}" ${ro?"disabled":""} style="max-width:90px"></div>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:4px">WhatsApp: outside a 24-hour conversation Meta only delivers <b>approved templates</b>; the post text is passed as the template's first parameter. Leave the template empty to send plain text to contacts who wrote to the business in the last 24 h.</div></div>
+    </div>
+    <div>
+     <div class="card" style="margin:0;background:#fff"><h3 style="margin:0 0 8px">Preview</h3>
+      <div style="border:1px solid #e3e6ee;border-radius:10px;padding:12px;max-width:420px">
+       <div class="flex" style="gap:8px"><img src="logo.png" style="height:34px"><div><b>MA Group</b><br><span class="muted" style="font-size:11px">Fit-out · Contracting · Maintenance · Dubai</span></div></div>
+       <div id="mk_prev" style="white-space:pre-wrap;font-size:13.5px;margin:10px 0;line-height:1.45"></div>
+       ${media[0]&&media[0].preview?`<img src="${media[0].preview}" style="width:100%;border-radius:8px">`:""}
+      </div></div>
+     ${p.id?`<div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 6px">Per channel</h3><table>${(p.channels||[]).map(c=>{ const pub=p.published&&p.published[c], f=p.failed&&p.failed[c], sn=p.sent&&p.sent[c]; return `<tr><td>${esc(mktChName(c))}</td><td style="font-size:12px">${pub?`<b style="color:var(--green)">${pub.count!=null?"sent to "+pub.count:"published"}</b> ${dmy(pub.at)}${pub.id?" · "+esc(String(pub.id)).slice(0,24):""}`:f?`<b style="color:var(--red)">failed</b> — ${esc(f.error)}`:sn?`${sn.done} sent so far`:"pending"}</td></tr>`; }).join("")}</table>
+      ${(p.log||[]).length?`<details style="margin-top:6px"><summary class="muted" style="font-size:12px;cursor:pointer">History (${p.log.length})</summary><div style="font-size:11.5px;max-height:180px;overflow:auto">${p.log.slice().reverse().map(l=>`<div>${dmy(l.at)} ${new Date(l.at).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})} — ${esc(l.action||l.channel||"")}${l.ok===false?" ✗ "+esc(l.error||""):l.ok?" ✓"+(l.sent!=null?" "+l.sent+" sent":""):""}${l.by?" · "+esc(l.by):""}${l.note?" — "+esc(l.note):""}</div>`).join("")}</div></details>`:""}</div>`:""}
+    </div>
+   </div>
+   <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:14px" id="mk_actions"></div>`;
+  const MEDIA=media;
+  const count=()=>{ const t=($("#mk_body").value+" "+$("#mk_tags").value).trim(); const n=t.length; const chs=[...el.querySelectorAll(".mk-ch:checked")].map(x=>x.value); const warn=chs.filter(c=>MKT_LIMITS[c]&&n>MKT_LIMITS[c]).map(c=>mktChName(c)+" limit "+MKT_LIMITS[c]); $("#mk_count").innerHTML=`${n} characters${warn.length?' · <b style="color:var(--red)">too long for '+esc(warn.join(", "))+'</b>':""}`; $("#mk_prev").textContent=[$("#mk_body").value,$("#mk_link").value,$("#mk_tags").value].filter(Boolean).join("\n\n"); };
+  ["mk_body","mk_tags","mk_link"].forEach(i=>$("#"+i).oninput=count); el.querySelectorAll(".mk-ch").forEach(c=>c.onchange=count); count();
+  $("#mkBack").onclick=()=>{ MKT_TAB="posts"; MKT_EDIT=null; vMarketing(); };
+  el.querySelectorAll("[data-rm]").forEach(a=>a.onclick=e=>{ e.preventDefault(); MEDIA.splice(+a.dataset.rm,1); p.media=MEDIA; renderMktForm(el,p); });
+  const ff=$("#mk_file"); if(ff) ff.onchange=async()=>{ for(const f of ff.files){ if(MEDIA.length>=4){ toast("Maximum 4 pictures"); break; } try{ const m=await mktShrink(f); MEDIA.push({name:m.name,data:m.data,preview:m.data,type:m.data.slice(5,m.data.indexOf(";"))}); }catch(e){ toast("Could not read "+f.name); } } p.media=MEDIA; renderMktForm(el,p); };
+  const gather=(status)=>({ id:p.id, title:$("#mk_title").value.trim(), type:$("#mk_type").value, campaign:$("#mk_camp").value.trim(), project:$("#mk_proj").value, channels:[...el.querySelectorAll(".mk-ch:checked")].map(x=>x.value), body:$("#mk_body").value, hashtags:$("#mk_tags").value.trim(), link:$("#mk_link").value.trim(), emailSubject:$("#mk_subj").value.trim(), audienceId:$("#mk_aud").value, waTemplate:$("#mk_tpl").value.trim(), waLang:$("#mk_lang").value.trim()||"en", scheduledAt:$("#mk_when").value?new Date($("#mk_when").value).toISOString():"", status:status||p.status||"Draft", media:MEDIA.map((m,i)=>m.keep?{keep:true,i:m.i}:{name:m.name,data:m.data}) });
+  const save=async(status,msg)=>{ try{ const r=await api("mkt/post",{method:"POST",body:gather(status)}); toast(msg||"Saved"); await openMktPost(r.id); }catch(e){ toast(e.message); } };
+  const setStatus=async(status,note)=>{ try{ const body={status}; if(status==="Scheduled"){ const w=$("#mk_when").value; if(!w){ toast("Set the schedule date & time first"); return; } if(!ro) await api("mkt/post",{method:"POST",body:gather()}); body.scheduledAt=new Date(w).toISOString(); } if(note!==undefined) body.note=note; await api("mkt/post/"+p.id+"/status",{method:"POST",body}); toast("Status: "+status); await openMktPost(p.id); }catch(e){ toast(e.message); } };
+  const act=$("#mk_actions"); const B=(id,l,cls)=>`<button class="btn ${cls||"ghost"}" id="${id}">${l}</button>`;
+  let h="";
+  if(!ro) h+=B("mkSave","Save draft","gold");
+  if(!ro&&(p.status==="Draft"||!p.id)) h+=B("mkReview","Submit for CEO review");
+  if(p.id&&mktCan.approve()&&["Review","Draft"].includes(p.status)) h+=B("mkApprove","Approve","gold");
+  if(p.id&&mktCan.approve()&&["Approved","Scheduled","Failed"].includes(p.status)) h+=B("mkSched","Schedule at the set time");
+  if(p.id&&mktCan.publish()&&["Approved","Scheduled","Failed","Published"].includes(p.status)&&(p.channels||[]).some(c=>["linkedin","instagram","facebook"].includes(c)&&!(p.published&&p.published[c]))) h+=B("mkPub","Publish now (social)","gold");
+  for(const c of (p.channels||[])) if(p.id&&mktCan.publish()&&["whatsapp","email"].includes(c)&&["Approved","Scheduled","Failed","Published"].includes(p.status)&&!(p.published&&p.published[c])) h+=B("mkSend_"+c,"Send "+mktChName(c),"gold");
+  if(p.id&&mktCan.approve()&&["Review","Approved","Scheduled"].includes(p.status)) h+=B("mkReject","Send back to draft");
+  if(p.id&&mktCan.approve()&&p.status!=="Cancelled"&&p.status!=="Published") h+=B("mkCancel","Cancel post");
+  if(p.id&&mktCan.approve()) h+=`<button class="btn danger right" id="mkDel">Delete</button>`;
+  act.innerHTML=h||`<span class="muted">Read only.</span>`;
+  const on=(id,fn)=>{ const b=$("#"+id); if(b) b.onclick=fn; };
+  on("mkSave",()=>save());
+  on("mkReview",async()=>{ if(!p.id){ try{ const r=await api("mkt/post",{method:"POST",body:gather("Review")}); toast("Sent for CEO review"); await openMktPost(r.id); }catch(e){ toast(e.message); } } else { await api("mkt/post",{method:"POST",body:gather()}).catch(e=>toast(e.message)); setStatus("Review"); } });
+  on("mkApprove",()=>setStatus("Approved"));
+  on("mkSched",()=>setStatus("Scheduled"));
+  on("mkReject",()=>{ const n=prompt("Note for the marketing team (optional):")||""; setStatus("Draft",n); });
+  on("mkCancel",()=>{ if(confirm("Cancel this post?")) setStatus("Cancelled"); });
+  on("mkDel",()=>adminDeleteMkt(p));
+  on("mkPub",async()=>{ if(!confirm("Publish now to: "+(p.channels||[]).filter(c=>["linkedin","instagram","facebook"].includes(c)).map(mktChName).join(", ")+"?\n\nThis goes live on the company's official accounts.")) return; try{ const r=await api("mkt/post/"+p.id+"/publish",{method:"POST",body:{}}); const bad=Object.entries(r.results).filter(([,v])=>!v.ok); toast(bad.length?"Some channels failed — see per-channel status":"Published"); await openMktPost(p.id); }catch(e){ alert(e.message); } });
+  for(const c of ["whatsapp","email"]){ on("mkSend_"+c,async()=>{ const aud=$("#mk_aud").value; if(!aud){ toast("Choose an audience first"); return; } if(!ro) await api("mkt/post",{method:"POST",body:gather()}).catch(()=>{}); if(!confirm("Send this post by "+mktChName(c)+" to the selected audience?\n\nMessages go out from the company's official "+(c==="email"?"mailbox":"WhatsApp number")+".")) return; const b=$("#mkSend_"+c); b.disabled=true; let tot=0, fail=0, guard=0; try{ while(guard++<200){ const r=await api("mkt/post/"+p.id+"/broadcast",{method:"POST",body:{channel:c,audienceId:aud,batch:25}}); tot=r.doneTotal; fail+=r.failed; b.textContent=`Sending… ${tot}/${r.total}`; if(!r.remaining) break; } toast(`Done — ${tot} sent${fail?", "+fail+" failed":""}`); }catch(e){ alert(e.message); } await openMktPost(p.id); }); }
+}
+async function adminDeleteMkt(p){ if(!confirm("Delete "+p.id+" permanently?")) return; try{ await api("mkt/post/"+p.id,{method:"DELETE"}); toast("Deleted"); MKT_TAB="posts"; MKT_EDIT=null; vMarketing(); }catch(e){ toast(e.message); } }
+function renderMktAudiences(el){
+  const d=MKT;
+  el.innerHTML=`<div class="flex" style="flex-wrap:wrap;gap:8px"><span class="muted">Built-in audiences come live from the system (clients, suppliers, staff from the HR system). Custom lists can be typed or imported from Excel / CSV (columns: Name, Email, Phone, Company).</span>${mktCan.edit()?`<button class="btn gold right" id="audNew">+ New list</button>`:""}</div>
+   <table style="margin-top:8px"><tr><th>Audience</th><th class="num">Contacts</th><th>Updated</th><th></th></tr>
+   ${d.builtIn.map(a=>`<tr><td><b>${esc(a.name)}</b> <span class="pill st-Draft" style="font-size:9px">live</span></td><td class="num">—</td><td>—</td><td><a href="#" data-view="${a.id}">preview</a></td></tr>`).join("")}
+   ${d.audiences.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td class="num">${a.count}</td><td>${dmy(a.updatedAt)}</td><td><a href="#" data-view="${a.id}">open</a>${mktCan.approve()?` · <a href="#" data-del="${a.id}" style="color:var(--red)">delete</a>`:""}</td></tr>`).join("")}</table>
+   <div id="audBox" style="margin-top:12px"></div>`;
+  const box=$("#audBox");
+  const show=async(id)=>{ box.innerHTML=`<div class="muted">Loading…</div>`; try{ const a=await api("mkt/audience/"+id); const rows=a.contacts||[]; box.innerHTML=`<div class="card" style="margin:0"><div class="flex"><h3 style="margin:0">${esc(a.name||id)} · ${rows.length} contact(s)</h3>${a.builtIn?"":mktCan.edit()?`<button class="btn ghost right" id="audEdit">Edit list</button>`:""}<button class="btn ghost ${a.builtIn?"right":""}" id="audCsv">Export CSV</button></div>
+      <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table><tr><th>Name</th><th>E-mail</th><th>Phone</th><th>Company</th></tr>${rows.slice(0,500).map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.email||"")}</td><td>${esc(c.phone||"")}</td><td>${esc(c.company||"")}</td></tr>`).join("")}</table></div>
+      <div class="muted" style="font-size:11px;margin-top:4px">${rows.filter(c=>c.email).length} with e-mail · ${rows.filter(c=>c.phone).length} with WhatsApp-capable phone.</div></div>`;
+      $("#audCsv").onclick=()=>exportCsv("MA_Audience_"+id+".csv",["Name","Email","Phone","Company"],rows.map(c=>[c.name,c.email,c.phone,c.company]));
+      const ed=$("#audEdit"); if(ed) ed.onclick=()=>editAudience(a); }catch(e){ box.innerHTML=`<div class="muted">${esc(e.message)}</div>`; } };
+  const editAudience=(a)=>{ a=a||{name:"",contacts:[]}; box.innerHTML=`<div class="card" style="margin:0"><h3 style="margin:0 0 6px">${a.id?"Edit":"New"} list</h3>
+     <div class="grid"><div><label>List name</label><input id="au_name" value="${esc(a.name)}" placeholder="e.g. Developers & consultants"></div><div><label>Import Excel / CSV</label><input type="file" id="au_file" accept=".csv,.xlsx,.xls"></div></div>
+     <label>Contacts — one per line: Name, Email, Phone, Company</label><textarea id="au_txt" rows="10" style="font-family:monospace;font-size:12px">${esc((a.contacts||[]).map(c=>[c.name,c.email,c.phone,c.company].join(", ")).join("\n"))}</textarea>
+     <div class="flex" style="gap:8px;margin-top:8px"><button class="btn gold" id="au_save">Save list</button><button class="btn ghost" id="au_cancel">Cancel</button><span class="muted" style="font-size:11px">Only contacts who agreed to receive company updates. Phones are stored in international format (971…).</span></div></div>`;
+    const parse=()=>$("#au_txt").value.split(/\n/).map(l=>l.split(/[,;\t]/).map(x=>x.trim())).filter(r=>r.some(Boolean)).map(r=>({name:r[0]||"",email:r[1]||"",phone:r[2]||"",company:r[3]||""}));
+    $("#au_file").onchange=async()=>{ const f=$("#au_file").files[0]; if(!f) return; try{ const buf=await f.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"}); const rr=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""}); const hi=rr.findIndex(r=>r.some(c=>/mail|phone|name/i.test(String(c)))); const H=hi>=0?rr[hi].map(h=>String(h).toLowerCase()):[]; const col=(...ks)=>{ for(const k of ks){ const i=H.findIndex(h=>h.includes(k)); if(i>=0) return i; } return -1; }; const C={n:col("name","contact"),e:col("mail"),p:col("phone","mobile","whatsapp"),c:col("company","organisation","organization")}; const rows=rr.slice(hi+1).filter(r=>r.some(Boolean)).map(r=>[C.n>=0?r[C.n]:r[0],C.e>=0?r[C.e]:r[1],C.p>=0?r[C.p]:r[2],C.c>=0?r[C.c]:r[3]].map(x=>String(x||"").trim()).join(", ")); $("#au_txt").value=($("#au_txt").value.trim()?$("#au_txt").value.trim()+"\n":"")+rows.join("\n"); toast(rows.length+" rows added"); }catch(e){ toast("Could not read file: "+e.message); } };
+    $("#au_save").onclick=async()=>{ try{ const r=await api("mkt/audience",{method:"POST",body:{id:a.id,name:$("#au_name").value.trim(),contacts:parse()}}); toast("Saved · "+r.count+" contacts"); MKT_TAB="audiences"; vMarketing(); }catch(e){ toast(e.message); } };
+    $("#au_cancel").onclick=()=>{ box.innerHTML=""; }; };
+  el.querySelectorAll("[data-view]").forEach(a=>a.onclick=e=>{ e.preventDefault(); show(a.dataset.view); });
+  el.querySelectorAll("[data-del]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm("Delete this list?")) return; try{ await api("mkt/audience/"+a.dataset.del,{method:"DELETE"}); vMarketing(); }catch(x){ toast(x.message); } });
+  const nb=$("#audNew"); if(nb) nb.onclick=()=>editAudience(null);
+}
+function renderMktConnect(el){
+  const st=MKT.status;
+  const row=(c,name,how)=>`<tr><td><b>${name}</b></td><td>${st[c]&&st[c].ready?'<span class="pill st-Paid">connected</span>':'<span class="pill st-Draft">not connected</span>'}</td><td style="font-size:12px" id="ct_${c}">${st[c]&&st[c].ready?"":"needs "+esc(st[c]?st[c].need:"")}</td><td style="font-size:11.5px;color:#556">${how}</td></tr>`;
+  el.innerHTML=`<div class="flex"><span class="muted">Tokens are stored as environment variables on the Netlify site (never in the browser). Marketing staff prepare posts; only the CEO's account can publish or send.</span><button class="btn ghost right" id="ctTest">Test connections</button></div>
+   <table style="margin-top:8px"><tr><th>Channel</th><th>Status</th><th>Detail</th><th>How to connect</th></tr>
+   ${row("whatsapp","WhatsApp Business (same number as the MA chatbot)","META_ACCESS_TOKEN + META_PHONE_NUMBER_ID — copied from the chatbot site. Broadcasts use approved message templates (Meta Business → WhatsApp Manager → Message templates).")}
+   ${row("facebook","Facebook page","In Meta Business Suite create a System User with pages_manage_posts + pages_read_engagement on the MA Group page, generate a permanent token → META_ACCESS_TOKEN; page id → META_PAGE_ID.")}
+   ${row("instagram","Instagram (business account linked to the page)","Same token with instagram_basic + instagram_content_publish; the IG business account id → IG_USER_ID. Posts need a picture.")}
+   ${row("linkedin","LinkedIn company page","LinkedIn Developer app with the Community Management API (w_organization_social), 3-legged token for a page admin → LINKEDIN_ACCESS_TOKEN (60-day, renewable); organisation id → LINKEDIN_ORG_ID.")}
+   ${row("email","E-mail campaigns","Uses the Zoho mailbox already configured in Settings → Email notifications. Each recipient gets an individual e-mail (no address is exposed).")}
+   </table>
+   <div class="muted" style="font-size:11.5px;margin-top:8px">Scheduled posts are pushed automatically every 15 minutes (${MKT.cronReady?'<b style="color:var(--green)">scheduler active</b>':'<b style="color:var(--gold)">scheduler key not set</b>'}). The vendor <b>Announcements</b> page remains the formal channel for suppliers &amp; subcontractors.</div>`;
+  $("#ctTest").onclick=async()=>{ $("#ctTest").disabled=true; try{ const r=await api("mkt/test",{method:"POST",body:{}}); for(const c in r){ const t=$("#ct_"+c); if(t) t.innerHTML=r[c].ok?`<b style="color:var(--green)">OK</b> — ${esc(r[c].detail||"")}`:`<b style="color:var(--red)">✗</b> ${esc(r[c].error||"")}`; } }catch(e){ toast(e.message); } $("#ctTest").disabled=false; };
+}
+
 async function vAnnounce(){
-  if(ME.role!=="CEO"){ $("#main").innerHTML=`<div class="card muted">Announcements are available to the CEO / CFO only.</div>`; return; }
+  if(!["CEO","HR","Marketing"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Announcements are available to the CEO, HR &amp; Admin and Marketing.</div>`; return; }
   $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
   let rc={withEmail:0,missingEmail:0,total:0}, hist={items:[]};
   try{ [rc,hist]=await Promise.all([api("announcement/recipients"),api("announcement/list")]); }catch(e){}
@@ -4606,9 +4803,18 @@ function vSettings(){
      <div class="muted" id="mgHint" style="font-size:11px;margin-top:6px"></div></div>`:""}
    <h3>Banks / accounts</h3><div id="bankList"></div>
    ${admin?`<div class="flex"><input id="nbName" placeholder="Bank — account" style="max-width:320px"><button class="btn" id="nbAdd">Add bank</button></div>`:""}
-   ${admin?`<h3>Users</h3><table><tr><th>User</th><th>Role</th><th></th></tr>
-     ${USERS.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.title||u.role)}${u.title&&u.role==="CEO"&&u.id!=="ceo"?' <span class="pill" style="background:#375623;font-size:10px">full access</span>':""}</td><td><a href="#" data-reset="${u.id}">reset PIN</a></td></tr>`).join("")}</table>
-     <div class="muted" style="margin-top:6px">Default PINs — CEO 1234, QS 1111, PM 2222, Accounts 3333, Secretary 4444. Change after first login. The Secretary can register & manage suppliers only.</div>`:""}
+   ${admin?`<h3>Users &amp; departments</h3><div style="overflow-x:auto"><table><tr><th>User id</th><th>Name</th><th>Department</th><th>Role / access</th><th>Status</th><th></th></tr>
+     ${USERS.map(u=>`<tr style="${u.active===false?'opacity:.55':''}"><td><code>${esc(u.id)}</code></td><td>${esc(u.name)}${u.title?`<br><span class="muted" style="font-size:11px">${esc(u.title)}</span>`:""}</td><td>${esc(u.department||DEPT_OF[u.role]||"")}</td><td>${esc(u.role)}${u.title&&u.role==="CEO"&&u.id!=="ceo"?' <span class="pill" style="background:#375623;font-size:10px">full access</span>':""}</td><td>${u.active===false?'<span class="pill st-Cancelled">deactivated</span>':'<span class="pill st-Paid">active</span>'}</td><td style="white-space:nowrap"><a href="#" data-reset="${u.id}">reset PIN</a> · <a href="#" data-uedit="${u.id}">edit</a>${u.id!==ME.id&&u.id!=="ceo"?` · <a href="#" data-uact="${u.id}" data-to="${u.active===false?1:0}">${u.active===false?"activate":"deactivate"}</a>`:""}</td></tr>`).join("")}</table></div>
+     <div class="card" style="margin:10px 0 0;background:#f8f9fc"><h3 style="margin:0 0 6px" id="uFormTitle">Add a user</h3>
+      <div class="grid">
+       <div><label>User id (login name)</label><input id="u_id" placeholder="e.g. fatima.hr" style="text-transform:lowercase"></div>
+       <div><label>Full name</label><input id="u_name" placeholder="Name shown in the system"></div>
+       <div><label>Job title</label><input id="u_title" placeholder="e.g. HR Officer"></div>
+       <div><label>Department / access</label><select id="u_dept">${DEPTS.map(d=>`<option value="${d.role}">${esc(d.name)} — ${esc(d.desc)}</option>`).join("")}</select></div>
+       <div><label>Starting PIN (4–8 digits)</label><input id="u_pin" inputmode="numeric" placeholder="user must change it at first login"></div>
+      </div>
+      <div class="flex" style="gap:8px;margin-top:8px"><button class="btn gold" id="u_save">Save user</button><button class="btn ghost" id="u_clear">Clear</button>
+       <span class="muted" style="font-size:11px">Each department only sees its own pages: Finance → payments, bank, P&amp;L; HR &amp; Admin → operations cost, payroll, assets, announcements; Projects/QS → clients, IPCs, procurement, DLP; Marketing → marketing &amp; announcements; Admin &amp; data entry → data entry without approvals. The CEO sees everything.</span></div></div>`:""}
    </div>
    ${admin?`<div class="card"><h2>Backup &amp; data</h2>
      <div class="muted" style="margin-bottom:8px">Your data lives in Netlify's cloud (replicated &amp; durable). Download a full backup regularly — keep a copy off-system. This exports every record as one JSON file (no PINs).</div>
@@ -4678,6 +4884,11 @@ function vSettings(){
     }).catch(()=>{ const b=$("#polReg"); if(b) b.textContent="Register unavailable."; });
     if($("#dlBackup")) $("#dlBackup").onclick=async ()=>{ toast("Preparing backup…"); try{ const bk=await api("backup"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(bk,null,2)],{type:"application/json"})); a.download="MA_Group_Finance_backup_"+new Date().toISOString().slice(0,10)+".json"; a.click(); toast("Backup downloaded"); }catch(e){ toast(e.message); } };
     document.querySelectorAll("[data-reset]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const pin=prompt("New PIN (4-8 digits):"); if(!pin) return; const u=USERS.find(x=>x.id===a.dataset.reset);
+    const uFill=(u)=>{ $("#u_id").value=u?u.id:""; $("#u_id").disabled=!!u; $("#u_name").value=u?u.name:""; $("#u_title").value=u?(u.title||""):""; $("#u_dept").value=u?u.role:"Accounts"; $("#u_pin").value=""; $("#uFormTitle").textContent=u?"Edit user — "+u.name:"Add a user"; };
+    document.querySelectorAll("[data-uedit]").forEach(a=>a.onclick=e=>{ e.preventDefault(); const u=USERS.find(x=>x.id===a.dataset.uedit); if(u) uFill(u); $("#u_name").focus(); });
+    document.querySelectorAll("[data-uact]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const u=USERS.find(x=>x.id===a.dataset.uact); if(!u) return; const to=a.dataset.to==="1"; if(!confirm((to?"Activate ":"Deactivate ")+u.name+"?")) return; try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,active:to}}); toast(to?"Activated":"Deactivated"); await load(); render(); }catch(x){ toast(x.message); } });
+    const uS=$("#u_save"); if(uS) uS.onclick=async()=>{ const id=$("#u_id").value.trim().toLowerCase(), name=$("#u_name").value.trim(), role=$("#u_dept").value, pin=$("#u_pin").value.trim(); if(!id||!name){ toast("User id and name are required"); return; } const isNew=!USERS.some(x=>x.id===id); if(isNew&&!/^\d{4,8}$/.test(pin)){ toast("A 4–8 digit starting PIN is required for a new user"); return; } try{ await api("users",{method:"POST",body:{id,name,role,title:$("#u_title").value.trim(),department:DEPT_OF[role]||"",pin:pin||undefined}}); toast(isNew?"User added — share the PIN privately":"User updated"); await load(); render(); }catch(x){ toast(x.message); } };
+    const uC=$("#u_clear"); if(uC) uC.onclick=()=>uFill(null);
       try{ await api("users",{method:"POST",body:{id:u.id,name:u.name,role:u.role,pin}}); toast("PIN reset"); }catch(x){ toast(x.message); } });
     bindChequeLayout(saveS);
   }

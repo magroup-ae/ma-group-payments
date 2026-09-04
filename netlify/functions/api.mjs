@@ -12577,7 +12577,7 @@ ${o.closing ? `<p style="margin:0 0 6px;color:#333c48;font-size:14px;line-height
 </td></tr>
 <tr><td style="background:#f4f6f9;border-top:1px solid #e3e7ee;padding:16px 30px;color:#7a8494;font-size:11px;line-height:1.6">
 <a href="mailto:${emEsc(cfg.replyTo)}" style="color:#2e75b6;text-decoration:none">${emEsc(cfg.replyTo)}</a> &nbsp;|&nbsp; www.maagroup.ae &nbsp;|&nbsp; +971 80062244<br>
-This is an automated notification from the MA Group Finance. You may reply directly to this email to reach our team.
+This is an automated notification from the MA Group management system. You may reply directly to this email to reach our team.
 </td></tr>
 </table>
 </td></tr></table></body></html>`;
@@ -12658,12 +12658,12 @@ function buildEmail(type, ctx, cfg) {
           : `This confirms you have digitally signed MA Group's Confidentiality Undertaking.`,
         lead: forCeo
           ? [
-              `This is to confirm that the following team member has <strong>digitally accepted and signed</strong> the MA Group Confidentiality &amp; Non-Disclosure Undertaking before accessing the MA Group Finance system.`,
+              `This is to confirm that the following team member has <strong>digitally accepted and signed</strong> the MA Group Confidentiality &amp; Non-Disclosure Undertaking before accessing the MA Group management system.`,
               `This acknowledgement is recorded in the system's confidentiality register and is legally binding.`
             ]
           : [
               `This confirms that you have <strong>digitally accepted and signed</strong> the MA Group Confidentiality &amp; Non-Disclosure Undertaking.`,
-              `By signing, you have agreed to keep all information accessed through the MA Group Finance system strictly confidential and to use it solely for your authorised duties. Please retain this email for your records.`
+              `By signing, you have agreed to keep all information accessed through the MA Group management system strictly confidential and to use it solely for your authorised duties. Please retain this email for your records.`
             ],
         table: [
           ["Signatory", a.name || a.userId || "—"],
@@ -12677,7 +12677,7 @@ function buildEmail(type, ctx, cfg) {
         note: `This is an electronic acknowledgement captured at first access to the system. It carries the same weight as a signed undertaking under the UAE Federal Decree-Law on the protection of confidential information and MA Group's internal policy.`,
         noteColor: "#eef5ec", noteBar: "#375623",
         closing: forCeo
-          ? `The full confidentiality register is available under Settings → Confidentiality in the MA Group Finance system.`
+          ? `The full confidentiality register is available under Settings → Confidentiality in the MA Group management system.`
           : `Thank you for your commitment to protecting MA Group's confidential information.`
       })
     };
@@ -13136,7 +13136,9 @@ var DEFAULT_SETTINGS = {
   seq: 0,
   supplierSeq: 0
 };
-var ROLES = ["CEO", "QS", "PM", "Accounts", "Secretary", "Clerk"];
+var ROLES = ["CEO", "QS", "PM", "Accounts", "Secretary", "Clerk", "HR", "Marketing"];
+// Departments: Finance / Accounts → Accounts · HR & Admin → HR · Projects / QS → PM, QS ·
+// Marketing → Marketing · Admin & data entry → Clerk, Secretary · CEO → everything.
 var DEFAULT_USERS = [
   { id: "ceo", name: "Mohammed Abuassba", role: "CEO", salt: "", pinHash: "" },
   { id: "qs", name: "QS / Site Engineer", role: "QS", salt: "", pinHash: "" },
@@ -13743,23 +13745,29 @@ var CAN = {
   pay: ["Accounts", "CEO"],
   cancel: ["CEO"],
   admin: ["CEO"],
-  suppliers: ["QS", "PM", "CEO", "Secretary", "Clerk"],
-  assets: ["CEO", "PM", "Secretary", "QS", "Clerk"],
+  suppliers: ["QS", "PM", "CEO", "Secretary", "Clerk", "HR"],
+  assets: ["CEO", "PM", "Secretary", "QS", "Clerk", "HR"],
   assetsDelete: ["CEO"],
   clients: ["CEO", "PM", "QS", "Secretary", "Clerk"],
   contracts: ["CEO", "PM", "QS"],
   procurement: ["CEO", "PM", "QS"],
   clientcert: ["CEO", "PM", "QS"],
   clientcertIssue: ["CEO", "PM"],
-  expense: ["CEO", "PM", "QS", "Accounts", "Secretary", "Clerk"],
+  expense: ["CEO", "PM", "QS", "Accounts", "Secretary", "Clerk", "HR"],
   expenseDelete: ["CEO", "PM"],
   pnl: ["CEO", "PM", "QS", "Accounts", "Clerk"],
   budget: ["CEO", "PM", "QS", "Accounts", "Clerk"],
   budgetEdit: ["CEO", "PM", "QS"],
-  ops: ["CEO", "PM", "QS", "Accounts", "Clerk", "Secretary"],
-  opsEdit: ["CEO", "Accounts", "Secretary"],
-  opsPayroll: ["CEO", "Accounts"],
-  opsPost: ["CEO", "Accounts"]
+  ops: ["CEO", "PM", "QS", "Accounts", "Clerk", "Secretary", "HR"],
+  opsEdit: ["CEO", "Accounts", "Secretary", "HR"],
+  opsPayroll: ["CEO", "Accounts", "HR"],
+  opsPost: ["CEO", "Accounts"],
+  // Marketing department prepares; the CEO approves, publishes and sends.
+  announce: ["CEO", "HR", "Marketing"],
+  marketing: ["CEO", "Marketing"],
+  marketingApprove: ["CEO"],
+  marketingPublish: ["CEO"],
+  users: ["CEO"]
 };
 // Clerk = data-entry + view only: can add expenses, suppliers, clients, assets
 // and view P&L/budget, but CANNOT approve, record payments/print cheques,
@@ -14468,6 +14476,210 @@ function normalisePayrollRows(list) {
   }
   return out;
 }
+// ===================== MARKETING MODULE =====================
+// One place to plan, approve and push every outbound message the company makes:
+// LinkedIn / Instagram / Facebook posts (published through the Meta Graph API and
+// the LinkedIn Community Management API once the tokens are set), WhatsApp
+// broadcasts (Meta Cloud API — the same WhatsApp Business number as the MA
+// chatbot), e-mail campaigns (Zoho SMTP already configured for notifications) and
+// the vendor announcement. Every post goes Draft → Review → Approved → Scheduled →
+// Published with a per-channel log, so marketing staff prepare and the CEO releases.
+var MKT_CHANNELS = [
+  { code: "linkedin", name: "LinkedIn", kind: "social" },
+  { code: "instagram", name: "Instagram", kind: "social" },
+  { code: "facebook", name: "Facebook", kind: "social" },
+  { code: "whatsapp", name: "WhatsApp broadcast", kind: "direct" },
+  { code: "email", name: "E-mail campaign", kind: "direct" }
+];
+var MKT_STATUS = ["Draft", "Review", "Approved", "Scheduled", "Published", "Failed", "Cancelled"];
+var MKT_TYPES = ["Project showcase", "Completed project / handover", "Company news", "Hiring", "Offer / promotion", "Client announcement", "Greeting / occasion", "Tip / know-how", "Other"];
+var GRAPH_API = "https://graph.facebook.com/v20.0";
+var LI_API = "https://api.linkedin.com/rest";
+function mktEnv() {
+  return {
+    metaToken: process.env.META_ACCESS_TOKEN || "", waPhoneId: process.env.META_PHONE_NUMBER_ID || "",
+    fbPageId: process.env.META_PAGE_ID || "", igUserId: process.env.IG_USER_ID || "",
+    liToken: process.env.LINKEDIN_ACCESS_TOKEN || "", liOrg: process.env.LINKEDIN_ORG_ID || "",
+    siteUrl: (process.env.SITE_URL || process.env.URL || "https://ma-group-payments.netlify.app").replace(/\/+$/, ""),
+    waDefaultTemplate: process.env.WA_TEMPLATE || "", waLang: process.env.WA_TEMPLATE_LANG || "en"
+  };
+}
+function mktChannelStatus() {
+  const e = mktEnv();
+  return {
+    linkedin: { ready: !!(e.liToken && e.liOrg), need: "LINKEDIN_ACCESS_TOKEN + LINKEDIN_ORG_ID" },
+    instagram: { ready: !!(e.metaToken && e.igUserId), need: "META_ACCESS_TOKEN (instagram_content_publish) + IG_USER_ID" },
+    facebook: { ready: !!(e.metaToken && e.fbPageId), need: "META_ACCESS_TOKEN (pages_manage_posts) + META_PAGE_ID" },
+    whatsapp: { ready: !!(e.metaToken && e.waPhoneId), need: "META_ACCESS_TOKEN + META_PHONE_NUMBER_ID" },
+    email: { ready: true, need: "" }
+  };
+}
+async function listPosts() {
+  const out = (await getAllJSON(store(), "mkt/post/")).filter((v) => v && v.id);
+  out.sort((a, b) => String(b.scheduledAt || b.createdAt || "").localeCompare(String(a.scheduledAt || a.createdAt || "")));
+  return out;
+}
+async function listAudiences() { return (await getAllJSON(store(), "mkt/audience/")).filter((v) => v && v.id); }
+function normPhone(p) {
+  let d = String(p || "").replace(/[^\d+]/g, "");
+  if (!d) return "";
+  if (d.startsWith("+")) d = d.slice(1);
+  if (d.startsWith("00")) d = d.slice(2);
+  if (/^0\d{8,9}$/.test(d)) d = "971" + d.slice(1);   // UAE local → E.164
+  if (/^5\d{8}$/.test(d)) d = "971" + d;
+  return /^\d{8,15}$/.test(d) ? d : "";
+}
+// Built-in audiences are derived live from the records already in the system.
+async function resolveAudience(s, id) {
+  const contacts = [];
+  const push = (name, email, phone, company, tag) => { const e = String(email || "").trim().toLowerCase(), p = normPhone(phone); if (!e && !p) return; contacts.push({ name: String(name || "").trim(), email: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e : "", phone: p, company: String(company || ""), tag }); };
+  if (id === "clients") { for (const c of await listClients()) { if (c.status && /inactive|blocked/i.test(c.status)) continue; push(c.contactName || c.contact || c.name, c.email, c.mobile || c.phone, c.name, "client"); } }
+  else if (id === "suppliers") { for (const v of await listSuppliers()) { if (v.status && /inactive|blocked|blacklist/i.test(v.status)) continue; push(v.contactName || v.contact || v.name, v.email, v.mobile || v.whatsapp || v.phone, v.name, "supplier"); } }
+  else if (id === "staff") {
+    const emps = await hrGet("/admin/employees");
+    for (const e of Array.isArray(emps) ? emps : emps.employees || []) { if (e.active === false) continue; push(e.name, e.email, e.phone || e.mobile, e.company || "MA Group", "staff"); }
+  } else {
+    const a = await s.get("mkt/audience/" + id, { type: "json" });
+    if (!a) throw new Error("Audience not found");
+    for (const c of a.contacts || []) { if (c.consent === false) continue; push(c.name, c.email, c.phone, c.company, "list"); }
+  }
+  // de-duplicate on e-mail / phone
+  const seen = new Set(); const out = [];
+  for (const c of contacts) { const k = c.email || c.phone; if (seen.has(k)) continue; seen.add(k); out.push(c); }
+  return out;
+}
+async function graphCall(url, body, token, method) {
+  const rs = await fetch(url, { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json", Authorization: "Bearer " + token }, body: body ? JSON.stringify(body) : void 0 });
+  const txt = await rs.text(); let j = null; try { j = JSON.parse(txt); } catch {}
+  if (!rs.ok) throw new Error((j && j.error && (j.error.message || j.error.error_user_msg)) || `Graph API ${rs.status}: ${txt.slice(0, 200)}`);
+  return j || {};
+}
+function postText(post) {
+  const tags = (post.hashtags || "").split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith("#") ? t : "#" + t).join(" ");
+  return [post.body || "", post.link ? post.link : "", tags].filter(Boolean).join("\n\n").trim();
+}
+function mediaUrl(env, post, i) { return `${env.siteUrl}/api/mkt/media/${post.id}/${i}?k=${post.mediaKey}`; }
+async function publishFacebook(post, env) {
+  const text = postText(post), media = post.media || [];
+  const img = media.find((m) => /^image\//.test(m.type || ""));
+  if (img) return await graphCall(`${GRAPH_API}/${env.fbPageId}/photos`, { url: mediaUrl(env, post, media.indexOf(img)), caption: text, published: true }, env.metaToken);
+  return await graphCall(`${GRAPH_API}/${env.fbPageId}/feed`, { message: text, ...(post.link ? { link: post.link } : {}) }, env.metaToken);
+}
+async function publishInstagram(post, env) {
+  const media = post.media || [];
+  const img = media.find((m) => /^image\//.test(m.type || ""));
+  if (!img) throw new Error("Instagram needs a picture — attach an image (JPEG) to this post.");
+  const c = await graphCall(`${GRAPH_API}/${env.igUserId}/media`, { image_url: mediaUrl(env, post, media.indexOf(img)), caption: postText(post) }, env.metaToken);
+  let lastErr = "";
+  for (let i = 0; i < 4; i++) {
+    try { return await graphCall(`${GRAPH_API}/${env.igUserId}/media_publish`, { creation_id: c.id }, env.metaToken); }
+    catch (e) { lastErr = e.message; if (!/not ready|9007|in progress/i.test(lastErr)) throw e; await new Promise((r) => setTimeout(r, 2500)); }
+  }
+  throw new Error(lastErr || "Instagram did not finish processing the image");
+}
+async function publishLinkedIn(post, env) {
+  const H = { Authorization: "Bearer " + env.liToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0", "Content-Type": "application/json" };
+  const author = `urn:li:organization:${env.liOrg}`;
+  const media = post.media || [];
+  const img = media.find((m) => /^image\//.test(m.type || ""));
+  let content;
+  if (img) {
+    const init = await fetch(`${LI_API}/images?action=initializeUpload`, { method: "POST", headers: H, body: JSON.stringify({ initializeUploadRequest: { owner: author } }) });
+    const ij = await init.json().catch(() => ({}));
+    if (!init.ok) throw new Error("LinkedIn image upload init failed: " + (ij.message || init.status));
+    const buf = Buffer.from(String(img.data || "").split(",").pop(), "base64");
+    const up = await fetch(ij.value.uploadUrl, { method: "PUT", headers: { Authorization: "Bearer " + env.liToken, "Content-Type": img.type || "image/jpeg" }, body: buf });
+    if (!up.ok) throw new Error("LinkedIn image upload failed: " + up.status);
+    content = { media: { title: post.title || "MA Group", id: ij.value.image } };
+  } else if (post.link) {
+    content = { article: { source: post.link, title: post.title || "MA Group" } };
+  }
+  const body = { author, commentary: postText(post), visibility: "PUBLIC", distribution: { feedDistribution: "MAIN_FEED", targetEntities: [], thirdPartyDistributionChannels: [] }, lifecycleState: "PUBLISHED", isReshareDisabledByAuthor: false, ...(content ? { content } : {}) };
+  const rs = await fetch(`${LI_API}/posts`, { method: "POST", headers: H, body: JSON.stringify(body) });
+  if (!rs.ok) { const t = await rs.text(); throw new Error("LinkedIn: " + rs.status + " " + t.slice(0, 200)); }
+  return { id: rs.headers.get("x-restli-id") || "ok" };
+}
+// WhatsApp Cloud API. Outside a 24-hour customer window only APPROVED TEMPLATES
+// can be sent, so broadcasts use a template (name + language) with the post
+// body as the first body parameter; a plain text is attempted when no template
+// is given (delivered only to numbers that wrote to the business recently).
+async function sendWhatsApp(env, to, post, opts) {
+  const tpl = opts.template || env.waDefaultTemplate;
+  const msg = tpl
+    ? { messaging_product: "whatsapp", to, type: "template", template: { name: tpl, language: { code: opts.lang || env.waLang || "en" }, components: opts.params && opts.params.length ? [{ type: "body", parameters: opts.params.map((t) => ({ type: "text", text: String(t) })) }] : void 0 } }
+    : { messaging_product: "whatsapp", to, type: "text", text: { body: postText(post), preview_url: !!post.link } };
+  const r = await graphCall(`${GRAPH_API}/${env.waPhoneId}/messages`, msg, env.metaToken);
+  return (r.messages && r.messages[0] && r.messages[0].id) || "sent";
+}
+async function publishToChannel(s, post, ch) {
+  const env = mktEnv(), st = mktChannelStatus();
+  if (!st[ch] || !st[ch].ready) throw new Error(`${ch} is not connected yet — set ${st[ch] ? st[ch].need : ch} in Netlify environment variables.`);
+  if (ch === "facebook") return await publishFacebook(post, env);
+  if (ch === "instagram") return await publishInstagram(post, env);
+  if (ch === "linkedin") return await publishLinkedIn(post, env);
+  throw new Error("Use the broadcast action for " + ch);
+}
+function mktLog(post, entry) { post.log = post.log || []; post.log.push({ at: now(), ...entry }); if (post.log.length > 200) post.log = post.log.slice(-200); }
+function mktRollStatus(post) {
+  const social = (post.channels || []).filter((c) => ["linkedin", "instagram", "facebook"].includes(c));
+  const done = social.filter((c) => post.published && post.published[c]);
+  const failed = social.filter((c) => post.failed && post.failed[c]);
+  const direct = (post.channels || []).filter((c) => ["whatsapp", "email"].includes(c));
+  const directDone = direct.filter((c) => post.published && post.published[c]);
+  if (social.length + direct.length === 0) return;
+  if (done.length + directDone.length === social.length + direct.length) post.status = "Published";
+  else if (failed.length && done.length + directDone.length + failed.length === social.length + direct.length) post.status = "Failed";
+}
+// Runs everything that is Scheduled and due (called by the 15-minute cron).
+async function runScheduledPosts(s) {
+  const posts = await listPosts(); const due = posts.filter((p) => p.status === "Scheduled" && p.scheduledAt && p.scheduledAt <= now());
+  const out = [];
+  for (const post of due) {
+    for (const ch of post.channels || []) {
+      if (post.published && post.published[ch]) continue;
+      try {
+        if (["linkedin", "instagram", "facebook"].includes(ch)) { const r = await publishToChannel(s, post, ch); post.published = post.published || {}; post.published[ch] = { at: now(), id: r.id || r.post_id || "" }; if (post.failed) delete post.failed[ch]; mktLog(post, { channel: ch, ok: true, id: r.id || "" }); }
+        else if (post.audienceId) { const r = await broadcastPost(s, post, ch, {}); mktLog(post, { channel: ch, ok: true, sent: r.sent, failed: r.failed }); }
+      } catch (e) { post.failed = post.failed || {}; post.failed[ch] = { at: now(), error: e.message }; mktLog(post, { channel: ch, ok: false, error: e.message }); }
+    }
+    mktRollStatus(post); post.updatedAt = now();
+    await s.setJSON("mkt/post/" + post.id, post);
+    out.push({ id: post.id, status: post.status });
+  }
+  return out;
+}
+// WhatsApp / e-mail broadcast of one post to its audience, in batches so one
+// request never runs longer than the platform allows. Idempotent per recipient.
+async function broadcastPost(s, post, ch, opts) {
+  const env = mktEnv();
+  const audienceId = opts.audienceId || post.audienceId;
+  if (!audienceId) throw new Error("Choose an audience first.");
+  const contacts = await resolveAudience(s, audienceId);
+  const key = "mkt/sent/" + post.id + "-" + ch;
+  const sentRec = (await s.get(key, { type: "json" })) || { post: post.id, channel: ch, done: {}, failed: {} };
+  const max = Math.max(1, Math.min(num(opts.batch) || 25, 40));
+  let sent = 0, failed = 0, skipped = 0, remaining = 0;
+  const pending = contacts.filter((c) => { const id = ch === "email" ? c.email : c.phone; if (!id) { skipped++; return false; } return !sentRec.done[id]; });
+  const batch = pending.slice(0, max); remaining = Math.max(0, pending.length - batch.length);
+  if (ch === "email") {
+    const cfg = await getEmailCfg(s);
+    for (const c of batch) {
+      const html = emailShell(cfg, { title: post.title || "MA Group", band: "#1f3864", greeting: c.name ? c.name.split(" ")[0] : "Valued partner", lead: String(post.body || "").split(/\n{2,}/).map((p) => p.replace(/\n/g, "<br>")), closing: post.link ? `<a href="${post.link}">${post.link}</a>` : "", preheader: (post.body || "").slice(0, 90) });
+      const r = await sendMail(s, cfg, { type: "marketing", to: c.email, toName: c.name, subject: post.emailSubject || post.title || "MA Group", html });
+      if (r && (r.status === "sent")) { sentRec.done[c.email] = now(); sent++; } else { sentRec.failed[c.email] = (r && r.detail) || r.status || "not sent"; failed++; }
+    }
+  } else {
+    for (const c of batch) {
+      try { const id = await sendWhatsApp(env, c.phone, post, { template: opts.template || post.waTemplate, lang: opts.lang || post.waLang, params: opts.params || post.waParams || [postText(post)] }); sentRec.done[c.phone] = id; sent++; }
+      catch (e) { sentRec.failed[c.phone] = e.message; failed++; }
+    }
+  }
+  sentRec.updatedAt = now(); sentRec.audienceId = audienceId; sentRec.total = contacts.length;
+  await s.setJSON(key, sentRec);
+  if (!remaining) { post.published = post.published || {}; post.published[ch] = { at: now(), count: Object.keys(sentRec.done).length, failed: Object.keys(sentRec.failed).length }; }
+  return { sent, failed, skipped, remaining, total: contacts.length, doneTotal: Object.keys(sentRec.done).length };
+}
+
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
   let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0, subAdvancePaid = 0;
@@ -14690,7 +14902,7 @@ async function computeBudget(s, project) {
 var POLICY_VERSION = 1;
 var CONFIDENTIALITY_POLICY = `<h2 style="margin:0 0 4px;color:#1f3864">MA Group — Confidentiality &amp; Data Protection Undertaking</h2>
 <div style="color:#667;font-size:12px;margin-bottom:12px">Applicable to Marvellous Art Decoration &amp; Fit Out Design L.L.C · MA Building Contracting L.L.C · MA Building Maintenance L.L.C ("MA Group"). Version ${POLICY_VERSION}.</div>
-<p>This system ("MA Group Finance") and the data within it are <b>strictly confidential and the exclusive property of MA Group</b>. By accessing it you agree to the following legally binding undertaking.</p>
+<p>This system ("MA Group management system") and the data within it are <b>strictly confidential and the exclusive property of MA Group</b>. By accessing it you agree to the following legally binding undertaking.</p>
 <p><b>1. Confidential Information.</b> "Confidential Information" means all information accessible through this system, including without limitation: financial records, payment &amp; interim payment certificates (IPCs), bills of quantities (BOQs), unit rates, pricing, margins, profit &amp; loss and budget data, client and supplier/subcontractor details, contracts, variations, bank details, TRN and tax data, salaries and payroll, and any related commercial, technical or personal data — in any form, whether marked confidential or not.</p>
 <p><b>2. Ownership.</b> All Confidential Information is and remains the sole property of MA Group. No right or licence is granted to you other than to use it strictly for the performance of your authorised duties for MA Group.</p>
 <p><b>3. Your undertakings.</b> You expressly undertake that you shall: (a) access and use the Confidential Information <b>only</b> for your authorised job duties; (b) <b>not disclose</b> it to any third party or to any colleague not authorised to receive it; (c) <b>not copy, export, download, screenshot, photograph, print, transmit or remove</b> any Confidential Information except as required for your authorised duties; (d) <b>not use it for any personal benefit</b> or for the benefit of any competitor or third party; (e) keep your login credentials confidential, never share your account, and log out after each use; and (f) immediately report any actual or suspected breach, loss or unauthorised access to the CEO.</p>
@@ -15699,6 +15911,7 @@ var api_default = async (req, context) => {
   if (path === "login" && req.method === "POST") {
     const { userId: userId2, pin } = await req.json();
     const u = users.find((x) => x.id === userId2);
+    if (u && u.active === false) return err("This account is deactivated — contact the CEO", 403);
     // Brute-force protection: a 4–8 digit PIN is small enough to guess, so
     // throttle failed attempts per user. Lenient window that auto-expires —
     // real users are never locked out for long, but an attacker cannot spray.
@@ -15724,7 +15937,23 @@ var api_default = async (req, context) => {
     try { if (lk) await s.delete(lkKey); } catch {}
     return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, title: u.title || "", mustChangePin: !!u.mustChangePin } });
   }
-  if (path === "userlist") return json(users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
+  if (path === "userlist") return json(users.filter((u) => u.active !== false).map((u) => ({ id: u.id, name: u.name, role: u.role })));
+  // Public picture for a marketing post: Meta / LinkedIn fetch it by URL when
+  // publishing. Guarded by the post's random key, no login involved.
+  if (path.startsWith("mkt/media/") && req.method === "GET") {
+    const [, , pid, idx] = path.split("/");
+    const p = await s.get("mkt/post/" + pid, { type: "json" });
+    if (!p || !p.mediaKey || url.searchParams.get("k") !== p.mediaKey) return err("Not found", 404);
+    const m = (p.media || [])[+idx || 0]; if (!m || !m.data) return err("Not found", 404);
+    const buf = Buffer.from(String(m.data).split(",").pop(), "base64");
+    return new Response(buf, { headers: { "content-type": m.type || "image/jpeg", "cache-control": "public, max-age=86400", "content-length": String(buf.length) } });
+  }
+  // Scheduled publishing runner (called by cron-mkt every 15 min with the shared key).
+  if (path === "mkt/run-scheduled") {
+    const k = process.env.CRON_KEY || "";
+    if (!k || (req.headers.get("x-cron-key") || url.searchParams.get("k")) !== k) return err("Forbidden", 403);
+    try { return json({ ok: true, ran: await runScheduledPosts(s) }); } catch (e) { return err(e.message, 500); }
+  }
   const auth = req.headers.get("authorization") || "";
   const userId = await verifyToken(auth.startsWith("Bearer ") ? auth.slice(7) : null);
   const me = users.find((x) => x.id === userId);
@@ -15805,20 +16034,20 @@ var api_default = async (req, context) => {
   }
   const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || "").trim());
   if (path === "announcement/recipients" && req.method === "GET") {
-    if (!can("admin")) return err("CEO only", 403);
+    if (!can("announce")) return err("Announcements: CEO / HR / Marketing only", 403);
     const sups = await listSuppliers();
     const active = sups.filter((x) => !x.status || x.status === "Active");
     const withEmail = active.filter((x) => validEmail(x.email));
     return json({ total: sups.length, active: active.length, withEmail: withEmail.length, missingEmail: active.length - withEmail.length });
   }
   if (path === "announcement/list" && req.method === "GET") {
-    if (!can("admin")) return err("CEO only", 403);
+    if (!can("announce")) return err("Announcements: CEO / HR / Marketing only", 403);
     const items = await getAllJSON(s, "announcement/");
     items.sort((a, b) => a.sentAt < b.sentAt ? 1 : -1);
     return json({ items });
   }
   if (path === "announcement/send" && req.method === "POST") {
-    if (!can("admin")) return err("CEO only", 403);
+    if (!can("announce")) return err("Announcements: CEO / HR / Marketing only", 403);
     const b = await req.json();
     const category = String(b.category || "General Information").trim();
     const subject = String(b.subject || "").trim();
@@ -16881,7 +17110,7 @@ var api_default = async (req, context) => {
     const html = emailShell(cfg, {
       title: "Test Notification",
       band: "#2e75b6",
-      lead: [`This is a test email from the MA Group Finance, confirming that outbound notifications are configured correctly.`, `Sent at ${emDate(now())}.`],
+      lead: [`This is a test email from the MA Group management system, confirming that outbound notifications are configured correctly.`, `Sent at ${emDate(now())}.`],
       note: `If you received this, replies to <strong>${emEsc(cfg.replyTo)}</strong> will reach your team.`
     });
     const rec = await sendMail(s, cfg, { type: "", to: to || cfg.replyTo, toName: "Test", subject: "MA Group \u2014 Email Test", html });
@@ -16933,7 +17162,7 @@ var api_default = async (req, context) => {
       clientCount,
       contractCount,
       clientCertCount,
-      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title || "" }))
+      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title || "", department: u.department || "", active: u.active !== false }))
     });
   }
   if (path === "settings" && req.method === "POST") {
@@ -16955,16 +17184,24 @@ var api_default = async (req, context) => {
   }
   if (path === "users" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
-    const { id, name, role, pin } = await req.json();
-    if (!id || !name || !ROLES.includes(role)) return err("Bad user");
+    const { id: idRaw, name, role, pin, title, department, active, remove } = await req.json();
+    const id = String(idRaw || "").trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+    if (!id) return err("User id is required (letters / numbers)");
     const all = await s.get("users", { type: "json" });
     let u = all.find((x) => x.id === id);
+    if (remove) { if (!u) return err("User not found"); if (u.id === me.id || u.id === "ceo") return err("This account cannot be removed"); await s.setJSON("users", all.filter((x) => x.id !== id)); return json({ ok: true, removed: id }); }
+    if (!name || !ROLES.includes(role)) return err("Name and a valid role / department are required");
     if (!u) {
-      u = { id, salt: randomBytes(8).toString("hex"), pinHash: "" };
+      if (all.length >= 40) return err("User limit reached");
+      if (!pin || !/^\d{4,8}$/.test(String(pin))) return err("A 4–8 digit starting PIN is required for a new user");
+      u = { id, salt: randomBytes(8).toString("hex"), pinHash: "", createdAt: now(), createdBy: me.name };
       all.push(u);
     }
     u.name = name;
     u.role = role;
+    if (title !== void 0) u.title = String(title || "");
+    if (department !== void 0) u.department = String(department || "");
+    if (active !== void 0) { if (u.id === me.id) return err("You cannot deactivate your own account"); u.active = !!active; }
     if (pin) {
       u.salt = randomBytes(8).toString("hex");
       u.pinHash = hashPin(String(pin), u.salt);
@@ -18493,6 +18730,146 @@ var api_default = async (req, context) => {
     await s.delete("expense/" + decodeURIComponent(expDel[1]));
     return json({ ok: true });
   }
+  // ===================== MARKETING ENDPOINTS =====================
+  if (path === "mkt" && req.method === "GET") {
+    if (!can("marketing")) return err("Marketing is for the Marketing department / CEO", 403);
+    const [posts, audiences] = await Promise.all([listPosts(), listAudiences()]);
+    const light = posts.map((p) => ({ ...p, media: (p.media || []).map((m, i) => ({ name: m.name, type: m.type, size: m.size, i })) }));
+    const kpi = { total: posts.length, published: posts.filter((p) => p.status === "Published").length, scheduled: posts.filter((p) => p.status === "Scheduled").length, review: posts.filter((p) => p.status === "Review").length, draft: posts.filter((p) => p.status === "Draft").length, failed: posts.filter((p) => p.status === "Failed").length };
+    return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
+  }
+  if (path === "mkt/post" && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const b = await req.json();
+    const stg = await s.get("settings", { type: "json" }) || {};
+    let id = b.id; const ex = id ? await s.get("mkt/post/" + id, { type: "json" }) : null;
+    if (id && !ex) return err("Post not found", 404);
+    if (ex && ["Published"].includes(ex.status) && !can("admin")) return err("A published post cannot be edited", 403);
+    if (!id) { id = await nextId(s, stg, "mktSeq", "MK", "mkt/post/", 4); await s.setJSON("settings", stg); }
+    const channels = (Array.isArray(b.channels) ? b.channels : []).filter((c) => MKT_CHANNELS.some((x) => x.code === c));
+    if (!b.title) return err("Give the post a title");
+    if (!channels.length) return err("Choose at least one channel");
+    const media = [];
+    for (const m of (Array.isArray(b.media) ? b.media : ex?.media || []).slice(0, 4)) {
+      if (!m) continue;
+      if (m.keep && ex) { const old = (ex.media || [])[m.i]; if (old) media.push(old); continue; }
+      if (!m.data || !/^data:(image\/(jpeg|png)|video\/mp4|application\/pdf);base64,/.test(m.data)) continue;
+      const size = Math.round(String(m.data).length * 0.75);
+      if (size > 4.5e6) return err(`${m.name || "File"} is larger than 4.5 MB — resize the picture first.`);
+      media.push({ name: String(m.name || "media"), type: String(m.data).slice(5, String(m.data).indexOf(";")), size, data: m.data });
+    }
+    const st = MKT_STATUS.includes(b.status) ? b.status : ex?.status || "Draft";
+    const post = {
+      id, title: String(b.title).trim(), type: MKT_TYPES.includes(b.type) ? b.type : "Other", campaign: String(b.campaign || ""), project: String(b.project || ""),
+      channels, body: String(b.body || ""), hashtags: String(b.hashtags || ""), link: String(b.link || ""), emailSubject: String(b.emailSubject || ""),
+      audienceId: String(b.audienceId || ""), waTemplate: String(b.waTemplate || ""), waLang: String(b.waLang || "en"), waParams: Array.isArray(b.waParams) ? b.waParams.map(String).filter(Boolean) : [],
+      scheduledAt: b.scheduledAt ? String(b.scheduledAt) : "", status: st, media, mediaKey: ex?.mediaKey || randomBytes(8).toString("hex"),
+      published: ex?.published || {}, failed: ex?.failed || {}, log: ex?.log || [],
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
+    };
+    if (!ex) mktLog(post, { action: "Created", by: me.name });
+    await s.setJSON("mkt/post/" + id, post);
+    return json({ ...post, media: post.media.map((m, i) => ({ name: m.name, type: m.type, size: m.size, i })) });
+  }
+  if (path.startsWith("mkt/post/") && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2];
+    const p = await s.get("mkt/post/" + id, { type: "json" });
+    if (!p) return err("Not found", 404);
+    const sent = {}; for (const ch of ["whatsapp", "email"]) { const r = await s.get(`mkt/sent/${id}-${ch}`, { type: "json" }); if (r) sent[ch] = { done: Object.keys(r.done || {}).length, failed: r.failed || {}, total: r.total, updatedAt: r.updatedAt }; }
+    return json({ ...p, media: (p.media || []).map((m, i) => ({ name: m.name, type: m.type, size: m.size, i, preview: /^image\//.test(m.type) ? m.data : "" })), sent });
+  }
+  if (path.startsWith("mkt/post/") && path.endsWith("/status") && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const p = await s.get("mkt/post/" + id, { type: "json" }); if (!p) return err("Not found", 404);
+    const to = b.status;
+    if (!MKT_STATUS.includes(to)) return err("Bad status");
+    // Marketing prepares (Draft → Review); the CEO approves / schedules / cancels.
+    if (["Approved", "Scheduled"].includes(to) && !can("marketingApprove")) return err("Approval is reserved for the CEO", 403);
+    if (to === "Scheduled" && !(p.scheduledAt || b.scheduledAt)) return err("Set the date & time to schedule");
+    if (b.scheduledAt) p.scheduledAt = String(b.scheduledAt);
+    mktLog(p, { action: `${p.status} → ${to}`, by: me.name, note: b.note || "" });
+    p.status = to; p.updatedAt = now(); p.updatedBy = me.name;
+    if (to === "Approved") { p.approvedBy = me.name; p.approvedAt = now(); }
+    await s.setJSON("mkt/post/" + id, p);
+    return json({ ok: true, status: p.status });
+  }
+  if (path.startsWith("mkt/post/") && path.endsWith("/publish") && req.method === "POST") {
+    if (!can("marketingPublish")) return err("Publishing is reserved for the CEO", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const p = await s.get("mkt/post/" + id, { type: "json" }); if (!p) return err("Not found", 404);
+    if (!["Approved", "Scheduled", "Failed", "Published"].includes(p.status)) return err("Approve the post first (Review → Approved), then publish.");
+    const chs = (Array.isArray(b.channels) && b.channels.length ? b.channels : p.channels).filter((c) => ["linkedin", "instagram", "facebook"].includes(c) && p.channels.includes(c));
+    if (!chs.length) return err("No social channel on this post — WhatsApp and e-mail go out with “Send broadcast”.");
+    const results = {};
+    for (const ch of chs) {
+      try { const r = await publishToChannel(s, p, ch); p.published = p.published || {}; p.published[ch] = { at: now(), id: r.id || r.post_id || "" }; if (p.failed) delete p.failed[ch]; mktLog(p, { channel: ch, ok: true, id: r.id || r.post_id || "", by: me.name }); results[ch] = { ok: true, id: r.id || r.post_id || "" }; }
+      catch (e) { p.failed = p.failed || {}; p.failed[ch] = { at: now(), error: e.message }; mktLog(p, { channel: ch, ok: false, error: e.message, by: me.name }); results[ch] = { ok: false, error: e.message }; }
+    }
+    mktRollStatus(p); p.updatedAt = now();
+    await s.setJSON("mkt/post/" + id, p);
+    return json({ ok: true, status: p.status, results });
+  }
+  if (path.startsWith("mkt/post/") && path.endsWith("/broadcast") && req.method === "POST") {
+    if (!can("marketingPublish")) return err("Sending broadcasts is reserved for the CEO", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const p = await s.get("mkt/post/" + id, { type: "json" }); if (!p) return err("Not found", 404);
+    if (!["Approved", "Scheduled", "Failed", "Published"].includes(p.status)) return err("Approve the post first, then send.");
+    const ch = b.channel; if (!["whatsapp", "email"].includes(ch) || !p.channels.includes(ch)) return err("This post has no " + ch + " channel");
+    let r;
+    try { r = await broadcastPost(s, p, ch, { audienceId: b.audienceId, template: b.template, lang: b.lang, params: b.params, batch: b.batch }); }
+    catch (e) { return err(e.message); }
+    if (b.audienceId) p.audienceId = b.audienceId;
+    if (!r.remaining) mktLog(p, { channel: ch, ok: r.failed === 0, sent: r.doneTotal, failed: r.failed, by: me.name });
+    mktRollStatus(p); p.updatedAt = now();
+    await s.setJSON("mkt/post/" + id, p);
+    return json({ ok: true, ...r, status: p.status });
+  }
+  if (path.startsWith("mkt/post/") && req.method === "DELETE") {
+    if (!can("marketingApprove")) return err("CEO only", 403);
+    const id = path.split("/")[2];
+    await s.delete("mkt/post/" + id); for (const ch of ["whatsapp", "email"]) { try { await s.delete(`mkt/sent/${id}-${ch}`); } catch {} }
+    return json({ ok: true });
+  }
+  if (path === "mkt/audience" && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const b = await req.json();
+    if (!b.name) return err("List name is required");
+    const stg = await s.get("settings", { type: "json" }) || {};
+    let id = b.id; const ex = id ? await s.get("mkt/audience/" + id, { type: "json" }) : null;
+    if (!id) { id = await nextId(s, stg, "mktAudSeq", "AUD", "mkt/audience/", 3); await s.setJSON("settings", stg); }
+    const contacts = (Array.isArray(b.contacts) ? b.contacts : ex?.contacts || []).map((c) => ({ name: String(c.name || "").trim(), email: String(c.email || "").trim().toLowerCase(), phone: normPhone(c.phone) || String(c.phone || "").trim(), company: String(c.company || "").trim(), consent: c.consent !== false })).filter((c) => c.email || c.phone).slice(0, 5000);
+    const rec = { id, name: String(b.name).trim(), description: String(b.description || ""), contacts, createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name };
+    await s.setJSON("mkt/audience/" + id, rec);
+    return json({ id, name: rec.name, count: contacts.length });
+  }
+  if (path.startsWith("mkt/audience/") && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2];
+    if (["clients", "suppliers", "staff"].includes(id)) { try { const list = await resolveAudience(s, id); return json({ id, builtIn: true, contacts: list, count: list.length }); } catch (e) { return err(e.message); } }
+    const a = await s.get("mkt/audience/" + id, { type: "json" }); if (!a) return err("Not found", 404);
+    return json(a);
+  }
+  if (path.startsWith("mkt/audience/") && req.method === "DELETE") {
+    if (!can("marketingApprove")) return err("CEO only", 403);
+    await s.delete("mkt/audience/" + path.split("/")[2]); return json({ ok: true });
+  }
+  if (path === "mkt/test" && req.method === "POST") {
+    // Connection test per channel: a cheap read against each API with the stored token.
+    if (!can("marketing")) return err("No rights", 403);
+    const env = mktEnv(), st = mktChannelStatus(), out = {};
+    for (const ch of ["facebook", "instagram", "whatsapp", "linkedin"]) {
+      if (!st[ch].ready) { out[ch] = { ok: false, error: "not configured — " + st[ch].need }; continue; }
+      try {
+        if (ch === "facebook") { const r = await graphCall(`${GRAPH_API}/${env.fbPageId}?fields=name`, null, env.metaToken); out[ch] = { ok: true, detail: r.name }; }
+        else if (ch === "instagram") { const r = await graphCall(`${GRAPH_API}/${env.igUserId}?fields=username`, null, env.metaToken); out[ch] = { ok: true, detail: "@" + r.username }; }
+        else if (ch === "whatsapp") { const r = await graphCall(`${GRAPH_API}/${env.waPhoneId}?fields=display_phone_number,verified_name`, null, env.metaToken); out[ch] = { ok: true, detail: `${r.verified_name || ""} ${r.display_phone_number || ""}`.trim() }; }
+        else { const rs = await fetch(`${LI_API}/organizations/${env.liOrg}`, { headers: { Authorization: "Bearer " + env.liToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" } }); const j = await rs.json().catch(() => ({})); out[ch] = rs.ok ? { ok: true, detail: j.localizedName || "connected" } : { ok: false, error: j.message || ("HTTP " + rs.status) }; }
+      } catch (e) { out[ch] = { ok: false, error: e.message }; }
+    }
+    return json(out);
+  }
   // ===================== OPERATIONS COST / HR MANAGEMENT ENDPOINTS =====================
   if (path === "ops" && req.method === "GET") {
     if (!can("ops")) return err("No rights", 403);
@@ -18770,13 +19147,13 @@ var api_default = async (req, context) => {
   }
   if (path === "backup" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
-    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/"];
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/", "mkt/post/", "mkt/audience/", "mkt/sent/"];
     const data = {};
     for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
     data.settings = await s.get("settings", { type: "json" });
     data.register = await s.get("register", { type: "json" }) || [];
     const us = await s.get("users", { type: "json" }) || [];
-    data.users = us.map((u) => ({ id: u.id, name: u.name, role: u.role })); // never export PIN hashes
+    data.users = us.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title || "", department: u.department || "", active: u.active !== false })); // never export PIN hashes
     const counts = {}; for (const k in data) counts[k] = Array.isArray(data[k]) ? data[k].length : 1;
     return json({ generatedAt: now(), version: 1, counts, data });
   }
