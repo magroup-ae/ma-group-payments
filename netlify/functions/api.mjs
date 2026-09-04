@@ -14500,14 +14500,25 @@ function mktEnv() {
     metaToken: process.env.META_ACCESS_TOKEN || "", waPhoneId: process.env.META_PHONE_NUMBER_ID || "",
     fbPageId: process.env.META_PAGE_ID || "", igUserId: process.env.IG_USER_ID || "",
     liToken: process.env.LINKEDIN_ACCESS_TOKEN || "", liOrg: process.env.LINKEDIN_ORG_ID || "",
+    liClientId: process.env.LINKEDIN_CLIENT_ID || "", liClientSecret: process.env.LINKEDIN_CLIENT_SECRET || "",
     siteUrl: (process.env.SITE_URL || process.env.URL || "https://ma-group-payments.netlify.app").replace(/\/+$/, ""),
     waDefaultTemplate: process.env.WA_TEMPLATE || "", waLang: process.env.WA_TEMPLATE_LANG || "en"
   };
 }
-function mktChannelStatus() {
+// LinkedIn is connected by OAuth from the Connections tab (token kept in the
+// data store, 60-day validity); an env token is honoured as a fallback.
+var LI_TOKEN_CACHE = null;
+async function liToken() {
+  const rec = await store().get("mkt/token/linkedin", { type: "json" }).catch(() => null);
+  if (rec && rec.accessToken && (!rec.expiresAt || rec.expiresAt > now())) return rec;
+  const e = mktEnv();
+  if (e.liToken) return { accessToken: e.liToken, personUrn: "", orgId: e.liOrg, scopes: "env" };
+  return null;
+}
+function mktChannelStatus(li) {
   const e = mktEnv();
   return {
-    linkedin: { ready: !!(e.liToken && e.liOrg), need: "LINKEDIN_ACCESS_TOKEN + LINKEDIN_ORG_ID" },
+    linkedin: { ready: !!li, need: e.liClientId ? "press Connect LinkedIn (CEO signs in once)" : "LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET", who: li ? (li.orgId ? "company page" : li.name || "member") : "", expiresAt: li ? li.expiresAt || "" : "", canConnect: !!(e.liClientId && e.liClientSecret) },
     instagram: { ready: !!(e.metaToken && e.igUserId), need: "META_ACCESS_TOKEN (instagram_content_publish) + IG_USER_ID" },
     facebook: { ready: !!(e.metaToken && e.fbPageId), need: "META_ACCESS_TOKEN (pages_manage_posts) + META_PAGE_ID" },
     whatsapp: { ready: !!(e.metaToken && e.waPhoneId), need: "META_ACCESS_TOKEN + META_PHONE_NUMBER_ID" },
@@ -14578,8 +14589,15 @@ async function publishInstagram(post, env) {
   throw new Error(lastErr || "Instagram did not finish processing the image");
 }
 async function publishLinkedIn(post, env) {
-  const H = { Authorization: "Bearer " + env.liToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0", "Content-Type": "application/json" };
-  const author = `urn:li:organization:${env.liOrg}`;
+  const li = await liToken();
+  if (!li) throw new Error("LinkedIn is not connected — open Marketing → Connections → Connect LinkedIn.");
+  const H = { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0", "Content-Type": "application/json" };
+  // Company-page author needs the Community Management API (w_organization_social);
+  // until LinkedIn approves it, posts go out from the CEO's own profile.
+  const orgOk = li.orgId && /w_organization_social/.test(li.scopes || "") || (li.scopes === "env" && li.orgId);
+  const author = orgOk ? `urn:li:organization:${li.orgId}` : li.personUrn;
+  if (!author) throw new Error("LinkedIn author unknown — reconnect LinkedIn.");
+  env = { ...env, liToken: li.accessToken };
   const media = post.media || [];
   const img = media.find((m) => /^image\//.test(m.type || ""));
   let content;
@@ -14612,7 +14630,7 @@ async function sendWhatsApp(env, to, post, opts) {
   return (r.messages && r.messages[0] && r.messages[0].id) || "sent";
 }
 async function publishToChannel(s, post, ch) {
-  const env = mktEnv(), st = mktChannelStatus();
+  const env = mktEnv(), st = mktChannelStatus(await liToken());
   if (!st[ch] || !st[ch].ready) throw new Error(`${ch} is not connected yet — set ${st[ch] ? st[ch].need : ch} in Netlify environment variables.`);
   if (ch === "facebook") return await publishFacebook(post, env);
   if (ch === "instagram") return await publishInstagram(post, env);
@@ -15947,6 +15965,27 @@ var api_default = async (req, context) => {
     const m = (p.media || [])[+idx || 0]; if (!m || !m.data) return err("Not found", 404);
     const buf = Buffer.from(String(m.data).split(",").pop(), "base64");
     return new Response(buf, { headers: { "content-type": m.type || "image/jpeg", "cache-control": "public, max-age=86400", "content-length": String(buf.length) } });
+  }
+  // LinkedIn OAuth callback (public): exchange the code, store the token, return to the app.
+  if (path === "mkt/linkedin/callback" && req.method === "GET") {
+    const e = mktEnv();
+    const back = (msg, ok) => new Response(`<!doctype html><meta charset="utf-8"><title>LinkedIn</title><body style="font-family:system-ui;padding:40px;text-align:center"><h2>${ok ? "LinkedIn connected" : "LinkedIn connection failed"}</h2><p>${String(msg).replace(/</g, "&lt;")}</p><p><a href="/">Back to MA Group</a></p><script>setTimeout(()=>location.href="/#marketing",${ok ? 1500 : 6000})</script></body>`, { status: ok ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8" } });
+    const code = url.searchParams.get("code"), state = url.searchParams.get("state") || "";
+    if (url.searchParams.get("error")) return back(url.searchParams.get("error_description") || url.searchParams.get("error"), false);
+    const st = state ? await s.get("mkt/oauth/" + state, { type: "json" }).catch(() => null) : null;
+    if (!code || !st) return back("Invalid or expired sign-in state — start again from Marketing → Connections.", false);
+    try { await s.delete("mkt/oauth/" + state); } catch {}
+    try {
+      const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: e.siteUrl + "/api/mkt/linkedin/callback", client_id: e.liClientId, client_secret: e.liClientSecret });
+      const rs = await fetch("https://www.linkedin.com/oauth/v2/accessToken", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+      const tk = await rs.json().catch(() => ({}));
+      if (!rs.ok || !tk.access_token) return back(tk.error_description || tk.error || ("token exchange failed " + rs.status), false);
+      const ui = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + tk.access_token } }).then((r) => r.json()).catch(() => ({}));
+      const rec = { accessToken: tk.access_token, refreshToken: tk.refresh_token || "", scopes: tk.scope || "", expiresAt: new Date(Date.now() + (num(tk.expires_in) || 5184e3) * 1e3).toISOString(),
+        personUrn: ui.sub ? "urn:li:person:" + ui.sub : "", name: ui.name || "", email: ui.email || "", orgId: st.org || "", connectedBy: st.by, connectedAt: now() };
+      await s.setJSON("mkt/token/linkedin", rec);
+      return back(`Signed in as ${rec.name || "LinkedIn member"}. Token valid until ${rec.expiresAt.slice(0, 10)}.`, true);
+    } catch (x) { return back(x.message, false); }
   }
   // Scheduled publishing runner (called by cron-mkt every 15 min with the shared key).
   if (path === "mkt/run-scheduled") {
@@ -18736,7 +18775,7 @@ var api_default = async (req, context) => {
     const [posts, audiences] = await Promise.all([listPosts(), listAudiences()]);
     const light = posts.map((p) => ({ ...p, media: (p.media || []).map((m, i) => ({ name: m.name, type: m.type, size: m.size, i })) }));
     const kpi = { total: posts.length, published: posts.filter((p) => p.status === "Published").length, scheduled: posts.filter((p) => p.status === "Scheduled").length, review: posts.filter((p) => p.status === "Review").length, draft: posts.filter((p) => p.status === "Draft").length, failed: posts.filter((p) => p.status === "Failed").length };
-    return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
+    return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(await liToken()), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
   }
   if (path === "mkt/post" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
@@ -18855,17 +18894,39 @@ var api_default = async (req, context) => {
     if (!can("marketingApprove")) return err("CEO only", 403);
     await s.delete("mkt/audience/" + path.split("/")[2]); return json({ ok: true });
   }
+  // LinkedIn OAuth start: the CEO signs in once on LinkedIn; the callback (public
+  // route above the auth gate) stores the token. State is signed so a stray
+  // callback cannot attach a token.
+  if (path === "mkt/linkedin/connect" && req.method === "POST") {
+    if (!can("marketingPublish")) return err("Only the CEO connects the company's LinkedIn", 403);
+    const e = mktEnv();
+    if (!e.liClientId || !e.liClientSecret) return err("LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET are not set on the site.");
+    const b = await req.json().catch(() => ({}));
+    const state = Date.now().toString(36) + "." + randomBytes(6).toString("hex");
+    await s.setJSON("mkt/oauth/" + state, { by: me.name, at: now(), org: String(b.orgId || e.liOrg || "") });
+    const scopes = ["openid", "profile", "email", "w_member_social", ...(b.orgId || e.liOrg ? ["w_organization_social", "r_organization_social"] : [])];
+    const u = new URL("https://www.linkedin.com/oauth/v2/authorization");
+    u.searchParams.set("response_type", "code"); u.searchParams.set("client_id", e.liClientId);
+    u.searchParams.set("redirect_uri", e.siteUrl + "/api/mkt/linkedin/callback"); u.searchParams.set("state", state); u.searchParams.set("scope", scopes.join(" "));
+    return json({ url: u.toString() });
+  }
+  if (path === "mkt/linkedin/disconnect" && req.method === "POST") {
+    if (!can("marketingPublish")) return err("CEO only", 403);
+    try { await s.delete("mkt/token/linkedin"); } catch {}
+    return json({ ok: true });
+  }
   if (path === "mkt/test" && req.method === "POST") {
     // Connection test per channel: a cheap read against each API with the stored token.
     if (!can("marketing")) return err("No rights", 403);
-    const env = mktEnv(), st = mktChannelStatus(), out = {};
+    const li = await liToken();
+    const env = mktEnv(), st = mktChannelStatus(li), out = {};
     for (const ch of ["facebook", "instagram", "whatsapp", "linkedin"]) {
       if (!st[ch].ready) { out[ch] = { ok: false, error: "not configured — " + st[ch].need }; continue; }
       try {
         if (ch === "facebook") { const r = await graphCall(`${GRAPH_API}/${env.fbPageId}?fields=name`, null, env.metaToken); out[ch] = { ok: true, detail: r.name }; }
         else if (ch === "instagram") { const r = await graphCall(`${GRAPH_API}/${env.igUserId}?fields=username`, null, env.metaToken); out[ch] = { ok: true, detail: "@" + r.username }; }
         else if (ch === "whatsapp") { const r = await graphCall(`${GRAPH_API}/${env.waPhoneId}?fields=display_phone_number,verified_name`, null, env.metaToken); out[ch] = { ok: true, detail: `${r.verified_name || ""} ${r.display_phone_number || ""}`.trim() }; }
-        else { const rs = await fetch(`${LI_API}/organizations/${env.liOrg}`, { headers: { Authorization: "Bearer " + env.liToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" } }); const j = await rs.json().catch(() => ({})); out[ch] = rs.ok ? { ok: true, detail: j.localizedName || "connected" } : { ok: false, error: j.message || ("HTTP " + rs.status) }; }
+        else { const rs = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + li.accessToken } }); const j = await rs.json().catch(() => ({})); out[ch] = rs.ok ? { ok: true, detail: (j.name || "connected") + (li.orgId ? " · company page " + li.orgId : " · posts as this profile until page access is approved") + (li.expiresAt ? " · valid to " + String(li.expiresAt).slice(0, 10) : "") } : { ok: false, error: j.message || ("HTTP " + rs.status + " — reconnect LinkedIn") }; }
       } catch (e) { out[ch] = { ok: false, error: e.message }; }
     }
     return json(out);
