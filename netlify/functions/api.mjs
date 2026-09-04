@@ -13261,13 +13261,9 @@ async function ensureInit() {
       u.mustChangePin = true;
     });
     await s.setJSON("users", users);
-  } else if (!users.find((u) => u.id === "secretary")) {
-    const sec = { id: "secretary", name: "Secretary / Reception", role: "Secretary", salt: randomBytes(8).toString("hex"), pinHash: "" };
-    sec.pinHash = hashPin("4444", sec.salt);
-    sec.mustChangePin = true;
-    users.push(sec);
-    await s.setJSON("users", users);
   }
+  // The generic "secretary" demo account (public default PIN) is retired — Jesse is reception.
+  if (users.find((u) => u.id === "secretary")) { users = users.filter((u) => u.id !== "secretary"); await s.setJSON("users", users); }
   // One-time: provision the MA Group staff accounts per the CEO's list.
   if (!settings.staffV1) {
     const staff = [
