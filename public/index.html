@@ -8,15 +8,50 @@
   :root { --navy:#1F3864; --blue:#2E75B6; --gold:#BF9000; --green:#375623; --red:#C00000; --grey:#f4f5f7; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:'Segoe UI',Calibri,Arial,sans-serif; background:var(--grey); color:#222; font-size:14px; }
-  header.app { background:var(--navy); color:#fff; display:flex; align-items:center; gap:14px; padding:8px 18px; position:sticky; top:0; z-index:10; }
-  header.app img { height:34px; background:#fff; border-radius:6px; padding:3px 6px; }
-  header.app .t { font-weight:700; font-size:16px; letter-spacing:.4px; }
+  /* ---------- app shell: fixed left sidebar + top bar ---------- */
+  :root { --sbw:238px; --sbwc:64px; }
+  body.sb-collapsed { --sbw:var(--sbwc); }
+  aside.sb { position:fixed; left:0; top:0; bottom:0; width:var(--sbw); background:var(--navy); color:#fff; display:flex; flex-direction:column;
+    z-index:40; transition:width .18s ease, transform .2s ease; overflow:hidden; }
+  aside.sb .sb-top { display:flex; align-items:center; gap:10px; padding:12px 12px 10px; border-bottom:1px solid rgba(255,255,255,.13); min-height:58px; }
+  aside.sb .sb-top img { height:34px; background:#fff; border-radius:6px; padding:3px 5px; flex:0 0 auto; }
+  aside.sb .sb-top .nm { font-weight:800; font-size:13.5px; letter-spacing:.3px; line-height:1.2; white-space:nowrap; }
+  aside.sb .sb-top .nm span { display:block; font-weight:500; font-size:10.5px; color:#c9d4e6; letter-spacing:.6px; }
+  aside.sb .sb-scroll { flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:8px 0 12px; }
+  aside.sb .sb-scroll::-webkit-scrollbar { width:6px } aside.sb .sb-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,.22); border-radius:3px }
+  aside.sb .grp { color:#8fa4c4; font-size:9px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; padding:9px 16px 3px; white-space:nowrap; }
+  aside.sb button.nv { width:100%; border:0; background:none; color:#dfe6f2; display:flex; align-items:center; gap:11px; padding:7px 16px; cursor:pointer;
+    font-size:13px; font-weight:600; text-align:left; border-left:3px solid transparent; white-space:nowrap; }
+  aside.sb button.nv:hover { background:rgba(255,255,255,.08); color:#fff; }
+  aside.sb button.nv.on { background:rgba(191,144,0,.20); color:#fff; border-left-color:var(--gold); }
+  aside.sb button.nv .ic { flex:0 0 18px; display:flex; align-items:center; justify-content:center; opacity:.92; }
+  aside.sb button.nv .lb { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; }
+  aside.sb .sb-foot { border-top:1px solid rgba(255,255,255,.13); padding:9px 12px; font-size:11px; color:#c9d4e6; white-space:nowrap; }
+  aside.sb .sb-foot b { color:#fff; display:block; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+  aside.sb .sb-foot a { color:#ffd77a; text-decoration:none; }
+  body.sb-collapsed aside.sb .lb, body.sb-collapsed aside.sb .grp, body.sb-collapsed aside.sb .nm, body.sb-collapsed aside.sb .sb-foot .txt { display:none; }
+  body.sb-collapsed aside.sb button.nv { justify-content:center; padding:11px 0; }
+  body.sb-collapsed aside.sb .sb-top { justify-content:center; padding:12px 0 10px; }
+  header.app { background:#fff; color:var(--navy); display:flex; align-items:center; gap:12px; padding:0 18px; height:52px;
+    position:sticky; top:0; z-index:20; border-bottom:1px solid #e3e7ee; margin-left:var(--sbw); transition:margin-left .18s ease; }
+  header.app .t { font-weight:800; font-size:15px; letter-spacing:.2px; color:var(--navy); }
   header.app .sp { flex:1; }
-  header.app .u { font-size:12px; opacity:.9; text-align:right; }
-  nav { background:#fff; border-bottom:1px solid #ddd; display:flex; gap:2px; padding:0 12px; position:sticky; top:50px; z-index:9; overflow-x:auto; }
-  nav button { border:0; background:none; padding:11px 15px; cursor:pointer; font-size:13px; font-weight:600; color:#555; border-bottom:3px solid transparent; white-space:nowrap; }
-  nav button.on { color:var(--navy); border-bottom-color:var(--gold); }
+  header.app .u { font-size:11.5px; color:#5b6472; text-align:right; }
+  header.app .u b { color:var(--navy) }
+  header.app a { color:var(--blue); text-decoration:none }
+  .sbtoggle { border:0; background:#f2f4f8; color:var(--navy); width:32px; height:32px; border-radius:8px; cursor:pointer; font-size:15px; line-height:1; }
+  .sbtoggle:hover { background:#e6ebf3 }
+  .sb-mask { display:none; position:fixed; inset:0; background:rgba(15,25,45,.45); z-index:35; }
   main { max-width:1180px; margin:0 auto; padding:16px; }
+  .shell { margin-left:var(--sbw); transition:margin-left .18s ease; }
+  @media (max-width:860px){
+    aside.sb { transform:translateX(-100%); width:238px; box-shadow:0 0 40px rgba(0,0,0,.3); }
+    body.sb-open aside.sb { transform:none; }
+    body.sb-open .sb-mask { display:block; }
+    header.app, .shell { margin-left:0; }
+    body.sb-collapsed { --sbw:0px; }
+  }
+  @media print { aside.sb, header.app, .sb-mask { display:none !important; } .shell { margin-left:0 } }
   .card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:16px 18px; margin-bottom:14px; }
   h2 { margin:2px 0 12px; font-size:16px; color:var(--navy); }
   h3 { margin:14px 0 8px; font-size:13px; color:var(--blue); text-transform:uppercase; letter-spacing:.5px; }
@@ -414,23 +449,94 @@ async function unlockSettings(){
   try{ const d=await api("verifypin",{method:"POST",body:{pin}}); if(d.ok){ settingsUnlocked=true; return true; } toast("Wrong PIN"); return false; }
   catch(e){ toast(e.message); return false; }
 }
+// Monochrome line icons — inherit the menu colour, no emoji, corporate look.
+const ICO=(d,extra="")=>`<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}${extra}</svg>`;
+const ICONS={
+  dash:ICO('<rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="11" width="7" height="10" rx="1"/>'),
+  clients:ICO('<path d="M3 21h18M5 21V6l7-3v18M19 21V11l-7-3"/><path d="M8 9h1M8 13h1M8 17h1M15 14h1M15 18h1"/>'),
+  ccerts:ICO('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),
+  vos:ICO('<path d="M12 5v14M5 12h14"/><path d="M4 20h6" transform="translate(0 0)"/>'),
+  projects:ICO('<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 13l9 5 9-5M3 18l9 5 9-5"/>'),
+  certs:ICO('<path d="M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M15 2v5h4M8 12h8M8 16h5"/>'),
+  sups:ICO('<path d="M1 6h12v10H1zM13 9h4l3 3v4h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'),
+  procure:ICO('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'),
+  awards:ICO('<path d="M3 17.5 15 5.5a2.1 2.1 0 0 1 3 3L6 20.5 2 21z"/><path d="M13 7.5l3 3"/>'),
+  cheques:ICO('<path d="M3 10h18M4 10 12 4l8 6M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18"/>'),
+  reg:ICO('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
+  bank:ICO('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'),
+  expenses:ICO('<path d="M20 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6"/><circle cx="17" cy="14" r="1.4"/>'),
+  pnl:ICO('<path d="M3 21V3M3 21h18"/><path d="m7 15 4-5 3 3 5-7"/><path d="M19 6h0.01M15 6h4v4"/>'),
+  budget:ICO('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>'),
+  assets:ICO('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
+  hocerts:ICO('<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>'),
+  announce:ICO('<path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6"/>'),
+  settings:ICO('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>')
+};
 function render(){
   if(ME && ME.policyAccepted===false){ renderPolicyGate(); return; }
-  const tabs=[["dash","Dashboard"],["certs","Supplier IPCs"],["projects","Projects"],["sups","Suppliers"],["cheques","Cheques"],["reg","Payment Register"],["clients","Clients"],["ccerts","Client IPCs"],["vos","Variations"],["expenses","Expenses"],["pnl","P&L"],["budget","Budget"],["assets","Assets"]];
-  if(["CEO","PM","QS","Accounts"].includes(ME.role)) tabs.push(["bank","Bank"]);
-  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["procure","Procurement"]);
-  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["awards","Contracts / LOA"]);
-  if(["CEO","PM","QS"].includes(ME.role)) tabs.push(["hocerts","Completion / DLP"]);
-  if(ME.role==="CEO") tabs.push(["announce","Announcements"]);
-  if(ME.role==="CEO") tabs.push(["settings","Settings 🔒"]);
+  const r=ME.role;
+  const has=(...roles)=>roles.includes(r);
+  // Menu grouped the way the business actually works: money in, money out,
+  // finance & control, delivery, then administration.
+  const GROUPS=[
+    ["", [["dash","Dashboard"]]],
+    ["Revenue — client side", [
+      ["clients","Clients"],
+      ["ccerts","Client IPCs"],
+      ["vos","Variations"],
+      ["projects","Projects"]]],
+    ["Cost — supplier side", [
+      ["certs","Supplier IPCs"],
+      ["sups","Suppliers"],
+      ...(has("CEO","PM","QS")?[["procure","Procurement"]]:[]),
+      ...(has("CEO","PM","QS")?[["awards","Contracts / LOA"]]:[])]],
+    ["Treasury & payments", [
+      ["cheques","Cheques"],
+      ["reg","Payment Register"],
+      ...(has("CEO","PM","QS","Accounts")?[["bank","Bank"]]:[])]],
+    ["Finance & control", [
+      ["expenses","Expenses"],
+      ["pnl","P&L"],
+      ["budget","Budget"],
+      ["assets","Assets"]]],
+    ["Delivery & aftercare", [
+      ...(has("CEO","PM","QS")?[["hocerts","Completion / DLP"]]:[])]],
+    ["Administration", [
+      ...(r==="CEO"?[["announce","Announcements"]]:[]),
+      ...(r==="CEO"?[["settings","Settings"]]:[])]]
+  ].map(([g,items])=>[g,items.filter(Boolean)]).filter(([,items])=>items.length);
+  const titleOf=(()=>{ for(const [,items] of GROUPS) for(const [k,l] of items) if(k===VIEW) return l; return "MA Group Finance"; })();
+  const collapsed=localStorage.getItem("ma_sb")==="1";
+  document.body.classList.toggle("sb-collapsed",collapsed);
+  document.body.classList.remove("sb-open");
   root.innerHTML = `
-  <header class="app"><img src="logo.png" alt=""><div class="t">MA GROUP — Finance</div><div class="sp"></div>
-    <div class="u">${esc(ME.name)} · ${esc(ME.title||ME.role)}<br><a href="#" id="pinBtn" style="color:#ffd">change PIN</a> · <a href="#" id="outBtn" style="color:#ffd">sign out</a></div></header>
-  <nav>${tabs.map(([k,l])=>`<button class="${VIEW===k?"on":""}" data-v="${k}">${l}</button>`).join("")}</nav>
-  <main id="main"></main>`;
-  root.querySelectorAll("nav button").forEach(b=>b.onclick=async ()=>{
+  <aside class="sb">
+    <div class="sb-top"><img src="logo.png" alt=""><div class="nm">MA GROUP<span>FINANCE</span></div></div>
+    <div class="sb-scroll">
+      ${GROUPS.map(([g,items])=>`${g?`<div class="grp">${esc(g)}</div>`:`<div style="height:6px"></div>`}
+        ${items.map(([k,l])=>`<button class="nv ${VIEW===k?"on":""}" data-v="${k}" title="${esc(l)}"><span class="ic">${ICONS[k]||""}</span><span class="lb">${esc(l)}</span></button>`).join("")}`).join("")}
+    </div>
+    <div class="sb-foot"><b title="${esc(ME.name)}">${esc(ME.name)}</b><span class="txt">${esc(ME.title||ME.role)}<br>
+      <a href="#" id="pinBtn">change PIN</a> · <a href="#" id="outBtn">sign out</a></span></div>
+  </aside>
+  <div class="sb-mask" id="sbMask"></div>
+  <header class="app">
+    <button class="sbtoggle" id="sbTog" title="Show / hide the menu">☰</button>
+    <div class="t">${esc(titleOf)}</div><div class="sp"></div>
+    <div class="u"><b>${esc(ME.name)}</b> · ${esc(ME.title||ME.role)}</div>
+  </header>
+  <div class="shell"><main id="main"></main></div>`;
+  root.querySelectorAll("aside.sb button.nv").forEach(b=>b.onclick=async ()=>{
     if(b.dataset.v==="settings"){ if(!(await unlockSettings())) return; }
     VIEW=b.dataset.v;CUR=null;render(); });
+  // Wide screens: collapse to icons. Narrow screens: slide the menu in and out.
+  $("#sbTog").onclick=()=>{
+    if(window.innerWidth<=860){ document.body.classList.toggle("sb-open"); return; }
+    const now=!document.body.classList.contains("sb-collapsed");
+    document.body.classList.toggle("sb-collapsed",now);
+    localStorage.setItem("ma_sb",now?"1":"0");
+  };
+  $("#sbMask").onclick=()=>document.body.classList.remove("sb-open");
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
