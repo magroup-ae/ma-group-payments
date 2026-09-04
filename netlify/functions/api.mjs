@@ -13296,6 +13296,28 @@ async function ensureInit() {
     settings.staffPruneV1 = true;
     await s.setJSON("settings", settings);
   }
+  // One-time (04/09/2026): staff accounts per the CEO's list. Starting PINs come from
+  // env STAFF_PINS_V2 = {"jesse":"......",...} so they are not in the source; every
+  // user must change the PIN at first login.
+  if (!settings.staffV2) {
+    let pins = {}; try { pins = JSON.parse(process.env.STAFF_PINS_V2 || "{}"); } catch {}
+    const staff = [
+      { id: "ceo", name: "Eng. Mohammed Abuassba", role: "CEO", title: "Chief Executive Officer (CEO)", department: "Management", final: true },
+      { id: "osama", name: "Mr. Osama Buder", role: "CEO", title: "Chief Financial Officer (CFO)", department: "Finance / Accounts", final: false },
+      { id: "shareef", name: "MD Shareef", role: "CEO", title: "HR & Admin Manager", department: "HR & Admin", final: false },
+      { id: "sinan", name: "Sinan", role: "Clerk", title: "Expenses data entry", department: "Finance / Accounts", final: false },
+      { id: "jesse", name: "Jesse", role: "Secretary", title: "Reception — supplier registration", department: "Admin & data entry", final: false }
+    ];
+    for (const st of staff) {
+      let u = users.find((x) => x.id === st.id);
+      if (!u) { u = { id: st.id, salt: randomBytes(8).toString("hex"), pinHash: "", createdAt: now(), createdBy: "system" }; users.push(u); }
+      u.name = st.name; u.role = st.role; u.title = st.title; u.department = st.department; u.final = st.final; u.active = true;
+      if (st.id !== "ceo" && pins[st.id]) { u.salt = randomBytes(8).toString("hex"); u.pinHash = hashPin(String(pins[st.id]), u.salt); u.mustChangePin = true; }
+    }
+    await s.setJSON("users", users);
+    settings.staffV2 = true;
+    await s.setJSON("settings", settings);
+  }
   // One-time: grant the CFO (Mr. Osama) full CEO-equivalent access. Access role is
   // set to CEO so every permission gate (backend + frontend) treats him identically;
   // a display title keeps his designation shown as CFO in the header.
@@ -16047,7 +16069,7 @@ var api_default = async (req, context) => {
       return err("Wrong PIN", 401);
     }
     try { if (lk) await s.delete(lkKey); } catch {}
-    return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, title: u.title || "", mustChangePin: !!u.mustChangePin } });
+    return json({ token: await makeToken(u.id), user: { id: u.id, name: u.name, role: u.role, title: u.title || "", department: u.department || "", final: u.id === "ceo" || u.final === true, mustChangePin: !!u.mustChangePin } });
   }
   if (path === "userlist") return json(users.filter((u) => u.active !== false).map((u) => ({ id: u.id, name: u.name, role: u.role })));
   // Public picture for a marketing post: Meta / LinkedIn fetch it by URL when
@@ -16135,7 +16157,11 @@ var api_default = async (req, context) => {
   const userId = await verifyToken(auth.startsWith("Bearer ") ? auth.slice(7) : null);
   const me = users.find((x) => x.id === userId);
   if (!me) return err("Not logged in", 401);
-  const can = (a) => CAN[a].includes(me.role);
+  // Final-approval authority: the CEO account (super admin) or a user flagged final:true.
+  // "Access all" accounts (CFO, HR & Admin) carry role CEO for access but final:false.
+  const isFinal = me.id === "ceo" || me.final === true;
+  const FINAL_ONLY = new Set(["approve", "cancel", "marketingApprove", "marketingPublish", "users"]);
+  const can = (a) => CAN[a].includes(me.role) && (!FINAL_ONLY.has(a) || isFinal);
   if (path === "pin" && req.method === "POST") {
     const { pin } = await req.json();
     if (!/^\d{4,8}$/.test(String(pin))) return err("PIN must be 4-8 digits");
@@ -16604,7 +16630,7 @@ var api_default = async (req, context) => {
     if (!rec || !rec.eval) return err("No evaluation on this inquiry", 404);
     const b = await req.json(); const a = String(b.action || "");
     if (a === "approve") {
-      if (!can("admin")) return err("CEO approval only", 403);
+      if (!can("admin") || !isFinal) return err("CEO final approval only", 403);
       if (!rec.eval.recommendedVendorId) return err("Select the recommended bidder first");
       rec.eval.status = "Approved"; rec.eval.approvedBy = me.name; rec.eval.approvedAt = now();
     } else if (a === "reopen") {
@@ -17327,7 +17353,7 @@ var api_default = async (req, context) => {
     const clientCertCount = clientCertList.blobs.length;
     const policyAccepted = await hasAcceptedPolicy(s, me.id);
     return json({
-      me: { id: me.id, name: me.name, role: me.role, title: me.title || "", policyAccepted },
+      me: { id: me.id, name: me.name, role: me.role, title: me.title || "", department: me.department || "", final: isFinal, policyAccepted },
       policyVersion: POLICY_VERSION,
       policyText: policyAccepted ? "" : CONFIDENTIALITY_POLICY,
       settings,
@@ -17361,7 +17387,7 @@ var api_default = async (req, context) => {
   }
   if (path === "users" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
-    const { id: idRaw, name, role, pin, title, department, active, remove } = await req.json();
+    const { id: idRaw, name, role, pin, title, department, active, final, remove } = await req.json();
     const id = String(idRaw || "").trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
     if (!id) return err("User id is required (letters / numbers)");
     const all = await s.get("users", { type: "json" });
@@ -17379,6 +17405,7 @@ var api_default = async (req, context) => {
     if (title !== void 0) u.title = String(title || "");
     if (department !== void 0) u.department = String(department || "");
     if (active !== void 0) { if (u.id === me.id) return err("You cannot deactivate your own account"); u.active = !!active; }
+    if (final !== void 0 && u.id !== "ceo") u.final = !!final;
     if (pin) {
       u.salt = randomBytes(8).toString("hex");
       u.pinHash = hashPin(String(pin), u.salt);
@@ -18355,7 +18382,7 @@ var api_default = async (req, context) => {
     if (!v) return err("Not found", 404);
     const b = await req.json(); const a = String(b.action || "");
     if (a === "submit") { if (!can("clientcert")) return err("Not permitted", 403); if (!["Draft", "Rejected"].includes(v.status)) return err("Only a draft can be submitted"); v.status = "Submitted"; v.submittedAt = now(); }
-    else if (a === "approve") { if (!can("admin")) return err("CEO only", 403); if (!["Submitted", "Draft"].includes(v.status)) return err("Already " + v.status); v.status = "Approved"; v.approvedAt = now(); v.approvedBy = me.name; if (b.clientApprovalRef !== void 0) v.clientApprovalRef = String(b.clientApprovalRef || ""); }
+    else if (a === "approve") { if (!can("admin") || !isFinal) return err("CEO final approval only", 403); if (!["Submitted", "Draft"].includes(v.status)) return err("Already " + v.status); v.status = "Approved"; v.approvedAt = now(); v.approvedBy = me.name; if (b.clientApprovalRef !== void 0) v.clientApprovalRef = String(b.clientApprovalRef || ""); }
     else if (a === "reject") { if (!can("admin")) return err("CEO only", 403); if (v.appliedToContract) return err("Already applied to the contract"); v.status = "Rejected"; }
     else if (a === "reopen") { if (!can("admin")) return err("CEO only", 403); if (v.appliedToContract) return err("Already applied to the contract — adjust with a new omission VO instead"); v.status = "Draft"; }
     else return err("Unknown action");
@@ -18546,7 +18573,7 @@ var api_default = async (req, context) => {
         await notify(s, "client_issued", { cert: c, contract, client });
       } catch {}
     } else if (action === "approve") {
-      if (!can("admin")) return err("CEO only", 403);
+      if (!can("admin") || !isFinal) return err("CEO final approval only", 403);
       if (c.status !== "Issued") return err("Must be Issued first");
       c.status = "Approved"; c.approvedBy = me.name; c.approvedAt = now();
       c.audit.push({ at: now(), by: me.name, action: "Approved", comment: comment || void 0 });

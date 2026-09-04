@@ -243,6 +243,8 @@
 const $ = (s, el=document) => el.querySelector(s);
 const root = $("#root");
 let TOKEN = sessionStorage.getItem("tok") || "";
+// Final approval = CEO (super admin) only; CFO / HR & Admin have "access all" but final:false.
+function FINAL(){ return !!ME && ME.role==="CEO" && ME.final!==false; }
 let ME=null, S=null, CERTS=[], REG=[], USERS=[], SUPS=[], ASSETS={sign:"",stamp:""}, ASSETC=0, PVEND=null;
 let VIEW="dash", CUR=null, settingsUnlocked=false;
 let POLICY_TEXT="", POLICY_VER=1;
@@ -1062,7 +1064,7 @@ async function openCert(no){
   const acts=[];
   if(c.status==="Draft" && ["QS","CEO"].includes(ME.role)) acts.push(["submit","Submit for check","btn"]);
   if(c.status==="Certified" && ["PM","CEO"].includes(ME.role)) acts.push(["check","Confirm check","btn"]);
-  if(c.status==="Checked" && ME.role==="CEO") acts.push(["approve","APPROVE","btn green"]);
+  if(c.status==="Checked" && FINAL()) acts.push(["approve","APPROVE","btn green"]);
   if(["Certified","Checked","Approved"].includes(c.status) && ["PM","CEO"].includes(ME.role)) acts.push(["reject","Reject","btn red"]);
   if(c.status==="Approved" && ["Accounts","CEO"].includes(ME.role)) acts.push(["pay","Record payment","btn gold"]);
   if(c.status!=="Paid" && c.status!=="Cancelled" && ME.role==="CEO") acts.push(["cancel","Cancel","btn ghost"]);
@@ -2347,7 +2349,7 @@ async function voForm(key){
     certNo:$("#vo_certNo").value, proformaRef:$("#vo_proformaRef").value, otherLinks:$("#vo_otherLinks").value, notes:$("#vo_notes").value });
   const save=async (then)=>{ try{ const r=await api("vo",{method:"POST",body:gather()}); toast((isNew?"Variation "+r.no+" saved":"Saved")); if(then) await then(r); else voForm(r.key); }catch(e){ toast(e.message); } };
   const act=async (key2,action,extra)=>{ try{ await api("vo/"+encodeURIComponent(key2)+"/status",{method:"POST",body:{action,...(extra||{})}}); voForm(key2); }catch(e){ toast(e.message); } };
-  const B=$("#voBtns"); const ceo=ME.role==="CEO"; let bh="";
+  const B=$("#voBtns"); const ceo=FINAL(); let bh="";
   if(!locked) bh+=`<button class="btn green" id="voSave">${isNew?"Save as draft":"Save changes"}</button>`;
   if(!isNew&&["Draft","Rejected"].includes(v.status)) bh+=`<button class="btn gold" id="voSubmit">Submit to client</button>`;
   if(!isNew&&v.status==="Submitted"&&ceo) bh+=`<button class="btn green" id="voApprove">Record client approval</button><button class="btn" style="background:#c0392b;color:#fff" id="voReject">Rejected by client</button>`;
@@ -2592,7 +2594,7 @@ async function openClientCert(no){
   const can=["CEO","PM","QS"].includes(ME.role), canIssue=["CEO","PM"].includes(ME.role);
   const acts=[];
   if(c.status==="Draft"&&canIssue) acts.push(["issue","Issue certificate","btn green"]);
-  if(c.status==="Issued"&&ME.role==="CEO") acts.push(["approve","Approve","btn green"]);
+  if(c.status==="Issued"&&FINAL()) acts.push(["approve","Approve","btn green"]);
   if(["Issued","Approved"].includes(c.status)&&ME.role==="CEO") acts.push(["reopen","Reopen","btn ghost"]);
   if(c.status!=="Cancelled"&&ME.role==="CEO") acts.push(["cancel","Cancel","btn red"]);
   const canEdit=c.status==="Draft"&&can;
@@ -3225,7 +3227,7 @@ const DEPTS=[
   {role:"Marketing",name:"Marketing",desc:"posts, campaigns, audiences (CEO approves & publishes)"},
   {role:"Clerk",name:"Admin & data entry",desc:"enters expenses, suppliers, clients, assets — no approvals"},
   {role:"Secretary",name:"Secretary",desc:"suppliers, clients, assets, operations register"},
-  {role:"CEO",name:"CEO / full access",desc:"everything incl. settings and approvals"}];
+  {role:"CEO",name:"Full access (management)",desc:"every page and setting; final approvals stay with the CEO"}];
 const DEPT_OF=Object.fromEntries(DEPTS.map(d=>[d.role,d.name]));
 let OPS_TAB="overview", OPS_MONTH=new Date().toISOString().slice(0,7), OPS=null, OPS_STAFF_EDIT=null;
 const opsCan={ edit:()=>["CEO","Accounts","Secretary"].includes(ME.role), payroll:()=>["CEO","Accounts"].includes(ME.role), post:()=>["CEO","Accounts"].includes(ME.role) };
@@ -4440,7 +4442,7 @@ function procEvalForm(){
     vendors:V.map(v=>({...v, scores:CR.reduce((o,c)=>{ o[c.key]=scoreOf(v,c); return o; },{})})),
     recommendedVendorId:$("#ev_rec").value||"", notLowestJustification:$("#ev_notLowest").value,
     recommendation:$("#ev_recom").value, conditions:$("#ev_cond").value });
-  const B=$("#ev_btns"); const ceo=ME.role==="CEO"; let h="";
+  const B=$("#ev_btns"); const ceo=FINAL(); let h="";
   if(!locked) h+=`<button class="btn green" id="ev_save">Save evaluation</button>`;
   h+=`<button class="btn ghost" id="ev_print">View / Print comparison sheet</button><button class="btn ghost" id="ev_dl">⤓ PDF</button>`;
   if(ev.status!=="Approved"&&ceo) h+=`<button class="btn gold" id="ev_approve">Approve evaluation (CEO)</button>`;
@@ -4561,7 +4563,7 @@ const ANN_TEMPLATES={
 };
 /* ---------- marketing: posts, approvals, publishing, broadcasts, audiences ---------- */
 let MKT=null, MKT_TAB="live", MKT_EDIT=null, MKT_FILTER="", MKT_AUD=null;
-const mktCan={ edit:()=>["CEO","Marketing"].includes(ME.role), approve:()=>ME.role==="CEO", publish:()=>ME.role==="CEO" };
+const mktCan={ edit:()=>["CEO","Marketing"].includes(ME.role), approve:()=>FINAL(), publish:()=>FINAL() };
 const MKT_LIMITS={linkedin:3000,instagram:2200,facebook:5000,whatsapp:1024,email:0};
 function mktPill(st){ const m={Draft:"st-Draft",Review:"st-Submitted",Approved:"st-Approved",Scheduled:"st-Issued",Published:"st-Paid",Failed:"st-Rejected",Cancelled:"st-Cancelled"}; return `<span class="pill ${m[st]||"st-Draft"}">${esc(st)}</span>`; }
 function mktChName(c){ const x=(MKT&&MKT.channels||[]).find(k=>k.code===c); return x?x.name:c; }
@@ -4950,8 +4952,8 @@ function vSettings(){
      <div class="muted" id="mgHint" style="font-size:11px;margin-top:6px"></div></div>`:""}
    <h3>Banks / accounts</h3><div id="bankList"></div>
    ${admin?`<div class="flex"><input id="nbName" placeholder="Bank — account" style="max-width:320px"><button class="btn" id="nbAdd">Add bank</button></div>`:""}
-   ${admin?`<h3>Users &amp; departments</h3><div style="overflow-x:auto"><table><tr><th>User id</th><th>Name</th><th>Department</th><th>Role / access</th><th>Status</th><th></th></tr>
-     ${USERS.map(u=>`<tr style="${u.active===false?'opacity:.55':''}"><td><code>${esc(u.id)}</code></td><td>${esc(u.name)}${u.title?`<br><span class="muted" style="font-size:11px">${esc(u.title)}</span>`:""}</td><td>${esc(u.department||DEPT_OF[u.role]||"")}</td><td>${esc(u.role)}${u.title&&u.role==="CEO"&&u.id!=="ceo"?' <span class="pill" style="background:#375623;font-size:10px">full access</span>':""}</td><td>${u.active===false?'<span class="pill st-Cancelled">deactivated</span>':'<span class="pill st-Paid">active</span>'}</td><td style="white-space:nowrap"><a href="#" data-reset="${u.id}">reset PIN</a> · <a href="#" data-uedit="${u.id}">edit</a>${u.id!==ME.id&&u.id!=="ceo"?` · <a href="#" data-uact="${u.id}" data-to="${u.active===false?1:0}">${u.active===false?"activate":"deactivate"}</a>`:""}</td></tr>`).join("")}</table></div>
+   ${FINAL()?`<h3>Users &amp; departments</h3><div style="overflow-x:auto"><table><tr><th>User id</th><th>Name</th><th>Department</th><th>Role / access</th><th>Status</th><th></th></tr>
+     ${USERS.map(u=>`<tr style="${u.active===false?'opacity:.55':''}"><td><code>${esc(u.id)}</code></td><td>${esc(u.name)}${u.title?`<br><span class="muted" style="font-size:11px">${esc(u.title)}</span>`:""}</td><td>${esc(u.department||DEPT_OF[u.role]||"")}</td><td>${esc(u.role)}${u.role==="CEO"?(u.id==="ceo"||u.final?' <span class="pill" style="background:#7a5c00;font-size:10px">super admin · final approval</span>':' <span class="pill" style="background:#375623;font-size:10px">full access · no final approval</span>'):""}</td><td>${u.active===false?'<span class="pill st-Cancelled">deactivated</span>':'<span class="pill st-Paid">active</span>'}</td><td style="white-space:nowrap"><a href="#" data-reset="${u.id}">reset PIN</a> · <a href="#" data-uedit="${u.id}">edit</a>${u.id!==ME.id&&u.id!=="ceo"?` · <a href="#" data-uact="${u.id}" data-to="${u.active===false?1:0}">${u.active===false?"activate":"deactivate"}</a>`:""}</td></tr>`).join("")}</table></div>
      <div class="card" style="margin:10px 0 0;background:#f8f9fc"><h3 style="margin:0 0 6px" id="uFormTitle">Add a user</h3>
       <div class="grid">
        <div><label>User id (login name)</label><input id="u_id" placeholder="e.g. fatima.hr" style="text-transform:lowercase"></div>
@@ -4961,7 +4963,7 @@ function vSettings(){
        <div><label>Starting PIN (4–8 digits)</label><input id="u_pin" inputmode="numeric" placeholder="user must change it at first login"></div>
       </div>
       <div class="flex" style="gap:8px;margin-top:8px"><button class="btn gold" id="u_save">Save user</button><button class="btn ghost" id="u_clear">Clear</button>
-       <span class="muted" style="font-size:11px">Each department only sees its own pages: Finance → payments, bank, P&amp;L; HR &amp; Admin → operations cost, payroll, assets, announcements; Projects/QS → clients, IPCs, procurement, DLP; Marketing → marketing &amp; announcements; Admin &amp; data entry → data entry without approvals. The CEO sees everything.</span></div></div>`:""}
+       <span class="muted" style="font-size:11px">Each department only sees its own pages: Finance → payments, bank, P&amp;L; HR &amp; Admin → operations cost, payroll, assets, announcements; Projects/QS → clients, IPCs, procurement, DLP; Marketing → marketing &amp; announcements; Admin &amp; data entry → data entry without approvals. Full access = every page (CFO, HR &amp; Admin); final approvals (IPCs, variations, evaluations, marketing publishing, users) are the CEO's alone.</span></div></div>`:""}
    </div>
    ${admin?`<div class="card"><h2>Backup &amp; data</h2>
      <div class="muted" style="margin-bottom:8px">Your data lives in Netlify's cloud (replicated &amp; durable). Download a full backup regularly — keep a copy off-system. This exports every record as one JSON file (no PINs).</div>
