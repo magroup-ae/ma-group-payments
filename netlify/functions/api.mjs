@@ -18961,9 +18961,20 @@ var api_default = async (req, context) => {
       try {
         const ui = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + li.accessToken } }).then((r) => r.json());
         out.linkedin = { name: ui.name || li.name || "", picture: ui.picture || "", email: ui.email || "", mode: li.orgId && /w_organization_social/.test(li.scopes || "") ? "company page" : "personal profile", expiresAt: li.expiresAt || "" };
-        if (li.orgId && /r_organization_social/.test(li.scopes || "")) {
-          const rs = await fetch(`${LI_API}/networkSizes/urn:li:organization:${li.orgId}?edgeType=CompanyFollowedByMember`, { headers: { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" } });
-          const j = await rs.json().catch(() => ({})); if (rs.ok) out.linkedin.followers = j.firstDegreeSize;
+        const orgId = li.orgId || env0.liOrg;
+        if (orgId) {
+          // Company page identity is always shown; live numbers need the Community Management API (r_organization_social).
+          out.linkedin.page = { id: orgId, name: process.env.LINKEDIN_ORG_NAME || "MA group", url: `https://www.linkedin.com/company/${orgId}/`, admin: `https://www.linkedin.com/company/${orgId}/admin/dashboard/`, live: false };
+          const H = { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" };
+          const rs = await fetch(`${LI_API}/networkSizes/urn:li:organization:${orgId}?edgeType=CompanyFollowedByMember`, { headers: H });
+          const j = await rs.json().catch(() => ({}));
+          if (rs.ok) { out.linkedin.followers = j.firstDegreeSize; out.linkedin.page.live = true; }
+          else out.linkedin.page.pending = rs.status === 403 || rs.status === 401 ? "Community Management API approval pending" : `HTTP ${rs.status}`;
+          if (rs.ok) {
+            const ps = await fetch(`${LI_API}/posts?author=${encodeURIComponent("urn:li:organization:" + orgId)}&q=author&count=10&sortBy=LAST_MODIFIED`, { headers: H });
+            const pj = await ps.json().catch(() => ({}));
+            if (ps.ok) out.linkedin.posts = (pj.elements || []).map((x) => ({ id: x.id, text: x.commentary || "", at: x.publishedAt ? new Date(x.publishedAt).toISOString() : "", url: x.id ? `https://www.linkedin.com/feed/update/${x.id}/` : "" }));
+          }
         }
       } catch (e) { out.errors.linkedin = e.message; }
     }
@@ -19124,7 +19135,10 @@ var api_default = async (req, context) => {
     const b = await req.json().catch(() => ({}));
     const state = Date.now().toString(36) + "." + randomBytes(6).toString("hex");
     await s.setJSON("mkt/oauth/" + state, { by: me.name, at: now(), org: String(b.orgId || e.liOrg || "") });
-    const scopes = ["openid", "profile", "email", "w_member_social", ...(b.orgId || e.liOrg ? ["w_organization_social", "r_organization_social"] : [])];
+    // Organisation scopes exist only on an app that has the Community Management API product (LINKEDIN_ORG_SCOPES=1 once approved);
+    // requesting them on the "Share on LinkedIn" app makes LinkedIn reject the whole sign-in.
+    const orgScopes = process.env.LINKEDIN_ORG_SCOPES === "1" || b.orgScopes === true;
+    const scopes = ["openid", "profile", "email", "w_member_social", ...(orgScopes && (b.orgId || e.liOrg) ? ["w_organization_social", "r_organization_social"] : [])];
     const u = new URL("https://www.linkedin.com/oauth/v2/authorization");
     u.searchParams.set("response_type", "code"); u.searchParams.set("client_id", e.liClientId);
     u.searchParams.set("redirect_uri", e.siteUrl + "/api/mkt/linkedin/callback"); u.searchParams.set("state", state); u.searchParams.set("scope", scopes.join(" "));
