@@ -14734,6 +14734,270 @@ function compCertDefaults(type) {
     "The works are hereby accepted by the Client without reservation. Any works beyond the scope stated in Section 2 shall be treated as a separate order or variation."
   ];
 }
+/* ---------- DLP service request: SLA, liability catalogue and documents ---------- */
+var SR_CATEGORIES = ["Civil & finishes", "Painting & decoration", "Joinery & carpentry", "Doors & ironmongery", "Flooring & tiling", "Ceilings & partitions", "Glass & aluminium", "Electrical", "Plumbing & drainage", "HVAC & ventilation", "Firefighting & alarm", "Data & telecom", "External works & landscape", "Other"];
+// Reason codes behind every liability decision — the audit trail that lets MA
+// defend a "this is chargeable" position with the client.
+var SR_REASONS_IN = [
+  { k: "workmanship", t: "Defective workmanship by MA Group" },
+  { k: "material", t: "Defective or non-compliant material supplied by MA Group" },
+  { k: "installation", t: "Installation error / incomplete installation" },
+  { k: "spec", t: "Not in accordance with the approved specification or drawings" },
+  { k: "latent", t: "Latent defect appearing within the DLP" },
+  { k: "subcontractor", t: "Defect attributable to an MA subcontractor (back-charged)" }
+];
+var SR_REASONS_OUT = [
+  { k: "misuse", t: "Misuse, abuse or improper operation by the occupant" },
+  { k: "thirdparty", t: "Third-party works, alteration or interference after handover" },
+  { k: "maintenance", t: "Lack of routine maintenance / cleaning by the client" },
+  { k: "wear", t: "Fair wear and tear / consumable item" },
+  { k: "clientmaterial", t: "Client-supplied material, equipment or nominated supplier" },
+  { k: "design", t: "Design or consultant instruction — not a construction defect" },
+  { k: "external", t: "External event — water ingress, power surge, force majeure" },
+  { k: "notscope", t: "Item never formed part of MA Group's scope of works" },
+  { k: "expired", t: "Reported after expiry of the Defects Liability Period" },
+  { k: "new", t: "New works / addition requested by the client" }
+];
+function srSla(settings) {
+  const d = (settings && settings.srSla) || {};
+  return {
+    Emergency: { respondHrs: num(d.emergencyRespond) || 4, rectifyDays: num(d.emergencyRectify) || 1 },
+    Urgent: { respondHrs: num(d.urgentRespond) || 24, rectifyDays: num(d.urgentRectify) || 7 },
+    Routine: { respondHrs: num(d.routineRespond) || 72, rectifyDays: num(d.routineRectify) || 14 }
+  };
+}
+function srQuoteTotals(r) {
+  const subtotal = r2((r.quoteLines || []).reduce((a, l) => a + r2(num(l.qty) * num(l.rate)), 0));
+  const vat = r2(subtotal * (r.quoteVatPct != null ? num(r.quoteVatPct) : 0.05));
+  return { subtotal, vat, total: r2(subtotal + vat) };
+}
+// Everything derived rather than stored: SLA clocks, in-warranty check, ageing.
+function srDerive(r, settings) {
+  if (!r) return r;
+  const sla = srSla(settings)[r.priority] || srSla(settings).Routine;
+  const rep = r.reportedAt ? new Date(r.reportedAt.length <= 10 ? r.reportedAt + "T09:00" : r.reportedAt) : null;
+  const responseDue = rep ? new Date(rep.getTime() + sla.respondHrs * 3600e3).toISOString().slice(0, 16) : "";
+  const rectifyDue = rep ? new Date(rep.getTime() + sla.rectifyDays * 864e5).toISOString().slice(0, 10) : "";
+  const respondedAt = r.acknowledgedAt || r.inspectedAt || "";
+  const nowIso = now();
+  const open = !["Closed", "Cancelled", "Declined", "Rejected"].includes(r.status);
+  const q = srQuoteTotals(r);
+  // In-warranty test: a concern reported after the DLP end date can never be a
+  // free rectification, whatever its cause.
+  const withinDlp = r.dlpEnd ? String(r.reportedAt || "").slice(0, 10) <= String(r.dlpEnd).slice(0, 10) : null;
+  return {
+    ...r, quoteSubtotal: q.subtotal, quoteVat: q.vat, quoteTotal: q.total,
+    slaRespondHrs: sla.respondHrs, slaRectifyDays: sla.rectifyDays,
+    responseDue, rectifyDue, respondedAt,
+    responseMet: respondedAt ? (respondedAt <= responseDue) : null,
+    responseOverdue: !respondedAt && open && responseDue ? nowIso > responseDue : false,
+    rectifyMet: r.completedAt ? (String(r.completedAt).slice(0, 10) <= rectifyDue) : null,
+    rectifyOverdue: !r.completedAt && open && rectifyDue ? nowIso.slice(0, 10) > rectifyDue : false,
+    ageDays: rep ? Math.max(0, Math.round((Date.now() - rep.getTime()) / 864e5)) : 0,
+    withinDlp, open,
+    chargeable: r.liability === "out-of-scope" || (r.liability === "partial" && num(r.sharePct) < 100)
+  };
+}
+function srStats(items) {
+  const open = items.filter((x) => x.open);
+  const closed = items.filter((x) => x.status === "Closed");
+  const respTimes = items.filter((x) => x.respondedAt && x.reportedAt)
+    .map((x) => (new Date(x.respondedAt) - new Date(x.reportedAt.length <= 10 ? x.reportedAt + "T09:00" : x.reportedAt)) / 3600e3);
+  const rectTimes = closed.filter((x) => x.completedAt && x.reportedAt)
+    .map((x) => (new Date(x.completedAt) - new Date(x.reportedAt.length <= 10 ? x.reportedAt + "T09:00" : x.reportedAt)) / 864e5);
+  const avg = (a) => a.length ? r2(a.reduce((t, v) => t + v, 0) / a.length) : 0;
+  return {
+    total: items.length, open: open.length, closed: closed.length,
+    overdue: open.filter((x) => x.responseOverdue || x.rectifyOverdue).length,
+    emergencyOpen: open.filter((x) => x.priority === "Emergency").length,
+    inScope: items.filter((x) => x.liability === "in-scope").length,
+    outOfScope: items.filter((x) => x.liability === "out-of-scope").length,
+    awaitingVerdict: items.filter((x) => x.open && !x.liability).length,
+    chargeableValue: r2(items.filter((x) => x.liability === "out-of-scope").reduce((t, x) => t + num(x.quoteTotal), 0)),
+    approvedChargeable: r2(items.filter((x) => x.quoteApprovedAt).reduce((t, x) => t + num(x.quoteTotal), 0)),
+    backCharges: r2(items.reduce((t, x) => t + num(x.backChargeAmount), 0)),
+    avgResponseHrs: avg(respTimes), avgRectifyDays: avg(rectTimes),
+    slaResponseMet: items.filter((x) => x.responseMet === true).length,
+    slaResponseTotal: items.filter((x) => x.responseMet !== null).length
+  };
+}
+function srReasonText(k) {
+  const all = SR_REASONS_IN.concat(SR_REASONS_OUT).find((x) => x.k === k);
+  return all ? all.t : (k || "");
+}
+function srLiabilityLabel(r) {
+  return r.liability === "in-scope" ? "MA GROUP LIABILITY — RECTIFIED FREE OF CHARGE UNDER THE DLP"
+    : r.liability === "out-of-scope" ? "OUTSIDE THE DLP SCOPE — CHARGEABLE TO THE CLIENT"
+    : r.liability === "partial" ? `SHARED LIABILITY — MA GROUP ${num(r.sharePct)}% / CLIENT ${r2(100 - num(r.sharePct))}%`
+    : r.liability === "rejected" ? "NOT ACCEPTED — NO MA GROUP LIABILITY"
+    : "PENDING INSPECTION & DETERMINATION";
+}
+function srDocShell(rec, cfg, assets, title, sub, bodyHtml, fit) {
+  const esc = (x) => emEsc(x);
+  const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.no)} — ${esc(title)}</title>
+<style>
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:11.6px;line-height:1.42}
+  .page{max-width:820px;margin:0 auto;padding:18px 26px}
+  ${MAH_CSS}
+  .mah-logo{height:52px}
+  .band{background:#183048;color:#fff;text-align:center;padding:7px 12px;margin-top:9px}
+  .band .t{font-size:15.5px;font-weight:800;letter-spacing:1.3px}
+  .band .s{font-size:10px;color:#d8e0ea;margin-top:1px}
+  .goldrule{height:3px;background:#cc9c30;margin-bottom:10px}
+  table.pt{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:11.2px}
+  table.pt td,table.pt th{border:1px solid #d9dfe8;padding:3.5px 8px;vertical-align:top;text-align:left}
+  table.pt td.k{background:#f4f6f9;color:#5b6472;width:160px;font-weight:600}
+  table.pt th{background:#183048;color:#fff;font-size:10.5px}
+  td.num{text-align:right}
+  .sec{color:#183048;font-size:12px;font-weight:800;margin:9px 0 3px;border-left:4px solid #cc9c30;padding-left:8px}
+  .decl{border:1px solid #d9dfe8;border-left:4px solid #183048;padding:8px 11px;margin:5px 0;font-size:11.4px}
+  .verdict{padding:9px 12px;margin:6px 0;font-weight:800;font-size:12.5px;text-align:center;letter-spacing:.4px;color:#fff}
+  .v-in{background:#2E7D32}.v-out{background:#B45309}.v-part{background:#2E75B6}.v-rej{background:#C00000}.v-none{background:#8a8a8a}
+  .prio{display:inline-block;padding:2px 8px;border-radius:10px;color:#fff;font-weight:700;font-size:10px}
+  .p-Emergency{background:#C00000}.p-Urgent{background:#B45309}.p-Routine{background:#2E75B6}
+  .phgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+  .ph{border:1px solid #d9dfe8;border-radius:4px;overflow:hidden}
+  .ph img{width:100%;height:200px;object-fit:cover;display:block}
+  .pc{padding:5px 8px;font-size:10px;color:#374151;background:#f8fafc;border-top:1px solid #e5e9f0}
+  table.sig{width:100%;border-collapse:collapse;margin-top:11px;font-size:11px}
+  table.sig td{border:1px solid #d9dfe8;padding:8px 10px;width:50%;vertical-align:top}
+  .sh{color:#5b6472;font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase}
+  .sn{font-weight:800;color:#183048;margin:2px 0 5px}
+  .sl{color:#444;font-size:10.5px;margin-top:4px}
+  .mah-foot{margin-top:12px}
+  ${MAPG_CSS}
+</style></head><body><div class="page"${fit ? ' data-fit="1"' : ""}>
+  ${mahHeader(cfg, ent)}
+  <div class="band"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div><div class="goldrule"></div>
+  ${bodyHtml}
+  ${mahFooter(ent)}
+</div>${MAPG_JS}</body></html>`;
+}
+function srParticulars(r) {
+  const esc = (x) => emEsc(x), dt = (d) => emDate(d);
+  const dtm = (x) => x ? (emDate(String(x).slice(0, 10)) + (String(x).length > 10 ? " " + String(x).slice(11, 16) : "")) : "—";
+  return `<table class="pt">
+    <tr><td class="k">Request No.</td><td><b>${esc(r.no)}</b></td><td class="k">Date reported</td><td>${dtm(r.reportedAt)}</td></tr>
+    <tr><td class="k">Project</td><td>${esc(r.project)}</td><td class="k">Priority</td><td><span class="prio p-${esc(r.priority)}">${esc(r.priority)}</span></td></tr>
+    <tr><td class="k">Client</td><td>${esc(r.clientName || "—")}</td><td class="k">Client reference</td><td>${esc(r.clientRef || "—")}</td></tr>
+    <tr><td class="k">Reported by</td><td>${esc(r.reportedBy || "—")}${r.reportedPhone ? " · " + esc(r.reportedPhone) : ""}</td><td class="k">Received via</td><td>${esc(r.channel)}</td></tr>
+    <tr><td class="k">Location</td><td>${esc(r.location || "—")}</td><td class="k">System / asset</td><td>${esc(r.asset || "—")}</td></tr>
+    <tr><td class="k">Category</td><td>${esc(r.category)}</td><td class="k">DLP period</td><td>${r.dlpStart || r.dlpEnd ? `${dt(r.dlpStart)} – ${dt(r.dlpEnd)}${r.withinDlp === false ? ' · <b style="color:#C00000">REPORTED AFTER EXPIRY</b>' : r.withinDlp === true ? ' · <b style="color:#2E7D32">within DLP</b>' : ""}` : "—"}</td></tr>
+    <tr><td class="k">Response target</td><td>${r.slaRespondHrs} hours — by ${dtm(r.responseDue)}</td><td class="k">Rectification target</td><td>${r.slaRectifyDays} days — by ${dt(r.rectifyDue)}</td></tr>
+  </table>`;
+}
+function buildSrHtml(r, cfg, assets) {
+  const esc = (x) => emEsc(x), dt = (d) => emDate(d);
+  const vcls = r.liability === "in-scope" ? "v-in" : r.liability === "out-of-scope" ? "v-out" : r.liability === "partial" ? "v-part" : r.liability === "rejected" ? "v-rej" : "v-none";
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:46px;max-width:150px;object-fit:contain;display:block">` : `<div style="height:46px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:80px;opacity:.85;object-fit:contain">` : "";
+  const before = (r.photos || []).filter((p) => p.stage !== "after");
+  const body = `
+  <div class="sec">1. REQUEST PARTICULARS</div>
+  ${srParticulars(r)}
+  <div class="sec">2. CONCERN AS REPORTED BY THE CLIENT</div>
+  <div class="decl">${esc(r.description)}</div>
+  ${before.length ? `<div class="sec">3. SITE PHOTOGRAPHS — AS FOUND</div><div class="phgrid">${before.slice(0, 6).map((p, i) => `<div class="ph"><img src="${p.dataUrl}" alt=""><div class="pc"><b>Photo ${String(i + 1).padStart(2, "0")}</b>${p.caption ? " — " + esc(p.caption) : ""}</div></div>`).join("")}</div>` : ""}
+  <div class="sec">${before.length ? "4" : "3"}. SITE INSPECTION &amp; ROOT CAUSE</div>
+  <table class="pt">
+    <tr><td class="k">Inspected by</td><td>${esc(r.inspectedBy || "—")}</td><td class="k">Inspection date</td><td>${r.inspectedAt ? emDate(String(r.inspectedAt).slice(0, 10)) : "—"}</td></tr>
+    <tr><td class="k">Findings</td><td colspan="3" style="white-space:pre-wrap">${esc(r.findings || "—")}</td></tr>
+    <tr><td class="k">Root cause</td><td colspan="3" style="white-space:pre-wrap">${esc(r.rootCause || "—")}</td></tr>
+  </table>
+  <div class="sec">${before.length ? "5" : "4"}. LIABILITY DETERMINATION</div>
+  <div class="verdict ${vcls}">${esc(srLiabilityLabel(r))}</div>
+  <table class="pt">
+    <tr><td class="k">Basis of determination</td><td>${esc(srReasonText(r.liabilityReason) || "—")}</td></tr>
+    ${r.liabilityNote ? `<tr><td class="k">Remarks</td><td style="white-space:pre-wrap">${esc(r.liabilityNote)}</td></tr>` : ""}
+    ${r.liability === "out-of-scope" ? `<tr><td class="k">Commercial effect</td><td><b>These works fall outside the Defects Liability Period and are chargeable.</b> A separate quotation is issued; no works will commence until the client's written approval is received.</td></tr>` : ""}
+    ${r.liability === "in-scope" ? `<tr><td class="k">Commercial effect</td><td><b>Rectification will be carried out at MA Group's cost</b> under the Defects Liability Period, at no charge to the client.</td></tr>` : ""}
+  </table>
+  <div class="decl" style="border-left-color:#cc9c30;font-size:10.8px">This determination is made in accordance with the contract and UAE construction practice: the Defects Liability Period covers defective workmanship, defective materials and installation not in accordance with the approved specification. It does not cover misuse, third-party alterations, absence of routine maintenance, fair wear and tear, client-supplied items, design matters, external events, or any concern reported after the DLP has expired.</div>
+  <table class="sig"><tr>
+    <td><div class="sh">Assessed &amp; issued by — Contractor</div><div class="sn">${esc(r.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C")}</div>
+      <div style="position:relative">${signImg}<div style="position:absolute;left:120px;top:-12px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div><div class="sl">Date: ${dt(now().slice(0, 10))}</div></td>
+    <td><div class="sh">Acknowledged by — Client</div><div class="sn">${esc(r.clientName || "")}</div><div style="height:46px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">Signature &amp; Date: ______________________</div></td>
+  </tr></table>`;
+  return srDocShell(r, cfg, assets, "DLP SERVICE REQUEST", "Defects Liability Period — Maintenance Request, Inspection &amp; Liability Determination", body, true);
+}
+function buildSrQuoteHtml(r, cfg, assets) {
+  const esc = (x) => emEsc(x), money = (n) => emMoney(n);
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:46px;max-width:150px;object-fit:contain;display:block">` : `<div style="height:46px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:80px;opacity:.85;object-fit:contain">` : "";
+  const body = `
+  <div class="sec">1. REFERENCE</div>
+  ${srParticulars(r)}
+  <div class="sec">2. WORKS QUOTED</div>
+  <div class="decl">${esc(r.description)}${r.findings ? `<div style="margin-top:5px"><b>Inspection findings:</b> ${esc(r.findings)}</div>` : ""}</div>
+  <div class="verdict v-out">OUTSIDE THE DEFECTS LIABILITY PERIOD — CHARGEABLE WORKS</div>
+  <table class="pt"><tr><td class="k">Reason</td><td>${esc(srReasonText(r.liabilityReason) || "—")}${r.liabilityNote ? " — " + esc(r.liabilityNote) : ""}</td></tr></table>
+  <div class="sec">3. PRICE BREAKDOWN (AED)</div>
+  <table class="pt"><tr><th style="width:34px">#</th><th>Description</th><th style="width:55px">Unit</th><th style="width:55px">Qty</th><th style="width:80px">Rate</th><th style="width:90px">Amount</th></tr>
+    ${(r.quoteLines || []).map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.description)}</td><td>${esc(l.unit || "—")}</td><td class="num">${esc(l.qty)}</td><td class="num">${money(l.rate)}</td><td class="num">${money(l.amount)}</td></tr>`).join("") || `<tr><td colspan="6">—</td></tr>`}
+    <tr><td colspan="5" style="text-align:right"><b>Subtotal (excl. VAT)</b></td><td class="num"><b>${money(r.quoteSubtotal)}</b></td></tr>
+    <tr><td colspan="5" style="text-align:right">VAT @ ${Math.round(num(r.quoteVatPct) * 100)}%</td><td class="num">${money(r.quoteVat)}</td></tr>
+    <tr style="background:#f4f6f9"><td colspan="5" style="text-align:right"><b>TOTAL PAYABLE (incl. VAT)</b></td><td class="num"><b>${money(r.quoteTotal)}</b></td></tr>
+    <tr><td colspan="6" style="font-style:italic">${esc(amountWords(r.quoteTotal))}</td></tr>
+  </table>
+  <div class="sec">4. TERMS</div>
+  <div class="decl" style="font-size:11px">
+    <p style="margin:0 0 4px">• Quotation validity: <b>${esc(r.quoteValidity || "15 days")}</b> from the date of issue.</p>
+    <p style="margin:0 0 4px">• Works will be scheduled and commenced <b>only upon receipt of the client's written approval</b> (email or signed copy of this quotation).</p>
+    <p style="margin:0 0 4px">• Prices are for the works described above only; any additional scope discovered during execution will be quoted separately before proceeding.</p>
+    <p style="margin:0 0 4px">• Payment terms: as per the main contract, unless otherwise agreed in writing.</p>
+    <p style="margin:0">• These works are <b>not</b> covered by the Defects Liability Period for the reason stated in section 2 above.</p>
+  </div>
+  <table class="sig"><tr>
+    <td><div class="sh">Quoted by — Contractor</div><div class="sn">${esc(r.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C")}</div>
+      <div style="position:relative">${signImg}<div style="position:absolute;left:120px;top:-12px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div></td>
+    <td><div class="sh">Approved for execution — Client</div><div class="sn">${esc(r.clientName || "")}</div><div style="height:46px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">LPO / approval ref: ________________</div><div class="sl">Signature, Stamp &amp; Date: _____________</div></td>
+  </tr></table>`;
+  return srDocShell(r, cfg, assets, "QUOTATION — CHARGEABLE WORKS", "Works outside the Defects Liability Period", body, true);
+}
+function buildSrReportHtml(r, cfg, assets) {
+  const esc = (x) => emEsc(x), dt = (d) => emDate(d);
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:46px;max-width:150px;object-fit:contain;display:block">` : `<div style="height:46px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:80px;opacity:.85;object-fit:contain">` : "";
+  const after = (r.photos || []).filter((p) => p.stage === "after");
+  const before = (r.photos || []).filter((p) => p.stage !== "after");
+  const grid = (list, label) => list.length ? `<div class="sec">${label}</div><div class="phgrid">${list.slice(0, 6).map((p, i) => `<div class="ph"><img src="${p.dataUrl}" alt=""><div class="pc"><b>${String(i + 1).padStart(2, "0")}</b>${p.caption ? " — " + esc(p.caption) : ""}</div></div>`).join("")}</div>` : "";
+  const body = `
+  <div class="sec">1. REFERENCE</div>
+  ${srParticulars(r)}
+  <div class="sec">2. CONCERN REPORTED</div>
+  <div class="decl">${esc(r.description)}</div>
+  <div class="sec">3. DETERMINATION</div>
+  <div class="verdict ${r.liability === "in-scope" ? "v-in" : r.liability === "out-of-scope" ? "v-out" : r.liability === "partial" ? "v-part" : "v-none"}">${esc(srLiabilityLabel(r))}</div>
+  <table class="pt"><tr><td class="k">Basis</td><td>${esc(srReasonText(r.liabilityReason) || "—")}</td></tr>
+    ${r.liability === "out-of-scope" && r.clientApprovalRef ? `<tr><td class="k">Client approval</td><td>${esc(r.clientApprovalRef)} — dated ${r.quoteApprovedAt ? dt(String(r.quoteApprovedAt).slice(0, 10)) : "—"}</td></tr>` : ""}
+    ${r.liability === "out-of-scope" ? `<tr><td class="k">Chargeable amount</td><td><b>AED ${emMoney(r.quoteTotal)}</b> (incl. VAT)</td></tr>` : ""}</table>
+  <div class="sec">4. WORK CARRIED OUT</div>
+  <table class="pt">
+    <tr><td class="k">Attended by</td><td>${esc(r.assignedTo || "—")}</td><td class="k">Date completed</td><td>${r.completedAt ? dt(String(r.completedAt).slice(0, 10)) : "—"}</td></tr>
+    <tr><td class="k">Work done</td><td colspan="3" style="white-space:pre-wrap">${esc(r.workDone || "—")}</td></tr>
+    ${r.materialsUsed ? `<tr><td class="k">Materials used</td><td colspan="3">${esc(r.materialsUsed)}</td></tr>` : ""}
+    ${num(r.manHours) ? `<tr><td class="k">Man-hours</td><td colspan="3">${num(r.manHours)}</td></tr>` : ""}
+    <tr><td class="k">Response time</td><td>${r.respondedAt ? "Attended within target" + (r.responseMet === false ? " — EXCEEDED" : "") : "—"}</td><td class="k">Rectification</td><td>${r.rectifyMet === true ? "Within target" : r.rectifyMet === false ? "Exceeded target" : "—"}</td></tr>
+  </table>
+  ${grid(before, "5. PHOTOGRAPHS — BEFORE")}
+  ${grid(after, before.length ? "6. PHOTOGRAPHS — AFTER RECTIFICATION" : "5. PHOTOGRAPHS — AFTER RECTIFICATION")}
+  <div class="decl" style="border-left-color:#2E7D32">The works described above have been completed and the location left clean and in working order. ${r.liability === "in-scope" ? "This rectification was carried out at MA Group's cost under the Defects Liability Period." : r.liability === "out-of-scope" ? "These works were outside the Defects Liability Period and are chargeable as per the approved quotation." : ""} ${r.dlpEnd ? `The Defects Liability Period for this project ends on <b>${dt(r.dlpEnd)}</b>; this attendance does not extend it except in respect of the rectified item.` : ""}</div>
+  <table class="sig"><tr>
+    <td><div class="sh">Completed by — Contractor</div><div class="sn">${esc(r.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C")}</div>
+      <div style="position:relative">${signImg}<div style="position:absolute;left:120px;top:-12px">${stampImg}</div></div>
+      <div class="sl">Name: Eng. Mohammed Abuassba</div><div class="sl">Title: Chief Executive Officer</div></td>
+    <td><div class="sh">Works accepted by — Client</div><div class="sn">${esc(r.clientSignName || r.clientName || "")}</div><div style="height:46px"></div>
+      <div class="sl">Name: ${r.clientSignName ? esc(r.clientSignName) : "______________________________"}</div>
+      <div class="sl">Date: ${r.clientSignDate ? dt(r.clientSignDate) : "______________"}</div>
+      <div class="sl">Signature &amp; Stamp</div></td>
+  </tr></table>`;
+  return srDocShell(r, cfg, assets, "SERVICE COMPLETION REPORT", "Defects Liability Period — rectification record and client acceptance", body, true);
+}
 function buildCompCertHtml(rec, cfg, assets) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
   const isDlp = rec.type === "DLP", isW = rec.type === "WARRANTY";
@@ -15779,6 +16043,204 @@ var api_default = async (req, context) => {
     const items = await getAllJSON(s, "award/");
     items.sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
     return json({ items, threshold: awardThreshold(settings) });
+  }
+  /* ===================== DLP SERVICE REQUESTS =====================
+     Every maintenance concern raised by a client during the Defects Liability
+     Period is logged, triaged against an SLA, inspected, and — the control that
+     protects the business — formally determined as either an MA liability
+     (rectified free of charge) or OUTSIDE the DLP scope (chargeable, quoted and
+     not started until the client approves in writing). UAE practice: the DLP
+     covers defective workmanship, materials and installation; it does not cover
+     misuse, third-party alterations, lack of maintenance, fair wear and tear or
+     anything reported after the DLP has expired. */
+  if (path === "srs" && req.method === "GET") {
+    const items = (await getAllJSON(s, "sr/")).map((r) => srDerive(r, settings));
+    items.sort((a, b) => (a.reportedAt < b.reportedAt ? 1 : a.reportedAt > b.reportedAt ? -1 : 0));
+    return json({ items, sla: srSla(settings), stats: srStats(items) });
+  }
+  if (path === "sr" && req.method === "POST") {
+    if (!can("contracts") && !can("procurement")) return err("Not permitted", 403);
+    const b = await req.json();
+    const stg = settings;
+    let id = b.id, ex = id ? await s.get("sr/" + id, { type: "json" }) : null;
+    if (id && !ex) return err("Service request not found", 404);
+    if (ex && ex.status === "Closed" && !can("admin")) return err("Closed — reopen it first (CEO)", 403);
+    const project = String(b.project ?? ex?.project ?? "").trim();
+    if (!project) return err("Choose the project");
+    if (!String(b.description ?? ex?.description ?? "").trim()) return err("Describe the reported concern");
+    if (!id) {
+      id = await nextId(s, stg, "srSeq", "SR", "sr/", 4);
+      await s.setJSON("settings", stg);
+    }
+    const yr = String(b.reportedAt || now()).slice(2, 4);
+    const pj = String(project).replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3).padEnd(3, "X");
+    const rec = {
+      id, no: ex?.no || `SR/MA${yr}/${pj}/${String(num(String(id).replace(/\D/g, ""))).padStart(3, "0")}`,
+      project, contractId: String(b.contractId ?? ex?.contractId ?? ""), compCertId: String(b.compCertId ?? ex?.compCertId ?? ""),
+      clientName: String(b.clientName ?? ex?.clientName ?? ""), clientRef: String(b.clientRef ?? ex?.clientRef ?? ""),
+      reportedBy: String(b.reportedBy ?? ex?.reportedBy ?? ""), reportedPhone: String(b.reportedPhone ?? ex?.reportedPhone ?? ""),
+      reportedEmail: String(b.reportedEmail ?? ex?.reportedEmail ?? ""),
+      channel: String(b.channel ?? ex?.channel ?? "Phone"),
+      reportedAt: String(b.reportedAt || ex?.reportedAt || now()).slice(0, 16),
+      location: String(b.location ?? ex?.location ?? ""), asset: String(b.asset ?? ex?.asset ?? ""),
+      category: String(b.category ?? ex?.category ?? "Other"),
+      priority: ["Emergency", "Urgent", "Routine"].includes(String(b.priority)) ? String(b.priority) : (ex?.priority || "Routine"),
+      description: String(b.description ?? ex?.description ?? ""),
+      // DLP window carried from the completion / DLP certificate for the automatic
+      // in-warranty check (a request after expiry can never be a free rectification).
+      dlpStart: String(b.dlpStart ?? ex?.dlpStart ?? "").slice(0, 10),
+      dlpEnd: String(b.dlpEnd ?? ex?.dlpEnd ?? "").slice(0, 10),
+      // --- inspection & liability determination ---
+      inspectedBy: String(b.inspectedBy ?? ex?.inspectedBy ?? ""), inspectedAt: String(b.inspectedAt ?? ex?.inspectedAt ?? "").slice(0, 16),
+      findings: String(b.findings ?? ex?.findings ?? ""), rootCause: String(b.rootCause ?? ex?.rootCause ?? ""),
+      liability: ["", "in-scope", "out-of-scope", "partial", "rejected"].includes(String(b.liability)) ? String(b.liability) : (ex?.liability || ""),
+      liabilityReason: String(b.liabilityReason ?? ex?.liabilityReason ?? ""),
+      liabilityNote: String(b.liabilityNote ?? ex?.liabilityNote ?? ""),
+      sharePct: num(b.sharePct ?? ex?.sharePct),
+      // --- back-charge to the responsible subcontractor (in-scope defects) ---
+      subcontractorId: String(b.subcontractorId ?? ex?.subcontractorId ?? ""),
+      subcontractorName: String(b.subcontractorName ?? ex?.subcontractorName ?? ""),
+      backChargeAmount: num(b.backChargeAmount ?? ex?.backChargeAmount),
+      // --- chargeable quotation (out of scope) ---
+      quoteLines: Array.isArray(b.quoteLines) ? b.quoteLines.filter((l) => l && (String(l.description || "").trim() || num(l.qty) || num(l.rate)))
+        .map((l) => ({ description: String(l.description || ""), unit: String(l.unit || ""), qty: num(l.qty), rate: num(l.rate), amount: r2(num(l.qty) * num(l.rate)) })) : (ex?.quoteLines || []),
+      quoteVatPct: b.quoteVatPct === void 0 ? (ex?.quoteVatPct != null ? num(ex.quoteVatPct) : 0.05) : num(b.quoteVatPct),
+      quoteValidity: String(b.quoteValidity ?? ex?.quoteValidity ?? "15 days"),
+      quoteSentAt: ex?.quoteSentAt || "", clientApprovalRef: String(b.clientApprovalRef ?? ex?.clientApprovalRef ?? ""),
+      quoteApprovedAt: ex?.quoteApprovedAt || "",
+      // --- execution ---
+      assignedTo: String(b.assignedTo ?? ex?.assignedTo ?? ""), targetDate: String(b.targetDate ?? ex?.targetDate ?? "").slice(0, 10),
+      startedAt: ex?.startedAt || "", completedAt: ex?.completedAt || "",
+      workDone: String(b.workDone ?? ex?.workDone ?? ""), materialsUsed: String(b.materialsUsed ?? ex?.materialsUsed ?? ""),
+      manHours: num(b.manHours ?? ex?.manHours),
+      // --- closeout ---
+      clientSignName: String(b.clientSignName ?? ex?.clientSignName ?? ""), clientSignDate: String(b.clientSignDate ?? ex?.clientSignDate ?? "").slice(0, 10),
+      satisfaction: num(b.satisfaction ?? ex?.satisfaction), closedAt: ex?.closedAt || "",
+      notes: String(b.notes ?? ex?.notes ?? ""),
+      photos: ex?.photos || [],
+      acknowledgedAt: ex?.acknowledgedAt || "",
+      status: ex?.status || "New",
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedBy: me.name, updatedAt: now(),
+      audit: [...(ex?.audit || []), { at: now(), by: me.name, action: ex ? "Updated" : "Logged (New)" }]
+    };
+    const q = srQuoteTotals(rec);
+    rec.quoteSubtotal = q.subtotal; rec.quoteVat = q.vat; rec.quoteTotal = q.total;
+    await s.setJSON("sr/" + id, rec);
+    return json(srDerive(rec, settings));
+  }
+  const srOne = path.match(/^sr\/([^/]+)$/);
+  if (srOne && req.method === "GET") {
+    const r = await s.get("sr/" + decodeURIComponent(srOne[1]), { type: "json" });
+    if (!r) return err("Not found", 404);
+    return json(srDerive(r, settings));
+  }
+  if (srOne && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    await s.delete("sr/" + decodeURIComponent(srOne[1]));
+    return json({ ok: true });
+  }
+  const srStat = path.match(/^sr\/([^/]+)\/status$/);
+  if (srStat && req.method === "POST") {
+    if (!can("contracts") && !can("procurement")) return err("Not permitted", 403);
+    const r = await s.get("sr/" + decodeURIComponent(srStat[1]), { type: "json" });
+    if (!r) return err("Not found", 404);
+    const b = await req.json(), a = String(b.action || "");
+    const stamp = (f) => { r[f] = now(); };
+    if (a === "acknowledge") { if (r.status !== "New") return err("Already acknowledged"); r.status = "Acknowledged"; stamp("acknowledgedAt"); }
+    else if (a === "inspect") {
+      if (!r.inspectedBy || !r.findings) return err("Record who inspected and the findings first");
+      if (!r.liability) return err("Determine the liability (in scope / out of scope / partial / rejected) first");
+      if (r.liability !== "in-scope" && !r.liabilityReason) return err("Select the reason for the liability determination");
+      r.status = "Inspected"; if (!r.inspectedAt) stamp("inspectedAt");
+    }
+    else if (a === "quote-sent") { if (!(num(r.quoteTotal) > 0)) return err("Price the chargeable works first"); r.status = "Quoted"; stamp("quoteSentAt"); }
+    else if (a === "quote-approved") {
+      if (!String(b.clientApprovalRef || r.clientApprovalRef || "").trim()) return err("Record the client's written approval reference");
+      r.clientApprovalRef = String(b.clientApprovalRef || r.clientApprovalRef); r.status = "Approved"; stamp("quoteApprovedAt");
+    }
+    else if (a === "quote-declined") { r.status = "Declined"; }
+    else if (a === "start") {
+      if (r.liability === "out-of-scope" && r.status !== "Approved") return err("Chargeable works cannot start before the client approves the quotation in writing");
+      if (r.liability === "rejected") return err("This request was rejected — reopen and re-determine it first");
+      r.status = "In progress"; if (!r.startedAt) stamp("startedAt");
+    }
+    else if (a === "complete") { if (!r.workDone) return err("Record the work carried out first"); r.status = "Completed"; if (!r.completedAt) stamp("completedAt"); }
+    else if (a === "close") {
+      if (r.status !== "Completed") return err("Complete the works before closing");
+      if (!r.clientSignName) return err("Record the client representative who accepted the works");
+      r.status = "Closed"; stamp("closedAt");
+    }
+    else if (a === "cancel") { r.status = "Cancelled"; }
+    else if (a === "reopen") { if (!can("admin")) return err("CEO only", 403); r.status = "Acknowledged"; r.closedAt = ""; }
+    else return err("Unknown action");
+    r.audit = [...(r.audit || []), { at: now(), by: me.name, action: "Status → " + r.status + (b.comment ? " — " + String(b.comment) : "") }];
+    r.updatedAt = now(); r.updatedBy = me.name;
+    await s.setJSON("sr/" + r.id, r);
+    return json(srDerive(r, settings));
+  }
+  const srPhoto = path.match(/^sr\/([^/]+)\/photo$/);
+  if (srPhoto && req.method === "POST") {
+    const r = await s.get("sr/" + decodeURIComponent(srPhoto[1]), { type: "json" });
+    if (!r) return err("Not found", 404);
+    const b = await req.json();
+    r.photos = Array.isArray(r.photos) ? r.photos : [];
+    if (b.removeIndex !== void 0) r.photos.splice(num(b.removeIndex), 1);
+    else if (b.captionIndex !== void 0) { const p = r.photos[num(b.captionIndex)]; if (p) p.caption = String(b.caption || ""); }
+    else {
+      const d = String(b.dataUrl || "");
+      if (!/^data:image\/(jpeg|png|webp);base64,/.test(d)) return err("Only JPG / PNG / WebP images");
+      if (d.length > 2e6) return err("Image too large — keep each photo under ~1.5 MB");
+      if (r.photos.length >= 20) return err("Maximum 20 photos per request");
+      r.photos.push({ dataUrl: d, caption: String(b.caption || ""), stage: String(b.stage || "before"), at: now(), by: me.name });
+    }
+    r.updatedAt = now();
+    await s.setJSON("sr/" + r.id, r);
+    return json(srDerive(r, settings));
+  }
+  const srHtml = path.match(/^sr\/([^/]+)\/(html|quote|report)$/);
+  if (srHtml && req.method === "GET") {
+    const r = await s.get("sr/" + decodeURIComponent(srHtml[1]), { type: "json" });
+    if (!r) return err("Not found", 404);
+    const cfg = await getEmailCfg(s);
+    const sign = await s.get("asset/sign").catch(() => "") || "";
+    const stamp = await s.get("asset/stamp").catch(() => "") || "";
+    const kind = srHtml[2];
+    const body = kind === "quote" ? buildSrQuoteHtml(srDerive(r, settings), cfg, { sign, stamp })
+      : kind === "report" ? buildSrReportHtml(srDerive(r, settings), cfg, { sign, stamp })
+      : buildSrHtml(srDerive(r, settings), cfg, { sign, stamp });
+    return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  const srSend = path.match(/^sr\/([^/]+)\/send$/);
+  if (srSend && req.method === "POST") {
+    if (!can("contracts") && !can("procurement")) return err("Not permitted", 403);
+    const r = await s.get("sr/" + decodeURIComponent(srSend[1]), { type: "json" });
+    if (!r) return err("Not found", 404);
+    const b = await req.json();
+    const to = String(b.to || r.reportedEmail || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return err("Enter a valid recipient email", 400);
+    const cc = [...new Set((Array.isArray(b.cc) ? b.cc : String(b.cc || "").split(/[,;\s]+/)).map((x) => String(x || "").trim())
+      .filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x) && x.toLowerCase() !== to.toLowerCase()))].slice(0, 12);
+    const cfg = await getEmailCfg(s);
+    const sign = await s.get("asset/sign").catch(() => "") || "";
+    const stampA = await s.get("asset/stamp").catch(() => "") || "";
+    const d = srDerive(r, settings);
+    const kind = String(b.kind || "ack");
+    const html = kind === "quote" ? buildSrQuoteHtml(d, cfg, { sign, stamp: stampA })
+      : kind === "report" ? buildSrReportHtml(d, cfg, { sign, stamp: stampA })
+      : buildSrHtml(d, cfg, { sign, stamp: stampA });
+    const subject = kind === "quote" ? `Quotation for chargeable works — ${r.no} — ${r.project}`
+      : kind === "report" ? `Service completion report — ${r.no} — ${r.project}`
+      : `Service request acknowledgement — ${r.no} — ${r.project}`;
+    const pdfs = Array.isArray(b.pdfs) ? b.pdfs.filter((p) => p && p.base64) : [];
+    const attachments = pdfs.length ? pdfs.map((p, i) => ({ filename: String(p.name || (r.no.replace(/[^A-Za-z0-9._-]+/g, "_") + (i ? "_" + i : "") + ".pdf")), content: Buffer.from(String(p.base64), "base64"), contentType: "application/pdf" })) : void 0;
+    const res = await sendMail(s, cfg, { type: "awarddoc", to, toName: r.reportedBy || r.clientName, cc, subject, html, attachments });
+    if (kind === "ack" && r.status === "New") { r.status = "Acknowledged"; r.acknowledgedAt = now(); }
+    if (kind === "quote") { r.status = "Quoted"; r.quoteSentAt = now(); }
+    r.audit = [...(r.audit || []), { at: now(), by: me.name, action: `Emailed (${kind}) to ${to}${cc.length ? " cc " + cc.join(", ") : ""}` }];
+    r.updatedAt = now();
+    await s.setJSON("sr/" + r.id, r);
+    try { await sendMail(s, cfg, { type: "awarddoc", to: cfg.adminEmail, toName: "MA Group", subject: "[COPY] " + subject, html, attachments }); } catch (e) {}
+    return json({ ok: true, status: res.status, to, cc, sr: srDerive(r, settings) });
   }
   // ===================== COMPLETION & DLP CERTIFICATE ENDPOINTS =====================
   if (path === "compcerts" && req.method === "GET") {

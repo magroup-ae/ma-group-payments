@@ -4418,12 +4418,382 @@ function bindChequeLayout(saveS){
 }
 
 /* ---------- Completion & DLP certificates ---------- */
+/* ================= DLP SERVICE REQUESTS =================
+   Client raises a maintenance concern during the Defects Liability Period →
+   logged → SLA clock starts → site inspection → LIABILITY DETERMINATION
+   (MA defect = free rectification | outside scope = quoted and chargeable, no
+   works before written approval) → execution → client sign-off → closed. */
+const SR_CATS=["Civil & finishes","Painting & decoration","Joinery & carpentry","Doors & ironmongery","Flooring & tiling","Ceilings & partitions","Glass & aluminium","Electrical","Plumbing & drainage","HVAC & ventilation","Firefighting & alarm","Data & telecom","External works & landscape","Other"];
+const SR_IN=[["workmanship","Defective workmanship by MA Group"],["material","Defective / non-compliant material supplied by MA"],["installation","Installation error / incomplete installation"],["spec","Not per approved specification or drawings"],["latent","Latent defect appearing within the DLP"],["subcontractor","Attributable to an MA subcontractor (back-charge)"]];
+const SR_OUT=[["misuse","Misuse, abuse or improper operation by the occupant"],["thirdparty","Third-party works / alteration after handover"],["maintenance","Lack of routine maintenance or cleaning by the client"],["wear","Fair wear and tear / consumable item"],["clientmaterial","Client-supplied material, equipment or nominated supplier"],["design","Design or consultant instruction — not a construction defect"],["external","External event — ingress, power surge, force majeure"],["notscope","Never formed part of MA Group's scope"],["expired","Reported after expiry of the DLP"],["new","New works / addition requested by the client"]];
+const srLiabPill=r=>r.liability==="in-scope"?`<span class="pill" style="background:#2E7D32;font-size:10px">MA — free</span>`
+  :r.liability==="out-of-scope"?`<span class="pill" style="background:#B45309;font-size:10px">Chargeable</span>`
+  :r.liability==="partial"?`<span class="pill" style="background:#2E75B6;font-size:10px">Shared ${num(r.sharePct)}%</span>`
+  :r.liability==="rejected"?`<span class="pill" style="background:#C00000;font-size:10px">Not accepted</span>`
+  :`<span class="pill" style="background:#8a8a8a;font-size:10px">Pending</span>`;
+const srStPill=r=>{const c={New:"#C00000",Acknowledged:"#B45309",Inspected:"#2E75B6",Quoted:"#7A5C00",Approved:"#375623","In progress":"#2E75B6",Completed:"#375623",Closed:"#1F3864",Declined:"#8a8a8a",Cancelled:"#8a8a8a"}[r.status]||"#5B6B85";
+  return `<span class="pill" style="background:${c};font-size:10px">${esc(r.status)}</span>`;};
+let SRS=[], SR_STATS={}, SR_CUR=null, SR_F={status:"open",priority:"",liability:""};
+async function vSrs(){
+  const b=$("#dlp_body"); b.innerHTML=`<div class="card muted">Loading service requests…</div>`;
+  const canEdit=["CEO","PM","QS"].includes(ME.role);
+  try{ const d=await api("srs"); SRS=d.items||[]; SR_STATS=d.stats||{}; }catch(e){ b.innerHTML=`<div class="card">${esc(e.message)}</div>`; return; }
+  let list=SRS.filter(r=>projMatch(r.project));
+  const s=SR_STATS;
+  if(SR_F.status==="open") list=list.filter(r=>r.open);
+  else if(SR_F.status==="overdue") list=list.filter(r=>r.open&&(r.responseOverdue||r.rectifyOverdue));
+  else if(SR_F.status==="verdict") list=list.filter(r=>r.open&&!r.liability);
+  else if(SR_F.status&&SR_F.status!=="all") list=list.filter(r=>r.status===SR_F.status);
+  if(SR_F.priority) list=list.filter(r=>r.priority===SR_F.priority);
+  if(SR_F.liability) list=list.filter(r=>r.liability===SR_F.liability);
+  b.innerHTML=`<div class="card">
+    <div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">Service request register</h3>
+      ${projFilterHtml()}
+      <span class="muted">every client maintenance concern during the DLP — logged, triaged, determined and closed</span>
+      <div class="right flex" style="gap:6px"><button class="btn ghost" id="srCsv">⤓ Excel / CSV</button>${canEdit?`<button class="btn gold" id="srNew">+ Log service request</button>`:""}</div></div>
+    <div class="kpis" style="margin-top:10px">
+      <div class="kpi" style="border-top-color:#C00000"><div class="v" style="color:#C00000">${num(s.open)}</div><div class="l">Open requests${num(s.emergencyOpen)?` · ${num(s.emergencyOpen)} emergency`:""}</div></div>
+      <div class="kpi" style="border-top-color:#B45309"><div class="v" style="color:#B45309">${num(s.overdue)}</div><div class="l">Breaching SLA (response or rectification)</div></div>
+      <div class="kpi" style="border-top-color:#8a8a8a"><div class="v" style="color:#5b6472">${num(s.awaitingVerdict)}</div><div class="l">Awaiting liability determination</div></div>
+      <div class="kpi" style="border-top-color:#375623"><div class="v" style="color:#375623">AED ${fmt(s.chargeableValue)}</div><div class="l">Chargeable works quoted${num(s.approvedChargeable)?` · ${fmt(s.approvedChargeable)} approved`:""}</div></div>
+    </div>
+    <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:10px;align-items:flex-end">
+      <div><label style="font-size:11px">Show</label><select id="srFSt">
+        <option value="open" ${SR_F.status==="open"?"selected":""}>Open only</option>
+        <option value="overdue" ${SR_F.status==="overdue"?"selected":""}>Breaching SLA</option>
+        <option value="verdict" ${SR_F.status==="verdict"?"selected":""}>Awaiting determination</option>
+        <option value="all" ${SR_F.status==="all"?"selected":""}>All requests</option>
+        ${["New","Acknowledged","Inspected","Quoted","Approved","In progress","Completed","Closed"].map(x=>`<option value="${x}" ${SR_F.status===x?"selected":""}>${x}</option>`).join("")}</select></div>
+      <div><label style="font-size:11px">Priority</label><select id="srFPr"><option value="">All</option>${["Emergency","Urgent","Routine"].map(x=>`<option ${SR_F.priority===x?"selected":""}>${x}</option>`).join("")}</select></div>
+      <div><label style="font-size:11px">Liability</label><select id="srFLi"><option value="">All</option>
+        <option value="in-scope" ${SR_F.liability==="in-scope"?"selected":""}>MA — free of charge</option>
+        <option value="out-of-scope" ${SR_F.liability==="out-of-scope"?"selected":""}>Outside scope — chargeable</option>
+        <option value="partial" ${SR_F.liability==="partial"?"selected":""}>Shared</option>
+        <option value="rejected" ${SR_F.liability==="rejected"?"selected":""}>Not accepted</option></select></div>
+    </div>
+    <div style="margin-top:10px;overflow-x:auto">
+      <table><tr><th>Request No.</th><th>Reported</th><th>Project</th><th>Location / category</th><th>Concern</th><th>Priority</th><th>SLA</th><th>Liability</th><th class="num">Chargeable</th><th>Status</th></tr>
+      ${list.length?list.map(r=>`<tr class="click" data-sr="${esc(r.id)}"${(r.responseOverdue||r.rectifyOverdue)?' style="background:#fff8ec"':''}>
+        <td><b>${esc(r.no)}</b>${r.withinDlp===false?`<br><span class="pill" style="background:#C00000;font-size:9px">after DLP</span>`:""}</td>
+        <td style="white-space:nowrap">${dmy(String(r.reportedAt).slice(0,10))}<br><span class="muted" style="font-size:10px">${r.ageDays} day${r.ageDays===1?"":"s"} ago</span></td>
+        <td>${esc(r.project)}</td>
+        <td>${esc(r.location||"—")}<br><span class="muted" style="font-size:10px">${esc(r.category)}</span></td>
+        <td style="max-width:260px">${esc(String(r.description||"").slice(0,90))}${String(r.description||"").length>90?"…":""}</td>
+        <td><span class="pill" style="background:${r.priority==="Emergency"?"#C00000":r.priority==="Urgent"?"#B45309":"#2E75B6"};font-size:10px">${esc(r.priority)}</span></td>
+        <td style="font-size:10.5px">${r.responseOverdue?`<b style="color:#C00000">response overdue</b>`:r.rectifyOverdue?`<b style="color:#B45309">rectification overdue</b>`:r.respondedAt?`<span style="color:#2E7D32">responded</span>`:`due ${dmy(String(r.responseDue).slice(0,10))}`}</td>
+        <td>${srLiabPill(r)}</td>
+        <td class="num">${num(r.quoteTotal)?fmt(r.quoteTotal):"—"}</td>
+        <td>${srStPill(r)}</td></tr>`).join("")
+        :`<tr><td colspan="10" class="muted">No service requests${SR_F.status==="open"?" open":""}${PROJ_FILTER?" for "+esc(PROJ_FILTER):""}.</td></tr>`}
+      </table></div>
+  </div>`;
+  bindProjFilter(vSrs);
+  $("#srFSt").onchange=()=>{ SR_F.status=$("#srFSt").value; vSrs(); };
+  $("#srFPr").onchange=()=>{ SR_F.priority=$("#srFPr").value; vSrs(); };
+  $("#srFLi").onchange=()=>{ SR_F.liability=$("#srFLi").value; vSrs(); };
+  if($("#srNew")) $("#srNew").onclick=()=>srForm(null);
+  b.querySelectorAll("[data-sr]").forEach(t=>t.onclick=async ()=>{ try{ srForm(await api("sr/"+t.dataset.sr)); }catch(e){ toast(e.message); } });
+  $("#srCsv").onclick=()=>exportCsv("MA_DLP_Service_Requests"+(PROJ_FILTER?"_"+PROJ_FILTER:""),
+    ["Request No.","Reported","Project","Location","Category","Priority","Concern","Reported by","Inspected by","Findings","Root cause","Liability","Reason","Chargeable (incl VAT)","Client approval","Status","Response due","Responded","Rectify due","Completed","Closed"],
+    list.map(r=>[r.no,String(r.reportedAt).slice(0,16),r.project,r.location,r.category,r.priority,r.description,r.reportedBy,r.inspectedBy,r.findings,r.rootCause,
+      r.liability==="in-scope"?"MA — free":r.liability==="out-of-scope"?"Chargeable":r.liability==="partial"?"Shared":r.liability==="rejected"?"Not accepted":"Pending",
+      (SR_IN.concat(SR_OUT).find(x=>x[0]===r.liabilityReason)||["",""])[1],
+      num(r.quoteTotal)||"",r.clientApprovalRef,r.status,String(r.responseDue).slice(0,16),String(r.respondedAt).slice(0,16),r.rectifyDue,String(r.completedAt).slice(0,10),String(r.closedAt).slice(0,10)]));
+}
+async function vSrKpi(){
+  const b=$("#dlp_body"); b.innerHTML=`<div class="card muted">Loading…</div>`;
+  let items=[],s={},certs=[];
+  try{ const d=await api("srs"); items=(d.items||[]).filter(r=>projMatch(r.project)); s=srRecalc(items);
+       certs=((await api("compcerts")).items||[]).filter(r=>projMatch(r.project)); }catch(e){ b.innerHTML=`<div class="card">${esc(e.message)}</div>`; return; }
+  // Live DLP windows from the issued completion / DLP certificates
+  const today=new Date().toISOString().slice(0,10);
+  const windows=certs.filter(c=>c.dlpEnd&&c.type!=="WARRANTY").map(c=>({project:c.project,docNo:c.docNo,start:c.dlpStart,end:c.dlpEnd,
+    days:Math.round((new Date(c.dlpEnd)-new Date(today))/864e5)}));
+  const byCat={}, bySub={}, byProj={};
+  items.forEach(r=>{ byCat[r.category]=(byCat[r.category]||0)+1;
+    if(r.subcontractorName) bySub[r.subcontractorName]=(bySub[r.subcontractorName]||0)+1;
+    byProj[r.project]=byProj[r.project]||{n:0,open:0,charge:0}; byProj[r.project].n++; if(r.open)byProj[r.project].open++; if(r.liability==="out-of-scope")byProj[r.project].charge+=num(r.quoteTotal); });
+  const topCat=Object.entries(byCat).sort((a,c)=>c[1]-a[1]).slice(0,8);
+  const topSub=Object.entries(bySub).sort((a,c)=>c[1]-a[1]).slice(0,6);
+  const slaPct=s.slaResponseTotal?Math.round(s.slaResponseMet/s.slaResponseTotal*100):null;
+  b.innerHTML=`<div class="card">
+    <div class="flex"><h3 style="margin:0">DLP dashboard</h3>${projFilterHtml()}<span class="muted">defect trends, SLA performance and warranty exposure</span></div>
+    <div class="kpis" style="margin-top:10px">
+      <div class="kpi" style="border-top-color:#1F3864"><div class="v" style="color:#1F3864">${s.total}</div><div class="l">Requests logged${PROJ_FILTER?" — "+esc(PROJ_FILTER):" — all projects"}</div></div>
+      <div class="kpi" style="border-top-color:#2E7D32"><div class="v" style="color:#2E7D32">${slaPct==null?"—":slaPct+"%"}</div><div class="l">Response SLA met (${s.slaResponseMet}/${s.slaResponseTotal})</div></div>
+      <div class="kpi" style="border-top-color:#2E75B6"><div class="v" style="color:#2E75B6">${s.avgResponseHrs?s.avgResponseHrs.toFixed(1)+" h":"—"}</div><div class="l">Average response time</div></div>
+      <div class="kpi" style="border-top-color:#B45309"><div class="v" style="color:#B45309">${s.avgRectifyDays?s.avgRectifyDays.toFixed(1)+" d":"—"}</div><div class="l">Average time to rectify (closed)</div></div>
+    </div>
+    <div class="grid" style="margin-top:12px;grid-template-columns:1fr 1fr;gap:14px">
+      <div><b style="color:var(--navy);font-size:12px">Liability split — the commercial control</b>
+        <table style="margin-top:4px"><tr><th>Determination</th><th class="num">Requests</th><th class="num">Value (AED)</th></tr>
+          <tr><td>MA Group liability — rectified free</td><td class="num">${s.inScope}</td><td class="num">—</td></tr>
+          <tr><td>Outside DLP scope — chargeable</td><td class="num">${s.outOfScope}</td><td class="num">${fmt(s.chargeableValue)}</td></tr>
+          <tr><td>… of which client approved</td><td class="num">${items.filter(r=>r.quoteApprovedAt).length}</td><td class="num" style="color:var(--green)">${fmt(s.approvedChargeable)}</td></tr>
+          <tr><td>Awaiting determination</td><td class="num">${s.awaitingVerdict}</td><td class="num">—</td></tr>
+          <tr class="tot"><td><b>Recovered from subcontractors (back-charge)</b></td><td class="num"></td><td class="num">${fmt(s.backCharges)}</td></tr>
+        </table>
+        <div class="muted" style="font-size:11px;margin-top:4px">Chargeable value is revenue that would otherwise have been absorbed as free warranty work.</div></div>
+      <div><b style="color:var(--navy);font-size:12px">Most frequent defect categories</b>
+        <table style="margin-top:4px"><tr><th>Category</th><th class="num">Requests</th><th>Share</th></tr>
+          ${topCat.length?topCat.map(([c,n])=>`<tr><td>${esc(c)}</td><td class="num">${n}</td><td><div style="background:#e3e7ee;height:8px;border-radius:4px;overflow:hidden"><div style="background:var(--blue);height:8px;width:${Math.round(n/items.length*100)}%"></div></div></td></tr>`).join(""):`<tr><td colspan="3" class="muted">No data yet.</td></tr>`}
+        </table>
+        ${topSub.length?`<b style="color:var(--navy);font-size:12px;display:block;margin-top:10px">Defects by responsible subcontractor</b>
+        <table style="margin-top:4px"><tr><th>Subcontractor</th><th class="num">Defects</th></tr>${topSub.map(([c,n])=>`<tr><td>${esc(c)}</td><td class="num">${n}</td></tr>`).join("")}</table>`:""}</div>
+    </div>
+    <div style="margin-top:14px"><b style="color:var(--navy);font-size:12px">Warranty exposure — live DLP windows</b>
+      <table style="margin-top:4px"><tr><th>Project</th><th>Certificate</th><th>DLP from</th><th>DLP to</th><th>Remaining</th><th class="num">Open requests</th><th class="num">Chargeable to date</th></tr>
+        ${windows.length?windows.map(w=>{const p=byProj[w.project]||{open:0,charge:0};
+          return `<tr><td>${esc(w.project)}</td><td>${esc(w.docNo)}</td><td>${dmy(w.start)}</td><td>${dmy(w.end)}</td>
+            <td style="color:${w.days<0?'#8a8a8a':w.days<60?'#C00000':w.days<120?'#B45309':'#2E7D32'}">${w.days<0?"expired":w.days+" days"}</td>
+            <td class="num">${p.open||0}</td><td class="num">${p.charge?fmt(p.charge):"—"}</td></tr>`;}).join("")
+          :`<tr><td colspan="7" class="muted">No DLP windows — issue a completion or DLP certificate with the DLP dates to track warranty exposure here.</td></tr>`}
+      </table>
+      <div class="muted" style="font-size:11px;margin-top:4px">A project whose DLP expires within 60 days is shown in red — chase outstanding defects before it closes, and confirm the retention release.</div></div>
+  </div>`;
+  bindProjFilter(vSrKpi);
+}
+// Client-side recalculation of the stats for the filtered subset
+function srRecalc(items){
+  const open=items.filter(x=>x.open), closed=items.filter(x=>x.status==="Closed");
+  const rt=items.filter(x=>x.respondedAt&&x.reportedAt).map(x=>(new Date(x.respondedAt)-new Date(String(x.reportedAt).length<=10?x.reportedAt+"T09:00":x.reportedAt))/3600e3);
+  const kt=closed.filter(x=>x.completedAt&&x.reportedAt).map(x=>(new Date(x.completedAt)-new Date(String(x.reportedAt).length<=10?x.reportedAt+"T09:00":x.reportedAt))/864e5);
+  const avg=a=>a.length?r2(a.reduce((t,v)=>t+v,0)/a.length):0;
+  return { total:items.length, open:open.length, closed:closed.length,
+    overdue:open.filter(x=>x.responseOverdue||x.rectifyOverdue).length,
+    emergencyOpen:open.filter(x=>x.priority==="Emergency").length,
+    inScope:items.filter(x=>x.liability==="in-scope").length,
+    outOfScope:items.filter(x=>x.liability==="out-of-scope").length,
+    awaitingVerdict:items.filter(x=>x.open&&!x.liability).length,
+    chargeableValue:r2(items.filter(x=>x.liability==="out-of-scope").reduce((t,x)=>t+num(x.quoteTotal),0)),
+    approvedChargeable:r2(items.filter(x=>x.quoteApprovedAt).reduce((t,x)=>t+num(x.quoteTotal),0)),
+    backCharges:r2(items.reduce((t,x)=>t+num(x.backChargeAmount),0)),
+    avgResponseHrs:avg(rt), avgRectifyDays:avg(kt),
+    slaResponseMet:items.filter(x=>x.responseMet===true).length,
+    slaResponseTotal:items.filter(x=>x.responseMet!==null).length };
+}
+async function srForm(r){
+  SR_CUR=r; const isNew=!r||!r.id; r=r||{priority:"Routine",category:"Other",channel:"Phone",status:"New",quoteVatPct:0.05,quoteLines:[],photos:[]};
+  const b=$("#dlp_body"); const canEdit=["CEO","PM","QS"].includes(ME.role);
+  const locked=r.status==="Closed"&&ME.role!=="CEO";
+  const dis=locked?"disabled":"";
+  let projs=[], certs=[], sups=SUPS||[];
+  try{ projs=[...new Set([...(CONTRACTS||[]).map(c=>c&&c.project),...((S.projects||[]).filter(p=>p&&p.name&&!p.fixed).map(p=>p.name))])].filter(Boolean).sort(); }catch(e){}
+  try{ certs=((await api("compcerts")).items||[]).filter(c=>c.dlpEnd); }catch(e){}
+  const nowLocal=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const liab=r.liability||"";
+  b.innerHTML=`<div class="card">
+   <div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">${isNew?"Log a service request":esc(r.no)}</h3>
+     ${isNew?"":srStPill(r)} ${isNew?"":srLiabPill(r)}
+     ${(!isNew&&(r.responseOverdue||r.rectifyOverdue))?`<span class="pill" style="background:#C00000">SLA BREACH</span>`:""}
+     ${(!isNew&&r.withinDlp===false)?`<span class="pill" style="background:#C00000">REPORTED AFTER DLP EXPIRY</span>`:""}
+     <button class="btn ghost right" id="srBack">Back to register</button></div>
+   ${isNew?`<div class="note" style="margin-top:8px">Log every client concern here — the SLA clock starts from the reported time. Nothing is rectified free of charge until the site inspection determines it is an <b>MA Group defect</b>; anything caused by misuse, third-party works, missing maintenance, wear and tear or reported after the DLP expired is <b>chargeable</b> and must be quoted and approved in writing before any work starts.</div>`:""}
+   <div class="sec-h" style="color:var(--navy);font-weight:800;font-size:12px;margin:12px 0 4px">1 · Request &amp; client details</div>
+   <div class="grid">
+     <div><label>Project *</label><select id="sr_project" ${dis}><option value="">— choose —</option>${projs.map(p=>`<option ${r.project===p?"selected":""}>${esc(p)}</option>`).join("")}</select></div>
+     <div><label>Linked DLP / completion certificate</label><select id="sr_cert" ${dis}><option value="">— none —</option>${certs.map(c=>`<option value="${esc(c.id)}" data-s="${esc(c.dlpStart||"")}" data-e="${esc(c.dlpEnd||"")}" data-p="${esc(c.project||"")}" data-c="${esc(c.partyName||"")}" ${r.compCertId===c.id?"selected":""}>${esc(c.docNo)} — ${esc(c.project)}</option>`).join("")}</select></div>
+     <div><label>Date &amp; time reported *</label><input type="datetime-local" id="sr_reportedAt" value="${esc(String(r.reportedAt||nowLocal).slice(0,16))}" ${dis}></div>
+     <div><label>Received via</label><select id="sr_channel" ${dis}>${["Phone","Email","WhatsApp","Site visit","Letter","Portal"].map(x=>`<option ${r.channel===x?"selected":""}>${x}</option>`).join("")}</select></div>
+     <div><label>Client</label><input id="sr_clientName" value="${esc(r.clientName||"")}" ${dis}></div>
+     <div><label>Client reference</label><input id="sr_clientRef" value="${esc(r.clientRef||"")}" placeholder="their complaint / email ref" ${dis}></div>
+     <div><label>Reported by (name)</label><input id="sr_reportedBy" value="${esc(r.reportedBy||"")}" ${dis}></div>
+     <div><label>Contact number</label><input id="sr_reportedPhone" value="${esc(r.reportedPhone||"")}" ${dis}></div>
+     <div><label>Contact email</label><input type="email" id="sr_reportedEmail" value="${esc(r.reportedEmail||"")}" ${dis}></div>
+     <div><label>DLP start</label><input type="date" id="sr_dlpStart" value="${esc((r.dlpStart||"").slice(0,10))}" ${dis}></div>
+     <div><label>DLP end</label><input type="date" id="sr_dlpEnd" value="${esc((r.dlpEnd||"").slice(0,10))}" ${dis}></div>
+   </div>
+   <div class="sec-h" style="color:var(--navy);font-weight:800;font-size:12px;margin:12px 0 4px">2 · The concern</div>
+   <div class="grid">
+     <div><label>Location (building / floor / unit / room)</label><input id="sr_location" value="${esc(r.location||"")}" ${dis}></div>
+     <div><label>System / asset</label><input id="sr_asset" value="${esc(r.asset||"")}" placeholder="e.g. AHU-02, DB-3, WC no.4" ${dis}></div>
+     <div><label>Category</label><select id="sr_category" ${dis}>${SR_CATS.map(c=>`<option ${r.category===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+     <div><label>Priority — sets the SLA</label><select id="sr_priority" ${dis}>
+       <option value="Emergency" ${r.priority==="Emergency"?"selected":""}>Emergency — safety / leak / power (respond 4 h)</option>
+       <option value="Urgent" ${r.priority==="Urgent"?"selected":""}>Urgent — affects use (respond 24 h)</option>
+       <option value="Routine" ${r.priority==="Routine"?"selected":""}>Routine — cosmetic / minor (respond 3 days)</option></select></div>
+     <div style="grid-column:1/-1"><label>Concern as reported by the client *</label><textarea id="sr_description" rows="3" ${dis}>${esc(r.description||"")}</textarea></div>
+   </div>
+   ${!isNew?`<div style="margin-top:10px"><b style="font-size:12px;color:var(--navy)">Site photographs</b> <span class="muted" style="font-size:11px">— tag each as BEFORE (as found) or AFTER (rectified); they print on the request and the completion report</span>
+     <div id="srPhotos" style="margin-top:6px"></div>
+     <div class="flex" style="gap:6px;margin-top:6px"><button class="btn ghost" id="srAddB">+ Add BEFORE photos</button><button class="btn ghost" id="srAddA">+ Add AFTER photos</button><input type="file" id="srPhFile" accept="image/*" multiple style="display:none"></div></div>`:""}
+   ${!isNew?`
+   <div class="sec-h" style="color:var(--navy);font-weight:800;font-size:12px;margin:14px 0 4px">3 · Site inspection &amp; liability determination <span class="muted" style="font-weight:400">— the control that protects the business</span></div>
+   <div class="grid">
+     <div><label>Inspected by</label><input id="sr_inspectedBy" value="${esc(r.inspectedBy||"")}" ${dis}></div>
+     <div><label>Inspection date &amp; time</label><input type="datetime-local" id="sr_inspectedAt" value="${esc(String(r.inspectedAt||"").slice(0,16))}" ${dis}></div>
+     <div style="grid-column:1/-1"><label>Findings on site</label><textarea id="sr_findings" rows="2" ${dis}>${esc(r.findings||"")}</textarea></div>
+     <div style="grid-column:1/-1"><label>Root cause</label><textarea id="sr_rootCause" rows="2" placeholder="what actually caused it — this is the evidence behind the determination" ${dis}>${esc(r.rootCause||"")}</textarea></div>
+     <div><label>Determination</label><select id="sr_liability" ${dis}>
+       <option value="" ${!liab?"selected":""}>— pending —</option>
+       <option value="in-scope" ${liab==="in-scope"?"selected":""}>MA Group liability — rectify FREE under DLP</option>
+       <option value="out-of-scope" ${liab==="out-of-scope"?"selected":""}>Outside DLP scope — CHARGEABLE to client</option>
+       <option value="partial" ${liab==="partial"?"selected":""}>Shared liability</option>
+       <option value="rejected" ${liab==="rejected"?"selected":""}>Not accepted — no MA liability</option></select></div>
+     <div><label>Reason / basis</label><select id="sr_liabilityReason" ${dis}></select></div>
+     <div id="sr_shareWrap" style="display:${liab==="partial"?"":"none"}"><label>MA Group share %</label><input type="number" step="1" min="0" max="100" id="sr_sharePct" value="${r.sharePct||0}" ${dis}></div>
+     <div style="grid-column:1/-1"><label>Remarks supporting the determination</label><input id="sr_liabilityNote" value="${esc(r.liabilityNote||"")}" ${dis}></div>
+     <div><label>Responsible subcontractor <span class="muted">(for back-charge)</span></label><select id="sr_subcontractorId" ${dis}><option value="">— none / MA direct —</option>${sups.map(x=>`<option value="${esc(x.id)}" ${r.subcontractorId===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>
+     <div><label>Back-charge amount (AED)</label><input type="number" step="0.01" id="sr_backChargeAmount" value="${r.backChargeAmount||""}" ${dis}></div>
+   </div>
+   <div id="sr_quoteWrap" style="display:${liab==="out-of-scope"||liab==="partial"?"":"none"};margin-top:12px">
+     <div class="sec-h" style="color:#B45309;font-weight:800;font-size:12px;margin:0 0 4px">4 · Chargeable works — quotation</div>
+     <div class="note" style="background:#fff8e6;border-left:4px solid #bf9000">These works are outside the DLP. Price them here, send the quotation, and record the client's <b>written approval</b> — the system will not let the works start until it is recorded.</div>
+     <div id="srQLines" style="margin-top:6px"></div>
+     <div class="flex" style="gap:8px;margin-top:6px;align-items:flex-end"><button class="btn ghost" id="srAddLn">+ Add line</button>
+       <div><label style="font-size:11px">VAT %</label><input type="number" step="0.5" id="sr_quoteVatPct" value="${Math.round((r.quoteVatPct!=null?r.quoteVatPct:0.05)*100)}" style="width:80px" ${dis}></div>
+       <div><label style="font-size:11px">Validity</label><input id="sr_quoteValidity" value="${esc(r.quoteValidity||"15 days")}" style="width:110px" ${dis}></div>
+       <div><label style="font-size:11px">Client approval ref</label><input id="sr_clientApprovalRef" value="${esc(r.clientApprovalRef||"")}" placeholder="LPO / email" ${dis}></div>
+       <div class="right"><b id="srQTot" style="font-size:13px;color:var(--navy)"></b></div></div>
+   </div>
+   <div class="sec-h" style="color:var(--navy);font-weight:800;font-size:12px;margin:14px 0 4px">5 · Execution &amp; closeout</div>
+   <div class="grid">
+     <div><label>Assigned to (technician / subcontractor)</label><input id="sr_assignedTo" value="${esc(r.assignedTo||"")}" ${dis}></div>
+     <div><label>Target completion date</label><input type="date" id="sr_targetDate" value="${esc((r.targetDate||"").slice(0,10))}" ${dis}></div>
+     <div style="grid-column:1/-1"><label>Work carried out</label><textarea id="sr_workDone" rows="2" ${dis}>${esc(r.workDone||"")}</textarea></div>
+     <div><label>Materials used</label><input id="sr_materialsUsed" value="${esc(r.materialsUsed||"")}" ${dis}></div>
+     <div><label>Man-hours</label><input type="number" step="0.5" id="sr_manHours" value="${r.manHours||""}" ${dis}></div>
+     <div><label>Client representative accepting the works</label><input id="sr_clientSignName" value="${esc(r.clientSignName||"")}" ${dis}></div>
+     <div><label>Acceptance date</label><input type="date" id="sr_clientSignDate" value="${esc((r.clientSignDate||"").slice(0,10))}" ${dis}></div>
+     <div><label>Client satisfaction (1–5)</label><input type="number" min="1" max="5" step="1" id="sr_satisfaction" value="${r.satisfaction||""}" ${dis}></div>
+     <div style="grid-column:1/-1"><label>Internal notes</label><input id="sr_notes" value="${esc(r.notes||"")}" ${dis}></div>
+   </div>
+   <div style="margin-top:8px" class="muted" style="font-size:11px">SLA: respond within <b>${r.slaRespondHrs||"—"} h</b> (by ${r.responseDue?dmy(String(r.responseDue).slice(0,10)):"—"}) · rectify within <b>${r.slaRectifyDays||"—"} days</b> (by ${r.rectifyDue?dmy(r.rectifyDue):"—"})</div>
+   `:""}
+   <div style="height:12px"></div><div class="flex" style="gap:8px;flex-wrap:wrap" id="srBtns"></div>
+   ${!isNew&&(r.audit||[]).length?`<div style="margin-top:10px"><b style="font-size:12px;color:var(--navy)">History</b><ul class="audit" style="margin:4px 0 0">${(r.audit||[]).slice().reverse().slice(0,12).map(a=>`<li>${dmy(String(a.at).slice(0,10))} — <b>${esc(a.by)}</b>: ${esc(a.action)}</li>`).join("")}</ul></div>`:""}
+  </div>`;
+  $("#srBack").onclick=()=>{ SR_CUR=null; vSrs(); };
+  // DLP dates + client auto-fill from the linked certificate
+  const cs=$("#sr_cert"); if(cs) cs.onchange=()=>{ const o=cs.selectedOptions[0]; if(!o||!o.value) return;
+    if(o.dataset.s) $("#sr_dlpStart").value=o.dataset.s; if(o.dataset.e) $("#sr_dlpEnd").value=o.dataset.e;
+    if(o.dataset.p) $("#sr_project").value=o.dataset.p; if(o.dataset.c&&!$("#sr_clientName").value) $("#sr_clientName").value=o.dataset.c; };
+  // Reason list follows the determination
+  const fillReasons=()=>{ const sel=$("#sr_liabilityReason"); if(!sel) return; const v=$("#sr_liability").value;
+    const list=v==="in-scope"?SR_IN:v==="out-of-scope"?SR_OUT:v==="partial"?SR_IN.concat(SR_OUT):v==="rejected"?SR_OUT:[];
+    sel.innerHTML=`<option value="">— select the basis —</option>`+list.map(([k,t])=>`<option value="${k}" ${r.liabilityReason===k?"selected":""}>${esc(t)}</option>`).join("");
+    if($("#sr_shareWrap")) $("#sr_shareWrap").style.display=v==="partial"?"":"none";
+    if($("#sr_quoteWrap")) $("#sr_quoteWrap").style.display=(v==="out-of-scope"||v==="partial")?"":"none"; };
+  if($("#sr_liability")){ $("#sr_liability").onchange=fillReasons; fillReasons(); }
+  // Quote lines
+  const QL=(r.quoteLines||[]).map(l=>({...l}));
+  const drawQ=()=>{ const h=$("#srQLines"); if(!h) return;
+    h.innerHTML=QL.length?`<table><tr><th>Description</th><th style="width:70px">Unit</th><th style="width:80px">Qty</th><th style="width:100px">Rate</th><th class="num" style="width:110px">Amount</th><th style="width:26px"></th></tr>
+      ${QL.map((l,i)=>`<tr><td><input data-q="${i}" data-f="description" value="${esc(l.description||"")}" ${dis}></td><td><input data-q="${i}" data-f="unit" value="${esc(l.unit||"")}" ${dis}></td>
+      <td><input type="number" step="0.01" data-q="${i}" data-f="qty" value="${l.qty||""}" ${dis}></td><td><input type="number" step="0.01" data-q="${i}" data-f="rate" value="${l.rate||""}" ${dis}></td>
+      <td class="num">${fmt(r2(num(l.qty)*num(l.rate)))}</td><td>${locked?"":`<a href="#" data-qrm="${i}" style="color:#c00">✕</a>`}</td></tr>`).join("")}</table>`:`<div class="muted" style="font-size:11px">No priced lines yet.</div>`;
+    h.querySelectorAll("[data-q]").forEach(inp=>inp.onchange=()=>{ const l=QL[+inp.dataset.q],f=inp.dataset.f; l[f]=(f==="qty"||f==="rate")?num(inp.value):inp.value; drawQ(); });
+    h.querySelectorAll("[data-qrm]").forEach(a=>a.onclick=e=>{ e.preventDefault(); QL.splice(+a.dataset.qrm,1); drawQ(); });
+    const sub=r2(QL.reduce((t,l)=>t+r2(num(l.qty)*num(l.rate)),0)), vp=(num($("#sr_quoteVatPct")?$("#sr_quoteVatPct").value:5))/100;
+    const tot=r2(sub+r2(sub*vp));
+    if($("#srQTot")) $("#srQTot").textContent="Total incl. VAT: AED "+fmt(tot); };
+  if($("#srAddLn")) $("#srAddLn").onclick=e=>{ e.preventDefault(); QL.push({description:"",unit:"",qty:1,rate:0}); drawQ(); };
+  if($("#sr_quoteVatPct")) $("#sr_quoteVatPct").onchange=drawQ;
+  drawQ();
+  // Photos
+  const drawPh=()=>{ const h=$("#srPhotos"); if(!h) return; const ph=r.photos||[];
+    h.innerHTML=ph.length?`<div style="display:flex;flex-wrap:wrap;gap:8px">${ph.map((p,i)=>`<div style="width:150px;border:1px solid #e3e7ee;border-radius:6px;overflow:hidden">
+      <img src="${p.dataUrl}" style="width:100%;height:95px;object-fit:cover;display:block">
+      <div style="padding:4px"><span class="pill" style="background:${p.stage==="after"?"#2E7D32":"#B45309"};font-size:9px">${p.stage==="after"?"AFTER":"BEFORE"}</span>
+      <input data-cap="${i}" value="${esc(p.caption||"")}" placeholder="caption" style="width:100%;font-size:10px;margin-top:3px" ${dis}>
+      ${locked?"":`<a href="#" data-phrm="${i}" style="color:#c00;font-size:10px">remove</a>`}</div></div>`).join("")}</div>`:`<div class="muted" style="font-size:11px">No photos yet.</div>`;
+    h.querySelectorAll("[data-cap]").forEach(inp=>inp.onchange=async ()=>{ try{ r=await api("sr/"+r.id+"/photo",{method:"POST",body:{captionIndex:+inp.dataset.cap,caption:inp.value}}); }catch(e){ toast(e.message); } });
+    h.querySelectorAll("[data-phrm]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); if(!confirm("Remove this photo?"))return; try{ r=await api("sr/"+r.id+"/photo",{method:"POST",body:{removeIndex:+a.dataset.phrm}}); drawPh(); }catch(x){ toast(x.message); } }); };
+  drawPh();
+  const addPhotos=(stage)=>{ const f=$("#srPhFile"); f.value=""; f.onchange=async ()=>{ const files=[...f.files]; if(!files.length) return;
+      toast("Uploading "+files.length+" photo(s)…");
+      for(const file of files){ await new Promise(res=>fileToDataUrl(file,async d=>{ try{ r=await api("sr/"+r.id+"/photo",{method:"POST",body:{dataUrl:d,stage}}); }catch(e){ toast(e.message); } res(); })); }
+      drawPh(); toast("Photos uploaded"); }; f.click(); };
+  if($("#srAddB")) $("#srAddB").onclick=e=>{ e.preventDefault(); addPhotos("before"); };
+  if($("#srAddA")) $("#srAddA").onclick=e=>{ e.preventDefault(); addPhotos("after"); };
+  const g=id=>{ const el=$("#sr_"+id); return el?el.value:""; };
+  const gather=()=>({ id:r.id, project:g("project"), compCertId:g("cert"), clientName:g("clientName"), clientRef:g("clientRef"),
+    reportedBy:g("reportedBy"), reportedPhone:g("reportedPhone"), reportedEmail:g("reportedEmail"), channel:g("channel"), reportedAt:g("reportedAt"),
+    dlpStart:g("dlpStart"), dlpEnd:g("dlpEnd"), location:g("location"), asset:g("asset"), category:g("category"), priority:g("priority"), description:g("description"),
+    inspectedBy:g("inspectedBy"), inspectedAt:g("inspectedAt"), findings:g("findings"), rootCause:g("rootCause"),
+    liability:g("liability"), liabilityReason:g("liabilityReason"), liabilityNote:g("liabilityNote"), sharePct:num(g("sharePct")),
+    subcontractorId:g("subcontractorId"), subcontractorName:(sups.find(x=>x.id===g("subcontractorId"))||{}).name||"", backChargeAmount:num(g("backChargeAmount")),
+    quoteLines:QL, quoteVatPct:num(g("quoteVatPct"))/100, quoteValidity:g("quoteValidity"), clientApprovalRef:g("clientApprovalRef"),
+    assignedTo:g("assignedTo"), targetDate:g("targetDate"), workDone:g("workDone"), materialsUsed:g("materialsUsed"), manHours:num(g("manHours")),
+    clientSignName:g("clientSignName"), clientSignDate:g("clientSignDate"), satisfaction:num(g("satisfaction")), notes:g("notes") });
+  const save=async ()=>{ const saved=await api("sr",{method:"POST",body:gather()}); return saved; };
+  const act=async (action,extra)=>{ try{ await save(); const res=await api("sr/"+r.id+"/status",{method:"POST",body:{action,...(extra||{})}}); toast("→ "+res.status); srForm(res); }catch(e){ toast(e.message); } };
+  const B=$("#srBtns"); const ceo=ME.role==="CEO"; let h="";
+  if(!locked&&canEdit) h+=`<button class="btn green" id="srSave">${isNew?"Log request":"Save changes"}</button>`;
+  if(!isNew){
+    h+=`<button class="btn ghost" id="srPrint">View / Print request</button><button class="btn ghost" id="srDl">⤓ PDF</button>`;
+    if(r.status==="New") h+=`<button class="btn gold" id="srAck">Acknowledge to client</button>`;
+    if(["New","Acknowledged"].includes(r.status)) h+=`<button class="btn" id="srInsp">Record inspection &amp; determination</button>`;
+    if((r.liability==="out-of-scope"||r.liability==="partial")&&num(r.quoteTotal)>0){
+      h+=`<button class="btn ghost" id="srQuotePrint">View quotation</button>`;
+      if(["Inspected","Quoted"].includes(r.status)) h+=`<button class="btn gold" id="srQuoteSend">Send quotation to client</button>`;
+      if(r.status==="Quoted") h+=`<button class="btn green" id="srQuoteOk">Record client approval</button><button class="btn ghost" id="srQuoteNo" style="color:#c00">Client declined</button>`;
+    }
+    if(["Inspected","Approved"].includes(r.status)) h+=`<button class="btn" id="srStart">Start works</button>`;
+    if(r.status==="In progress") h+=`<button class="btn green" id="srDone">Mark completed</button>`;
+    if(["Completed","Closed"].includes(r.status)) h+=`<button class="btn ghost" id="srRep">Completion report</button><button class="btn gold" id="srRepSend">Email report to client</button>`;
+    if(r.status==="Completed") h+=`<button class="btn green" id="srClose">Close with client sign-off</button>`;
+    if(r.status==="Closed"&&ceo) h+=`<button class="btn ghost" id="srReopen">Reopen (CEO)</button>`;
+    if(ceo) h+=`<button class="btn ghost" id="srDel" style="color:#c00">Delete</button>`;
+  }
+  B.innerHTML=h;
+  if($("#srSave")) $("#srSave").onclick=async ()=>{ try{ const saved=await save(); toast(isNew?("Logged "+saved.no):"Saved"); srForm(saved); }catch(e){ toast(e.message); } };
+  if($("#srAck")) $("#srAck").onclick=async ()=>{ const to=($("#sr_reportedEmail").value||"").trim();
+    if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)&&confirm("Email an acknowledgement to "+to+" now?\n\n(Cancel = just mark it acknowledged internally.)")){
+      try{ await save(); toast("Sending…"); const res=await api("sr/"+r.id+"/send",{method:"POST",body:{to,kind:"ack"}}); toast("Acknowledged & emailed to "+res.to); srForm(res.sr); }catch(e){ toast(e.message); } }
+    else act("acknowledge"); };
+  if($("#srInsp")) $("#srInsp").onclick=()=>act("inspect");
+  if($("#srStart")) $("#srStart").onclick=()=>act("start");
+  if($("#srDone")) $("#srDone").onclick=()=>act("complete");
+  if($("#srClose")) $("#srClose").onclick=()=>{ if(!$("#sr_clientSignName").value){ toast("Record the client representative who accepted the works"); return; } act("close"); };
+  if($("#srReopen")) $("#srReopen").onclick=()=>act("reopen");
+  if($("#srQuoteOk")) $("#srQuoteOk").onclick=()=>{ const ref=prompt("Client's written approval reference (LPO / email / signed quote):",$("#sr_clientApprovalRef").value||""); if(ref===null) return;
+    if(!ref.trim()){ toast("An approval reference is required"); return; } act("quote-approved",{clientApprovalRef:ref.trim()}); };
+  if($("#srQuoteNo")) $("#srQuoteNo").onclick=()=>{ if(confirm("Record that the client declined the chargeable works?")) act("quote-declined"); };
+  if($("#srPrint")) $("#srPrint").onclick=async ()=>{ try{ await save(); }catch(e){} openSrDoc(r.id,"html"); };
+  if($("#srDl")) $("#srDl").onclick=async ()=>{ try{ await save(); }catch(e){} downloadServerDoc("sr/"+r.id+"/html", r.no); };
+  if($("#srQuotePrint")) $("#srQuotePrint").onclick=async ()=>{ try{ await save(); }catch(e){} openSrDoc(r.id,"quote"); };
+  if($("#srRep")) $("#srRep").onclick=async ()=>{ try{ await save(); }catch(e){} openSrDoc(r.id,"report"); };
+  if($("#srQuoteSend")) $("#srQuoteSend").onclick=()=>srSendDoc(r,"quote","quotation for the chargeable works");
+  if($("#srRepSend")) $("#srRepSend").onclick=()=>srSendDoc(r,"report","service completion report");
+  if($("#srDel")) $("#srDel").onclick=async ()=>{ if(!confirm("Delete "+r.no+"? This cannot be undone."))return; try{ await api("sr/"+r.id,{method:"DELETE"}); toast("Deleted"); SR_CUR=null; vSrs(); }catch(e){ toast(e.message); } };
+}
+async function openSrDoc(id,kind){
+  try{ const html=await apiText("sr/"+id+"/"+kind); const w=window.open("","_blank");
+    if(!w){ toast("Allow pop-ups to view the document"); return; }
+    w.document.open(); w.document.write(html); w.document.close(); waitPaginateThenPrint(w);
+  }catch(e){ toast(e.message); }
+}
+async function srSendDoc(r,kind,label){
+  const to=($("#sr_reportedEmail").value||r.reportedEmail||"").trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast("Enter the client contact email first"); return; }
+  if(!confirm(`Email the ${label} for ${r.no} to ${to}?\n\nThe PDF is attached.`)) return;
+  try{ await api("sr",{method:"POST",body:{id:r.id}}); }catch(e){}
+  try{ toast("Preparing PDF…");
+    const html=await apiText("sr/"+r.id+"/"+kind);
+    const pdfs=[{name:(r.no.replace(/[^A-Za-z0-9._-]+/g,"_"))+"_"+kind+".pdf", base64:await htmlToPdfBase64(html,{budget:3.2e6})}];
+    toast("Sending…");
+    const res=await api("sr/"+r.id+"/send",{method:"POST",body:{to,kind,pdfs}});
+    toast("Sent to "+res.to); srForm(res.sr);
+  }catch(e){ toast("Failed: "+e.message); }
+}
+let DLP_TAB="certs";
 async function vCompCerts(){
+  const sub=(k,l)=>`<button class="btn ${DLP_TAB===k?'gold':'ghost'}" onclick="DLP_TAB='${k}';SR_CUR=null;vCompCerts()">${l}</button>`;
+  if(DLP_TAB!=="certs"){
+    $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Completion / DLP</h2>
+      <span class="muted">certificates &amp; defects-liability service requests</span>
+      <div class="right flex" style="gap:6px">${sub("certs","Certificates")}${sub("srs","Service requests")}${sub("kpi","DLP dashboard")}</div></div></div>
+      <div id="dlp_body"></div>`;
+    if(DLP_TAB==="srs") return vSrs();
+    return vSrKpi();
+  }
   const canEdit=["CEO","PM"].includes(ME.role);
   $("#main").innerHTML=`<div class="card"><div class="flex"><h2 style="margin:0">Completion &amp; DLP Certificates</h2>
     ${projFilterHtml()}
     <span class="muted">issued on project completion and at the end of the Defects Liability Period</span>
-    <div class="right flex">${canEdit?`<button class="btn gold" id="hcNewC">+ Completion certificate</button><button class="btn" id="hcNewD">+ DLP certificate</button><button class="btn ghost" id="hcNewW">+ Warranty certificate</button>`:""}</div></div>
+    <div class="right flex" style="gap:6px">${sub("certs","Certificates")}${sub("srs","Service requests")}${sub("kpi","DLP dashboard")}</div></div>
+    <div class="flex" style="gap:6px;margin-top:8px">${canEdit?`<button class="btn gold" id="hcNewC">+ Completion certificate</button><button class="btn" id="hcNewD">+ DLP certificate</button><button class="btn ghost" id="hcNewW">+ Warranty certificate</button>`:""}</div>
     <div class="note" style="margin-top:8px">UAE standard: the <b>Completion Certificate</b> records completion, handover and acceptance only (warranty/DLP stay governed by the quotation / PO terms). The <b>DLP Certificate</b> is issued at the end of the Defects Liability Period — defects made good, retention releasable, decennial liability under UAE Civil Code Arts. 880–883 reserved. All clauses are <b>editable per certificate</b> before issue.</div>
     <div id="hcList" class="muted" style="margin-top:10px">Loading…</div></div>`;
   if(canEdit){ $("#hcNewC").onclick=()=>compCertForm({type:"COMPLETION"}); $("#hcNewD").onclick=()=>compCertForm({type:"DLP"}); $("#hcNewW").onclick=()=>compCertForm({type:"WARRANTY"}); }
