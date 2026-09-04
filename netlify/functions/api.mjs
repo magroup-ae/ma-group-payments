@@ -18820,6 +18820,51 @@ var api_default = async (req, context) => {
     const kpi = { total: posts.length, published: posts.filter((p) => p.status === "Published").length, scheduled: posts.filter((p) => p.status === "Scheduled").length, review: posts.filter((p) => p.status === "Review").length, draft: posts.filter((p) => p.status === "Draft").length, failed: posts.filter((p) => p.status === "Failed").length };
     return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(await liToken(), await metaLink()), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
   }
+  // Live view of the connected accounts: followers, recent posts and engagement,
+  // read straight from each platform (cached 10 minutes so the page stays fast).
+  if (path === "mkt/live" && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const force = url.searchParams.get("refresh") === "1";
+    const cached = await s.get("mkt/live-cache", { type: "json" }).catch(() => null);
+    if (!force && cached && cached.at && Date.now() - new Date(cached.at).getTime() < 10 * 60e3) return json({ ...cached, cached: true });
+    const env0 = mktEnv(), meta = await metaLink(), li = await liToken();
+    const out = { at: now(), facebook: null, instagram: null, linkedin: null, whatsapp: null, errors: {} };
+    const fbTok = meta?.pageToken || env0.metaToken, fbPage = meta?.pageId || env0.fbPageId, igId = meta?.igUserId || env0.igUserId;
+    if (fbTok && fbPage) {
+      try {
+        const pg = await graphCall(`${GRAPH_API}/${fbPage}?fields=name,fan_count,followers_count,link,picture{url},category`, null, fbTok);
+        const ps = await graphCall(`${GRAPH_API}/${fbPage}/posts?fields=id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares&limit=12`, null, fbTok);
+        out.facebook = { name: pg.name, fans: pg.fan_count, followers: pg.followers_count, link: pg.link, picture: pg.picture?.data?.url || "", category: pg.category,
+          posts: (ps.data || []).map((x) => ({ id: x.id, text: x.message || "", at: x.created_time, url: x.permalink_url, image: x.full_picture || "", likes: x.likes?.summary?.total_count || 0, comments: x.comments?.summary?.total_count || 0, shares: x.shares?.count || 0 })) };
+      } catch (e) { out.errors.facebook = e.message; }
+    }
+    if (fbTok && igId) {
+      try {
+        const ig = await graphCall(`${GRAPH_API}/${igId}?fields=username,name,followers_count,follows_count,media_count,profile_picture_url,biography,website`, null, fbTok);
+        const md = await graphCall(`${GRAPH_API}/${igId}/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count&limit=12`, null, fbTok);
+        out.instagram = { username: ig.username, name: ig.name, followers: ig.followers_count, following: ig.follows_count, mediaCount: ig.media_count, picture: ig.profile_picture_url || "", bio: ig.biography || "", website: ig.website || "",
+          posts: (md.data || []).map((x) => ({ id: x.id, text: x.caption || "", at: x.timestamp, url: x.permalink, image: x.thumbnail_url || x.media_url || "", type: x.media_type, likes: x.like_count || 0, comments: x.comments_count || 0 })) };
+      } catch (e) { out.errors.instagram = e.message; }
+    }
+    if (env0.metaToken && env0.waPhoneId) {
+      try {
+        const ph = await graphCall(`${GRAPH_API}/${env0.waPhoneId}?fields=display_phone_number,verified_name,quality_rating,messaging_limit_tier,name_status`, null, env0.metaToken);
+        out.whatsapp = { number: ph.display_phone_number, name: ph.verified_name, quality: ph.quality_rating, tier: ph.messaging_limit_tier, nameStatus: ph.name_status };
+      } catch (e) { out.errors.whatsapp = e.message; }
+    }
+    if (li) {
+      try {
+        const ui = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + li.accessToken } }).then((r) => r.json());
+        out.linkedin = { name: ui.name || li.name || "", picture: ui.picture || "", email: ui.email || "", mode: li.orgId && /w_organization_social/.test(li.scopes || "") ? "company page" : "personal profile", expiresAt: li.expiresAt || "" };
+        if (li.orgId && /r_organization_social/.test(li.scopes || "")) {
+          const rs = await fetch(`${LI_API}/networkSizes/urn:li:organization:${li.orgId}?edgeType=CompanyFollowedByMember`, { headers: { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" } });
+          const j = await rs.json().catch(() => ({})); if (rs.ok) out.linkedin.followers = j.firstDegreeSize;
+        }
+      } catch (e) { out.errors.linkedin = e.message; }
+    }
+    await s.setJSON("mkt/live-cache", out);
+    return json(out);
+  }
   if (path === "mkt/post" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
     const b = await req.json();
