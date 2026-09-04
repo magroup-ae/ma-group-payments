@@ -16141,6 +16141,7 @@ var api_default = async (req, context) => {
   }
   // WhatsApp webhook (public): verification handshake + inbound events.
   if (path === "wa/webhook" && req.method === "GET") {
+    if (url.searchParams.has("status")) { const w = settings.webhookV2 || null; return json(w ? { at: w.at, callback: w.cb, ok: w.ok, error: w.error || (w.resp && w.resp.error && w.resp.error.message) || "" } : { pending: true }); }
     const vt = process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
     if (url.searchParams.get("hub.mode") === "subscribe" && vt && url.searchParams.get("hub.verify_token") === vt) return new Response(url.searchParams.get("hub.challenge") || "", { status: 200, headers: { "content-type": "text/plain" } });
     return err("Forbidden", 403);
