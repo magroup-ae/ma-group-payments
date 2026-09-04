@@ -3207,6 +3207,7 @@ async function parseLpoPdf(file){
   return items.filter(it=>it.description&&it.rate>0);
 }
 /* ---------- Operations cost / HR management ---------- */
+const HQ_NAME="MA HQ – Operations";
 let OPS_TAB="overview", OPS_MONTH=new Date().toISOString().slice(0,7), OPS=null, OPS_STAFF_EDIT=null;
 const opsCan={ edit:()=>["CEO","Accounts","Secretary"].includes(ME.role), payroll:()=>["CEO","Accounts"].includes(ME.role), post:()=>["CEO","Accounts"].includes(ME.role) };
 function monthLabel(m){ if(!m) return "—"; const [y,mo]=m.split("-"); return new Date(Date.UTC(+y,+mo-1,1)).toLocaleString("en-GB",{month:"long",year:"numeric",timeZone:"UTC"}); }
@@ -3285,11 +3286,13 @@ function renderOpsPayroll(el){
   el.innerHTML=`
    <div class="flex" style="flex-wrap:wrap;gap:8px">
      ${opsCan.payroll()?`<label class="btn gold" style="cursor:pointer">Import salary list (CSV / Excel)<input type="file" id="prFile" accept=".csv,.xlsx,.xls" style="display:none"></label>
-     <button class="btn ghost" id="prPull" title="${d.hrLink.configured?"Pull this month's payroll from "+esc(d.hrLink.url):"Set HR_API_KEY in Netlify to enable the live link"}">Pull from HR system${d.hrLink.configured?"":" (not linked)"}</button>`:""}
+     <button class="btn ghost" id="prPull" title="${d.hrLink.configured?"Pull this month's payroll from "+esc(d.hrLink.url):"Set HR_API_KEY in Netlify to enable the live link"}">Pull payroll from HR system${d.hrLink.configured?"":" (not linked)"}</button>`:""}
+     ${opsCan.edit()&&d.hrLink.configured?`<button class="btn ghost" id="prAtt" title="Read every day's check-ins from the attendance system and count man-days per site">${d.attendance?"Refresh attendance (sites)":"Pull attendance (sites → projects)"}</button>`:""}
      ${pay?`<button class="btn ghost" id="prCsv">Export CSV</button>`:""}
      ${pay&&opsCan.post()?`<button class="btn ${pay.posted?'ghost':'gold'}" id="prPost">${pay.posted?"Re-post payroll to ledger":"Post payroll to ledger"}</button>`:""}
-     <span class="muted right" style="font-size:12px">Source of truth: the attendance / HR system (${esc(d.hrLink.url)}). Import the month's salary list here; nothing is re-typed.</span>
+     <span class="muted right" style="font-size:12px">Source of truth: the attendance / HR system (${esc(d.hrLink.url)}) — ${d.hrLink.configured?'<b style="color:var(--green)">linked</b>':'<b style="color:var(--gold)">not linked</b>'}. Payroll and check-in sites are read live; nothing is re-typed.</span>
    </div>
+   ${d.attendance||Object.keys(d.siteMap||{}).length?renderSiteMap(d):""}
    ${!pay?`<div class="muted" style="margin-top:12px">No payroll imported for <b>${esc(ml)}</b>. In the HR system open <b>Payroll → ${esc(ml)}</b>, press <b>Export Excel</b> (Salary_List_${m}.csv) and import that file here. Columns recognised: ID, Employee, Role, Company, Basic, Housing, Transport, Other, Gross, Overtime, Commission, Deductions, NET.</div>`:pay.restricted?`<div class="muted" style="margin-top:12px">Payroll detail is restricted to CEO / Accounts. Totals: ${pay.totals.count} staff · employer cost AED ${fmt(pay.totals.cost)}.</div>`:`
    <div class="kpis" style="margin-top:12px">
      <div class="kpi"><div class="v">${pay.totals.count}</div><div class="l">Staff on payroll · ${esc(ml)}</div></div>
@@ -3301,17 +3304,17 @@ function renderOpsPayroll(el){
    <div class="muted" style="font-size:11.5px;margin:8px 0">Imported ${dmy(pay.importedAt)} by ${esc(pay.importedBy)} (${esc(pay.source)}${pay.fileName?" · "+esc(pay.fileName):""}) · ${pay.posted?'<b style="color:var(--green)">posted to the cost ledger</b>':'<b style="color:var(--gold)">not yet posted</b>'}. Click a row to assign the employee to one or more projects (the % of their time); the remainder stays in HQ and is allocated with the pool.</div>
    <div style="overflow-x:auto"><table>
     <tr><th>ID</th><th>Employee</th><th>Role</th><th class="num">Gross</th><th class="num">OT</th><th class="num">Comm.</th><th class="num">Deduct.</th><th class="num">Net</th><th>Paid by</th><th class="num">Employer cost</th><th>Assigned to</th><th>Cost type</th><th class="num">To projects</th><th class="num">HQ</th></tr>
-    ${pay.rows.map(r=>`<tr class="click" data-emp="${esc(r.empId)}"><td>${esc(r.empId)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.role||"—")}</td><td class="num">${fmt(r.gross)}</td><td class="num">${fmt(r.ot)}</td><td class="num">${fmt(r.commission)}</td><td class="num">${fmt(r.deductions)}</td><td class="num">${fmt(r.net)}</td><td>${esc(r.payMethod||"WPS")}</td><td class="num"><b>${fmt(r.cost)}</b></td><td>${r.splits.length?r.splits.map(s=>`${esc(s.project)} <span class="muted">${fmt(s.pct*100)}%</span>`).join("<br>"):'<span class="muted">HQ (unassigned)</span>'}</td><td>${esc(r.costType)}</td><td class="num">${fmt(r.assigned)}</td><td class="num">${fmt(r.hqShare)}</td></tr>
+    ${pay.rows.map(r=>`<tr class="click" data-emp="${esc(r.empId)}"><td>${esc(r.empId)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.role||"—")}</td><td class="num">${fmt(r.gross)}</td><td class="num">${fmt(r.ot)}</td><td class="num">${fmt(r.commission)}</td><td class="num">${fmt(r.deductions)}</td><td class="num">${fmt(r.net)}</td><td>${esc(r.payMethod||"WPS")}</td><td class="num"><b>${fmt(r.cost)}</b></td><td>${r.splits.length?r.splits.map(s=>`${esc(s.project)} <span class="muted">${fmt(s.pct*100)}%</span>`).join("<br>"):'<span class="muted">HQ (unassigned)</span>'} ${r.splitSource==="attendance"?`<span class="pill st-Approved" title="from check-in sites · ${esc(Object.entries(r.attDays||{}).map(([k,v])=>k+": "+v+"d").join(", "))}">attendance</span>`:r.splitSource==="manual"?`<span class="pill st-Issued" title="manual assignment overrides attendance">manual</span>`:""}</td><td>${esc(r.costType)}</td><td class="num">${fmt(r.assigned)}</td><td class="num">${fmt(r.hqShare)}</td></tr>
       ${OPS_STAFF_EDIT===r.empId?`<tr><td colspan="14" style="background:#f4f6fb"><div class="flex" style="flex-wrap:wrap;gap:8px;align-items:end">
         ${[0,1,2].map(i=>`<div><label class="muted" style="font-size:11px">Project ${i+1}</label><br><select class="sp-proj" style="max-width:240px">${projOpts}</select></div><div><label class="muted" style="font-size:11px">% of time</label><br><input class="sp-pct" type="number" min="0" max="100" step="5" style="width:80px" value="${r.splits[i]?fmt(r.splits[i].pct*100).replace(/\.00$/,""):""}"></div>`).join("")}
         <div><label class="muted" style="font-size:11px">Cost type on the project</label><br><select id="sp_ct">${d.staffCostTypes.map(t=>`<option ${t===r.costType?"selected":""}>${esc(t)}</option>`).join("")}</select></div>
-        <button class="btn gold" id="sp_save">Save assignment</button><button class="btn ghost" id="sp_cancel">Cancel</button>
+        <button class="btn gold" id="sp_save">Save assignment</button>${r.attDays?`<button class="btn ghost" id="sp_att" title="Drop the manual assignment and split by check-in sites">Use attendance split</button>`:""}<button class="btn ghost" id="sp_cancel">Cancel</button>
         <span class="muted" style="font-size:11px">Site staff (engineers, foremen, labour) → assign 100% to their project. Office / management → leave in HQ or split. Applies to every month until changed.</span></div></td></tr>`:""}`).join("")}
     <tr class="tot"><td colspan="3">TOTAL · ${pay.totals.count} staff</td><td class="num">${fmt(pay.totals.gross)}</td><td class="num">${fmt(pay.totals.ot)}</td><td class="num">${fmt(pay.totals.commission)}</td><td class="num">${fmt(pay.totals.deductions)}</td><td class="num">${fmt(pay.totals.net)}</td><td></td><td class="num">${fmt(pay.totals.cost)}</td><td colspan="2"></td><td class="num">${fmt(pay.totals.assigned)}</td><td class="num">${fmt(pay.totals.hq)}</td></tr>
    </table></div>
    ${Object.keys(pay.byProject).length?`<div class="card" style="margin:14px 0 0"><h3>Payroll charged to projects — ${esc(ml)}</h3><table><tr><th>Project</th><th class="num">AED</th></tr>${Object.entries(pay.byProject).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<tr><td>${esc(p)}</td><td class="num">${fmt(v)}</td></tr>`).join("")}<tr><td>MA HQ (unassigned → allocated with the pool)</td><td class="num">${fmt(pay.totals.hq)}</td></tr></table></div>`:""}`}`;
   const fi=$("#prFile"); if(fi) fi.onchange=()=>importPayrollFile(fi.files[0]);
-  const pl=$("#prPull"); if(pl) pl.onclick=async()=>{ if(!d.hrLink.configured){ alert("Live link not configured.\n\nIn Netlify → ma-group-payments → Site configuration → Environment variables add:\n  HR_API_KEY = the HR system's admin / master key\n  HR_API_URL = https://ma-group-attendance.netlify.app (optional)\n\nUntil then import the salary list file exported from the HR system."); return; } try{ toast("Contacting HR system…"); const r=await api("ops/payroll/pull",{method:"POST",body:{month:m}}); toast("Imported "+r.count+" staff from HR system"); vOps(); }catch(e){ alert(e.message); } };
+  const pl=$("#prPull"); if(pl) pl.onclick=async()=>{ if(!d.hrLink.configured){ alert("Live link not configured.\n\nIn Netlify → ma-group-payments → Site configuration → Environment variables add:\n  HR_API_KEY = the HR system's admin / master key\n  HR_API_URL = https://hr.maagroup.ae (optional)\n\nUntil then import the salary list file exported from the HR system."); return; } try{ toast("Contacting HR system…"); const r=await api("ops/payroll/pull",{method:"POST",body:{month:m}}); toast("Imported "+r.count+" staff from HR system"); vOps(); }catch(e){ alert(e.message); } };
   const pc=$("#prCsv"); if(pc) pc.onclick=()=>exportCsv("MA_Payroll_"+m+".csv",["ID","Employee","Role","Company","Basic","Housing","Transport","Other","Gross","Overtime","Commission","Deductions","Net","Paid by","Employer cost","Assigned to","Cost type","To projects","HQ share"],pay.rows.map(r=>[r.empId,r.name,r.role,r.company,r.basic,r.housing,r.transport,r.other,r.gross,r.ot,r.commission,r.deductions,r.net,r.payMethod,r.cost,r.splits.map(s=>s.project+" "+fmt(s.pct*100)+"%").join("; "),r.costType,r.assigned,r.hqShare]));
   const pp=$("#prPost"); if(pp) pp.onclick=()=>{ if(!confirm("Post "+ml+" payroll to the cost ledger?\n\nStaff assigned to projects are charged to those projects; the rest goes to the HQ pool. Re-posting replaces the month's payroll lines.")) return; opsPost("ops/payroll/post",{month:m},"Payroll posted"); };
   el.querySelectorAll("tr[data-emp]").forEach(tr=>tr.onclick=()=>{ if(!opsCan.edit()) return; OPS_STAFF_EDIT=OPS_STAFF_EDIT===tr.dataset.emp?null:tr.dataset.emp; renderOpsPayroll(el); });
@@ -3320,7 +3323,35 @@ function renderOpsPayroll(el){
     if(r) sels.forEach((s,i)=>{ if(r.splits[i]) s.value=r.splits[i].project; });
     const sv=$("#sp_save"); if(sv) sv.onclick=async()=>{ const splits=[]; sels.forEach((s,i)=>{ if(s.value&&num(pcts[i].value)>0) splits.push({project:s.value,pct:num(pcts[i].value)}); }); try{ await api("ops/staff",{method:"POST",body:{empId:r.empId,name:r.name,role:r.role,company:r.company,splits,costType:$("#sp_ct").value}}); toast("Assignment saved"+(pay.posted?" — re-post payroll to update the ledger":"")); OPS_STAFF_EDIT=null; vOps(); }catch(e){ toast(e.message); } };
     const cc=$("#sp_cancel"); if(cc) cc.onclick=()=>{ OPS_STAFF_EDIT=null; renderOpsPayroll(el); };
+    const ua=$("#sp_att"); if(ua) ua.onclick=async()=>{ try{ await api("ops/staff",{method:"POST",body:{empId:r.empId,name:r.name,role:r.role,company:r.company,splits:[],costType:$("#sp_ct").value,useAttendance:true}}); toast("Split now follows attendance"); OPS_STAFF_EDIT=null; vOps(); }catch(e){ toast(e.message); } };
   }
+  const pa=$("#prAtt"); if(pa) pa.onclick=()=>pullAttendance(m);
+  const sm=$("#smSave"); if(sm) sm.onclick=async()=>{ const map={}; el.querySelectorAll(".sm-sel").forEach(x=>{ if(x.value) map[x.dataset.site]=x.value; }); try{ await api("ops/sitemap",{method:"POST",body:{map}}); toast("Site mapping saved"+(pay&&pay.posted?" — re-post payroll to update the ledger":"")); vOps(); }catch(e){ toast(e.message); } };
+}
+// Read the month's check-ins in runs of 10 days (one HR call per day server-side).
+async function pullAttendance(m){
+  const b=$("#prAtt"); if(b){ b.disabled=true; b.textContent="Reading attendance…"; }
+  try{
+    let from=m+"-01", first=true, days=0, guard=0;
+    while(from&&guard++<6){ const r=await api("ops/attendance/pull",{method:"POST",body:{month:m,from,reset:first}}); first=false; days=r.days; from=r.next; if(b) b.textContent="Reading attendance… "+days+" day(s)"; }
+    toast("Attendance read: "+days+" day(s)"); vOps();
+  }catch(e){ alert(e.message); vOps(); }
+}
+// Site (geofence) → project mapping. Every site seen in the month's check-ins,
+// plus the sites configured in the HR system, gets a target.
+function renderSiteMap(d){
+  const att=d.attendance, map=d.siteMap||{};
+  const names=new Set([...Object.keys(att?.sites||{}),...(att?.siteList||[]),...Object.keys(map)]);
+  const rows=[...names].sort((a,b)=>(num(att?.sites?.[b])||0)-(num(att?.sites?.[a])||0)||a.localeCompare(b));
+  if(!rows.length) return "";
+  const opt=(cur)=>`<option value="">— not mapped (stays in HQ)</option><option value="${esc(HQ_NAME)}" ${cur===HQ_NAME?"selected":""}>MA HQ – Operations (office)</option>${d.projects.map(p=>`<option ${cur===p?"selected":""}>${esc(p)}</option>`).join("")}<option value="__ignore" ${cur==="__ignore"?"selected":""}>Ignore (not a work site)</option>`;
+  const unmapped=rows.filter(n=>!map[n]&&num(att?.sites?.[n])>0).length;
+  return `<div class="card" style="margin:12px 0 0;background:#f8f9fc"><div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">Check-in sites → projects</h3>
+    <span class="muted" style="font-size:12px">${att?`${att.days} day(s) read for ${esc(monthLabel(att.month))} · ${att.staffDays} staff-days · updated ${dmy(att.pulledAt)}`:"no attendance read yet for this month"}${unmapped?` · <b style="color:var(--gold)">${unmapped} site(s) with man-days not mapped</b>`:""}</span>
+    ${opsCan.edit()?`<button class="btn gold right" id="smSave">Save mapping</button>`:""}</div>
+    <div style="overflow-x:auto"><table style="margin-top:8px"><tr><th>Site (as recorded on check-in)</th><th class="num">Man-days this month</th><th>Charge to</th></tr>
+    ${rows.map(n=>`<tr><td>${esc(n)}</td><td class="num">${num(att?.sites?.[n])||0}</td><td>${opsCan.edit()?`<select class="sm-sel" data-site="${esc(n)}" style="max-width:320px">${opt(map[n]||"")}</select>`:esc(map[n]||"—")}</td></tr>`).join("")}</table></div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Each employee's salary is split by the days they checked in at each site. Sites mapped to a project charge that project (Labour); sites mapped to MA HQ, ignored or unmapped keep the salary in the HQ pool, which is then allocated on the Allocation tab. A manual assignment on an employee overrides this.</div></div>`;
 }
 async function importPayrollFile(file){
   if(!file) return;

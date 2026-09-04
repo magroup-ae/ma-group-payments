@@ -14306,14 +14306,51 @@ function staffSplits(st) {
   const scale = tot > 100 ? 100 / tot : 1;
   return sp.map((x) => ({ project: String(x.project), pct: r2(num(x.pct) * scale) / 100 }));
 }
+// ---- live link to the attendance / HR system (same Netlify team, separate site & data store) ----
+// The HR API accepts its ADMIN_MASTER_KEY as a bearer token on every /admin/* route,
+// so the finance app reads payroll and attendance server-to-server with one secret
+// (HR_API_KEY) — no user password involved and nothing is re-typed.
+var HR_BASE = () => (process.env.HR_API_URL || "https://hr.maagroup.ae").replace(/\/+$/, "");
+async function hrGet(pathQ) {
+  const key = process.env.HR_API_KEY || "";
+  if (!key) throw new Error("HR link not configured — add HR_API_KEY (the HR system's admin master key) in Netlify → ma-group-payments → Environment variables.");
+  const base = HR_BASE();
+  let lastErr = "";
+  for (const u of [`${base}/api${pathQ}`, `${base}/.netlify/functions/api${pathQ}`]) {
+    try {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 8500);
+      const rs = await fetch(u, { headers: { Authorization: "Bearer " + key, Accept: "application/json" }, signal: ctl.signal });
+      clearTimeout(tm);
+      const txt = await rs.text();
+      let j = null; try { j = JSON.parse(txt); } catch {}
+      if (!rs.ok) { lastErr = `${rs.status} ${j?.error || ""} (${u})`.trim(); if (rs.status === 401 || rs.status === 403) break; continue; }
+      if (j === null) { lastErr = "non-JSON answer from " + u; continue; }
+      return j;
+    } catch (e) { lastErr = String(e.message || e); }
+  }
+  throw new Error("Could not reach the HR system: " + lastErr);
+}
+// Site name as recorded on a check-in, without the "(outside zone)" suffix.
+function hrSiteKey(n) { return String(n || "").replace(/\s*\(outside zone\)\s*$/i, "").trim(); }
+// Attendance-driven project split for one employee: worked days on sites mapped
+// to a project ÷ all worked days in the month. Sites mapped to HQ (or unmapped)
+// keep that share of the salary in the HQ pool.
+function attendanceSplits(att, siteMap, empId) {
+  const by = att?.byEmp?.[empId]; if (!by) return null;
+  let total = 0; const perProj = {};
+  for (const site in by) { const d = num(by[site]); total += d; const p = siteMap[site]; if (p && p !== HQ_PROJECT && p !== "__ignore") perProj[p] = (perProj[p] || 0) + d; }
+  if (!(total > 0)) return null;
+  return { total, splits: Object.entries(perProj).map(([project, d]) => ({ project, pct: r2(d / total * 10000) / 10000, days: d })) };
+}
 // Full monthly operations picture: pool components, what is posted vs still to
 // post, allocation drivers per project and the saved allocation (if any).
 async function computeOps(s, month) {
-  const [expenses, fixed, staff, assets, payroll, allocRec, contracts, allCC, names] = await Promise.all([
+  const [expenses, fixed, staff, assets, payroll, allocRec, contracts, allCC, names, att] = await Promise.all([
     listExpenses(""), listOpsFixed(), listOpsStaff(), listAssets(), s.get("opspayroll/" + month, { type: "json" }),
-    s.get("opsalloc/" + month, { type: "json" }), listContracts(), getAllJSON(s, "clientcert/"), projectNames(s)
+    s.get("opsalloc/" + month, { type: "json" }), listContracts(), getAllJSON(s, "clientcert/"), projectNames(s), s.get("opsatt/" + month, { type: "json" })
   ]);
   const st = await s.get("settings", { type: "json" }) || {};
+  const siteMap = st.hrSiteMap || {};
   const overheadNames = new Set([HQ_PROJECT, ...(st.projects || []).filter((p) => p && p.kind === "overhead").map((p) => p.name)]);
   const projects = names.filter((p) => !overheadNames.has(p));
   const mExp = expenses.filter((e) => monthKeyOf(e.date) === month);
@@ -14326,9 +14363,14 @@ async function computeOps(s, month) {
   const rows = (payroll?.rows || []).map((r) => {
     const sm = staffMap[r.empId] || {};
     const cost = payrollCost(r);
-    const splits = staffSplits(sm);
+    // Attendance decides the split (check-in sites → projects) unless a manual
+    // assignment has been saved for the employee; no attendance → manual/none.
+    const auto = sm.manualSplits ? null : attendanceSplits(att, siteMap, r.empId);
+    const splits = auto ? auto.splits : staffSplits(sm);
+    const splitSource = auto ? "attendance" : splits.length ? "manual" : "none";
     const assigned = r2(cost * splits.reduce((t, x) => t + x.pct, 0));
-    return { ...r, cost, splits, costType: sm.costType || "Labour (Indirect)", assigned, hqShare: r2(cost - assigned) };
+    const attDays = att?.byEmp?.[r.empId] || null;
+    return { ...r, cost, splits, splitSource, attDays, manualSplits: !!sm.manualSplits, costType: sm.costType || "Labour (Indirect)", assigned, hqShare: r2(cost - assigned) };
   });
   const payrollTot = { count: rows.length, gross: 0, ot: 0, commission: 0, deductions: 0, net: 0, cost: 0, assigned: 0, hq: 0, wps: 0, cash: 0 };
   const payrollByProject = {};
@@ -14366,7 +14408,9 @@ async function computeOps(s, month) {
     fixed: fixedRows, fixedExpected, fixedPosted: r2(fixedRows.filter((f) => f.posted).reduce((t, f) => t + f.postedAmount, 0)),
     depreciation: { rows: depRows, expected: depExpected, posted: depPosted ? num(depPosted.amount) : 0, isPosted: !!depPosted },
     drivers: Object.values(drivers), alloc: allocRec || null,
-    staff: staff
+    staff: staff,
+    attendance: att ? { month, from: att.from, to: att.to, days: Object.keys(att.byDay || {}).length, pulledAt: att.pulledAt, sites: att.sites || {}, siteList: att.siteList || [], staffDays: att.staffDays || 0 } : null,
+    siteMap
   };
 }
 // Split the HQ pool across projects on the chosen basis. Returns rows that
@@ -18459,7 +18503,7 @@ var api_default = async (req, context) => {
       // Salary detail is CEO / Accounts only — others see totals without names.
       d.payroll = { ...d.payroll, rows: [], restricted: true };
     }
-    d.hrLink = { url: (process.env.HR_API_URL || "https://ma-group-attendance.netlify.app").replace(/\/+$/, ""), configured: !!process.env.HR_API_KEY };
+    d.hrLink = { url: HR_BASE(), configured: !!process.env.HR_API_KEY };
     return json(d);
   }
   // ---- fixed expense register ----
@@ -18538,25 +18582,67 @@ var api_default = async (req, context) => {
     if (!can("opsPayroll")) return err("Payroll is CEO / Accounts only", 403);
     const b = await req.json(); const month = b.month;
     if (!validMonth(month)) return err("Month must be YYYY-MM");
-    const base = (process.env.HR_API_URL || "https://ma-group-attendance.netlify.app").replace(/\/+$/, "");
-    const key = process.env.HR_API_KEY || "";
-    if (!key) return err("HR link not configured. In Netlify → Site configuration → Environment variables add HR_API_KEY (the HR system's admin key / master key) and, if different, HR_API_URL. Until then, import the salary list file (Payroll → Export Excel in the HR system).");
-    const tries = [`${base}/.netlify/functions/api/admin/payroll-split?month=${month}`, `${base}/api/admin/payroll-split?month=${month}`];
-    let data = null, lastErr = "";
-    for (const u of tries) {
-      try {
-        const rs = await fetch(u, { headers: { "Authorization": "Bearer " + key, "x-admin-key": key, "x-admin-token": key, "Accept": "application/json" } });
-        if (!rs.ok) { lastErr = `${rs.status} from ${u}`; continue; }
-        data = await rs.json(); break;
-      } catch (e) { lastErr = String(e.message || e); }
-    }
-    if (!data) return err("Could not reach the HR system (" + lastErr + "). Import the salary list file instead.");
+    let data;
+    try { data = await hrGet(`/admin/payroll-split?month=${month}`); }
+    catch (e) { return err(e.message + " — you can still import the salary list file (Payroll → Export Excel in the HR system)."); }
     const list = data.rows || data.employees || data.all?.rows || (Array.isArray(data) ? data : null) || [...(data.wps?.rows || []), ...(data.cash?.rows || [])];
     const rows = normalisePayrollRows(list);
-    if (!rows.length) return err("HR system answered but no payroll rows were recognised — import the salary list file instead.");
-    await s.setJSON("opspayroll/" + month, { month, rows, source: "hr-api", importedBy: me.name, importedAt: now() });
+    if (!rows.length) return err("HR system answered but no payroll rows were recognised for " + month + " — import the salary list file instead.");
+    const rec = { month, rows, source: "hr-link", importedBy: me.name, importedAt: now(),
+      hr: { wps: data.wps || null, cash: data.cash || null, all: data.all || null, excluded: data.excluded || [], payrollRun: data.payrollRun || null } };
+    await s.setJSON("opspayroll/" + month, rec);
     for (const r of rows) { const k = "opsstaff/" + r.empId.replace(/[^A-Za-z0-9_-]+/g, "_"); if (!(await s.get(k))) await s.setJSON(k, { empId: r.empId, name: r.name, role: r.role, company: r.company, splits: [], costType: "Labour (Indirect)", updatedAt: now(), updatedBy: me.name }); }
-    return json({ ok: true, month, count: rows.length, source: "hr-api" });
+    return json({ ok: true, month, count: rows.length, source: "hr-link", excluded: (data.excluded || []).length, payrollRun: data.payrollRun || null });
+  }
+  // Pull attendance for a run of days (≤ 10 per call — the HR overview reads one
+  // day at a time) and roll it up into man-days per employee per site.
+  if (path === "ops/attendance/pull" && req.method === "POST") {
+    if (!can("opsEdit")) return err("No rights", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const last = monthEnd(month);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || "") ? b.from : month + "-01";
+    let to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || "") ? b.to : last;
+    if (to > last) to = last;
+    const today = now().slice(0, 10); if (to > today) to = today;
+    const dates = [];
+    for (let d = new Date(from + "T00:00:00Z"); d.toISOString().slice(0, 10) <= to && dates.length < 10; d.setUTCDate(d.getUTCDate() + 1)) dates.push(d.toISOString().slice(0, 10));
+    const att = (await s.get("opsatt/" + month, { type: "json" })) || { month, byDay: {}, byEmp: {}, sites: {}, siteList: [], from: month + "-01", to: last };
+    if (b.reset) { att.byDay = {}; att.byEmp = {}; att.sites = {}; }
+    if (from === month + "-01" || !att.siteList?.length) {
+      try { const sl = await hrGet("/admin/sites"); att.siteList = (Array.isArray(sl) ? sl : sl.sites || []).map((x) => x && (x.name || x)).filter(Boolean).map(String); } catch {}
+    }
+    let fetched = 0;
+    try {
+      const results = await Promise.all(dates.map((d) => hrGet(`/admin/overview?date=${d}`)));
+      results.forEach((ov, i) => {
+        const date = dates[i]; const day = {};
+        for (const r of ov.rows || []) {
+          const ev = (r.events || []).find((x) => x.type === "in") || (r.events || [])[0];
+          const worked = (r.events || []).length > 0 || r.status === "in" || !!r.overnight;
+          if (!worked) continue;
+          const site = hrSiteKey(ev?.siteName || r.site || "Unknown location") || "Unknown location";
+          day[r.id] = site;
+        }
+        att.byDay[date] = day; fetched++;
+      });
+    } catch (e) { return err(e.message); }
+    // rebuild the roll-ups from byDay so re-pulls never double count
+    att.byEmp = {}; att.sites = {}; let staffDays = 0;
+    for (const date in att.byDay) for (const emp in att.byDay[date]) { const site = att.byDay[date][emp]; att.byEmp[emp] = att.byEmp[emp] || {}; att.byEmp[emp][site] = (att.byEmp[emp][site] || 0) + 1; att.sites[site] = (att.sites[site] || 0) + 1; staffDays++; }
+    att.staffDays = staffDays; att.pulledAt = now(); att.pulledBy = me.name;
+    await s.setJSON("opsatt/" + month, att);
+    const nextFrom = dates.length ? new Date(new Date(dates[dates.length - 1] + "T00:00:00Z").getTime() + 864e5).toISOString().slice(0, 10) : null;
+    return json({ ok: true, month, fetched, days: Object.keys(att.byDay).length, next: nextFrom && nextFrom <= to ? nextFrom : null, to, sites: att.sites, staffDays });
+  }
+  // Map each HR check-in site (geofence) to a finance project (or HQ / ignore).
+  if (path === "ops/sitemap" && req.method === "POST") {
+    if (!can("opsEdit")) return err("No rights", 403);
+    const b = await req.json();
+    const stg = await s.get("settings", { type: "json" }) || {};
+    const map = {}; for (const k in (b.map || {})) { const v = String(b.map[k] || "").trim(); if (v) map[String(k).trim()] = v; }
+    stg.hrSiteMap = map; await s.setJSON("settings", stg);
+    return json({ ok: true, map });
   }
   if (path === "ops/staff" && req.method === "POST") {
     if (!can("opsEdit")) return err("No rights", 403);
@@ -18567,7 +18653,9 @@ var api_default = async (req, context) => {
     const splits = (Array.isArray(b.splits) ? b.splits : []).filter((x) => x && x.project && num(x.pct) > 0).map((x) => ({ project: String(x.project).trim(), pct: r2(num(x.pct)) }));
     const tot = splits.reduce((t, x) => t + x.pct, 0);
     if (tot > 100.01) return err("Project splits total " + r2(tot) + "% — they cannot exceed 100%. The remainder stays with MA HQ.");
-    const rec = { ...ex, name: b.name || ex.name || "", role: b.role || ex.role || "", company: b.company || ex.company || "", splits, costType: OPS_STAFF_COST_TYPES.includes(b.costType) ? b.costType : ex.costType || "Labour (Indirect)", updatedAt: now(), updatedBy: me.name };
+    const rec = { ...ex, name: b.name || ex.name || "", role: b.role || ex.role || "", company: b.company || ex.company || "", splits, costType: OPS_STAFF_COST_TYPES.includes(b.costType) ? b.costType : ex.costType || "Labour (Indirect)",
+      // a saved assignment overrides attendance until "use attendance" is chosen again
+      manualSplits: b.useAttendance ? false : true, updatedAt: now(), updatedBy: me.name };
     await s.setJSON(k, rec);
     return json(rec);
   }
@@ -18682,7 +18770,7 @@ var api_default = async (req, context) => {
   }
   if (path === "backup" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
-    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/"];
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/"];
     const data = {};
     for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
     data.settings = await s.get("settings", { type: "json" });
