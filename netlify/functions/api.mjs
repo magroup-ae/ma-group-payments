@@ -14716,6 +14716,82 @@ async function broadcastPost(s, post, ch, opts) {
   return { sent, failed, skipped, remaining, total: contacts.length, doneTotal: Object.keys(sentRec.done).length };
 }
 
+// ===================== WHATSAPP INBOUND (LEADS) =====================
+// Meta delivers every WhatsApp event to ONE callback URL per app. This system
+// becomes that URL: it forwards the untouched event to the MA chatbot (which
+// keeps answering exactly as before) and, in parallel, reads the message to log
+// the contact and raise a LEAD whenever a customer asks for a person / a call /
+// a quotation — with an e-mail to the CEO & marketing inbox within seconds.
+var WA_AGENT_RX = /\b(agent|human|real person|someone|representative|manager|engineer|call me|call back|callback|phone call|speak (to|with)|talk (to|with)|contact me|ring me|whatsapp me|get in touch)\b|اتصل|اتصلوا|كلمني|مكالمة|موظف|ممثل|مهندس|مدير|شخص|تواصل معي|رقمي/i;
+var WA_ENQUIRY_RX = /\b(quot(e|ation)|price|pricing|cost|estimate|boq|site visit|visit|fit[- ]?out|renovat|villa|office|design|contract|project|tender|proposal)\b|سعر|عرض|تسعير|مقاولة|ديكور|تشطيب|فيلا|مكتب|تصميم|زيارة|مشروع/i;
+function waText(m) {
+  if (!m) return "";
+  if (m.type === "text") return m.text?.body || "";
+  if (m.type === "interactive") return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || m.interactive?.button_reply?.id || "";
+  if (m.type === "button") return m.button?.text || m.button?.payload || "";
+  if (m.type === "location") return "[location] " + (m.location?.name || m.location?.address || `${m.location?.latitude},${m.location?.longitude}`);
+  if (m.type === "image" || m.type === "document" || m.type === "audio" || m.type === "video") return `[${m.type}] ` + (m[m.type]?.caption || m[m.type]?.filename || "");
+  return m.type ? "[" + m.type + "]" : "";
+}
+async function waHandleInbound(s, payload) {
+  const created = [];
+  for (const en of payload?.entry || []) for (const ch of en.changes || []) {
+    const v = ch.value || {}; if (!Array.isArray(v.messages)) continue;
+    const names = {}; for (const c of v.contacts || []) names[c.wa_id] = c.profile?.name || "";
+    for (const m of v.messages) {
+      const phone = String(m.from || ""); if (!phone) continue;
+      const text = waText(m).trim(); const at = m.timestamp ? new Date(num(m.timestamp) * 1e3).toISOString() : now();
+      const key = "wa/contact/" + phone;
+      const rec = (await s.get(key, { type: "json" })) || { phone, name: "", firstAt: at, count: 0, history: [] };
+      if (names[phone]) rec.name = names[phone];
+      rec.count++; rec.lastAt = at; rec.lastText = text.slice(0, 300);
+      rec.history = [...(rec.history || []), { at, text: text.slice(0, 300), type: m.type }].slice(-30);
+      const agent = WA_AGENT_RX.test(text), enquiry = WA_ENQUIRY_RX.test(text);
+      let leadId = "";
+      if (agent || enquiry) {
+        // one open lead per contact per 24 h — later messages are appended to it
+        const leads = await listLeads();
+        const open = leads.find((l) => l.phone === phone && l.status !== "Closed" && Date.now() - new Date(l.createdAt).getTime() < 24 * 3600e3);
+        if (open) {
+          open.messages = [...(open.messages || []), { at, text: text.slice(0, 500) }].slice(-40);
+          if (agent && open.kind !== "Agent call requested") { open.kind = "Agent call requested"; open.priority = "High"; open.escalatedAt = at; }
+          open.updatedAt = now(); await s.setJSON("mkt/lead/" + open.id, open); leadId = open.id;
+          if (agent && !open.agentNotified) { open.agentNotified = true; await s.setJSON("mkt/lead/" + open.id, open); created.push(open); }
+        } else {
+          const stg = await s.get("settings", { type: "json" }) || {};
+          const id = await nextId(s, stg, "leadSeq", "LD", "mkt/lead/", 4); await s.setJSON("settings", stg);
+          const lead = { id, source: "WhatsApp", phone, name: rec.name || "", kind: agent ? "Agent call requested" : "Enquiry", priority: agent ? "High" : "Normal", status: "New",
+            text: text.slice(0, 500), messages: [{ at, text: text.slice(0, 500) }], history: (rec.history || []).slice(-8), createdAt: now(), updatedAt: now(), assignedTo: "", notes: "", agentNotified: agent };
+          await s.setJSON("mkt/lead/" + id, lead); leadId = id; created.push(lead);
+        }
+      }
+      if (leadId) rec.lastLead = leadId;
+      await s.setJSON(key, rec);
+    }
+  }
+  // notify once per new / escalated lead
+  for (const lead of created) { try { await notifyLead(s, lead); } catch (e) { console.log("lead notify failed", e.message); } }
+  return created.length;
+}
+async function listLeads() { const out = (await getAllJSON(store(), "mkt/lead/")).filter((v) => v && v.id); out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))); return out; }
+async function notifyLead(s, lead) {
+  const cfg = await getEmailCfg(s);
+  const stg = await s.get("settings", { type: "json" }) || {};
+  const to = [...new Set([cfg.adminEmail, ...String(stg.leadEmails || "").split(/[;,]/).map((x) => x.trim())].filter((x) => x && /@/.test(x)))];
+  if (!to.length) return;
+  const urgent = lead.kind === "Agent call requested";
+  const html = emailShell(cfg, {
+    title: urgent ? "WhatsApp: customer asks to speak to someone" : "WhatsApp enquiry received",
+    band: urgent ? "#b42318" : "#1f3864", greeting: "Mohammed",
+    preheader: `${lead.name || lead.phone}: ${String(lead.text || "").slice(0, 80)}`,
+    lead: [`<strong>${lead.name || "Unknown"}</strong> (+${lead.phone}) wrote on the MA Group WhatsApp number:`, `<em>“${String(lead.text || "").replace(/</g, "&lt;")}”</em>`,
+      urgent ? "The message asks for a person / a call. Please call back or reply from WhatsApp Business as soon as possible." : "Keyword match: a quotation / project enquiry. Follow up from the Marketing → Leads page."],
+    table: [["Lead", lead.id], ["Type", lead.kind], ["Phone", "+" + lead.phone], ["Received", new Date(lead.createdAt).toLocaleString("en-GB", { timeZone: "Asia/Dubai" }) + " (Dubai)"], ["Open WhatsApp", `https://wa.me/${lead.phone}`]],
+    note: (lead.history || []).length > 1 ? "<strong>Earlier messages:</strong><br>" + lead.history.slice(0, -1).map((h) => `${new Date(h.at).toLocaleString("en-GB", { timeZone: "Asia/Dubai" })} — ${String(h.text || "").replace(/</g, "&lt;")}`).join("<br>") : "",
+    closing: `Manage this lead in the MA Group system → Marketing → Leads.`
+  });
+  await sendMail(s, cfg, { type: "lead", to: to[0], toName: "Mohammed Abuassba", cc: to.slice(1), subject: `${urgent ? "🔴 CALL REQUEST" : "🟢 Lead"} · WhatsApp · ${lead.name || "+" + lead.phone} · ${lead.id}`, html });
+}
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
   let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0, subAdvancePaid = 0;
@@ -16029,6 +16105,23 @@ var api_default = async (req, context) => {
       await s.setJSON("mkt/token/meta", rec);
       return back(`Signed in as ${rec.userName}. Page: ${rec.pageName}${rec.igUsername ? " · Instagram @" + rec.igUsername : " · no Instagram business account linked to this page yet"}.`, true);
     } catch (x) { return back(x.message, false); }
+  }
+  // WhatsApp webhook (public): verification handshake + inbound events.
+  if (path === "wa/webhook" && req.method === "GET") {
+    const vt = process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
+    if (url.searchParams.get("hub.mode") === "subscribe" && vt && url.searchParams.get("hub.verify_token") === vt) return new Response(url.searchParams.get("hub.challenge") || "", { status: 200, headers: { "content-type": "text/plain" } });
+    return err("Forbidden", 403);
+  }
+  if (path === "wa/webhook" && req.method === "POST") {
+    const raw = await req.text();
+    // 1) hand the event to the chatbot untouched so it keeps replying
+    const fwd = (process.env.WA_BOT_FORWARD_URL || "https://magroup-bot-x7k2m9.netlify.app/webhook").trim();
+    const fwdP = fwd ? fetch(fwd, { method: "POST", headers: { "content-type": req.headers.get("content-type") || "application/json", "x-hub-signature-256": req.headers.get("x-hub-signature-256") || "", "x-hub-signature": req.headers.get("x-hub-signature") || "" }, body: raw }).catch((e) => console.log("bot forward failed", e.message)) : Promise.resolve();
+    // 2) read it for contacts & leads
+    let leads = 0;
+    try { const payload = JSON.parse(raw); if (payload && payload.object === "whatsapp_business_account") leads = await waHandleInbound(s, payload); } catch (e) { console.log("wa inbound parse failed", e.message); }
+    await fwdP;
+    return json({ ok: true, leads });
   }
   // Scheduled publishing runner (called by cron-mkt every 15 min with the shared key).
   if (path === "mkt/run-scheduled") {
@@ -18865,6 +18958,33 @@ var api_default = async (req, context) => {
     await s.setJSON("mkt/live-cache", out);
     return json(out);
   }
+  // ---- leads (WhatsApp) ----
+  if (path === "mkt/leads" && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const leads = await listLeads();
+    const contacts = (await getAllJSON(s, "wa/contact/")).filter((v) => v && v.phone).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+    const stg = await s.get("settings", { type: "json" }) || {};
+    return json({ leads, contacts: contacts.slice(0, 200), kpi: { open: leads.filter((l) => l.status !== "Closed").length, calls: leads.filter((l) => l.kind === "Agent call requested" && l.status === "New").length, today: leads.filter((l) => String(l.createdAt).slice(0, 10) === now().slice(0, 10)).length, contacts: contacts.length }, leadEmails: stg.leadEmails || "", webhook: { url: mktEnv().siteUrl + "/api/wa/webhook", verifySet: !!(process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN), forward: process.env.WA_BOT_FORWARD_URL || "https://magroup-bot-x7k2m9.netlify.app/webhook" } });
+  }
+  if (path.startsWith("mkt/lead/") && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const l = await s.get("mkt/lead/" + id, { type: "json" }); if (!l) return err("Lead not found", 404);
+    if (b.status && ["New", "Contacted", "Qualified", "Closed"].includes(b.status)) { if (b.status !== l.status) { l.log = [...(l.log || []), { at: now(), by: me.name, action: `${l.status} → ${b.status}` }]; l.status = b.status; } }
+    if (b.assignedTo !== void 0) l.assignedTo = String(b.assignedTo || "");
+    if (b.notes !== void 0) l.notes = String(b.notes || "");
+    if (b.name !== void 0) l.name = String(b.name || "");
+    if (b.kind && ["Agent call requested", "Enquiry", "Other"].includes(b.kind)) l.kind = b.kind;
+    l.updatedAt = now(); l.updatedBy = me.name;
+    await s.setJSON("mkt/lead/" + id, l);
+    return json(l);
+  }
+  if (path === "mkt/leads/settings" && req.method === "POST") {
+    if (!can("marketingApprove")) return err("CEO only", 403);
+    const b = await req.json(); const stg = await s.get("settings", { type: "json" }) || {};
+    stg.leadEmails = String(b.leadEmails || "").trim(); await s.setJSON("settings", stg);
+    return json({ ok: true, leadEmails: stg.leadEmails });
+  }
   if (path === "mkt/post" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
     const b = await req.json();
@@ -19331,7 +19451,7 @@ var api_default = async (req, context) => {
   }
   if (path === "backup" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
-    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/", "mkt/post/", "mkt/audience/", "mkt/sent/"];
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/", "mkt/post/", "mkt/audience/", "mkt/sent/", "mkt/lead/", "wa/contact/"];
     const data = {};
     for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
     data.settings = await s.get("settings", { type: "json" });

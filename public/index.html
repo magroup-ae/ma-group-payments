@@ -4571,13 +4571,14 @@ async function vMarketing(){
   const sub=(k,l)=>`<button class="btn ${MKT_TAB===k?'gold':'ghost'}" data-tab="${k}">${l}</button>`;
   $("#main").innerHTML=`<div class="card"><div class="flex" style="flex-wrap:wrap;gap:8px">
      <h2 style="margin:0">Marketing</h2><span class="muted">LinkedIn · Instagram · Facebook · WhatsApp · e-mail — plan, approve, publish, measure</span>
-     <div class="right flex" style="gap:6px;flex-wrap:wrap">${sub("live","Live channels")}${sub("posts","Posts & calendar")}${mktCan.edit()?sub("new","+ New post"):""}${sub("audiences","Audiences")}${sub("connect","Connections")}</div></div>
+     <div class="right flex" style="gap:6px;flex-wrap:wrap">${sub("live","Live channels")}${sub("leads","WhatsApp leads")}${sub("posts","Posts & calendar")}${mktCan.edit()?sub("new","+ New post"):""}${sub("audiences","Audiences")}${sub("connect","Connections")}</div></div>
      <div id="mkBody" class="muted" style="margin-top:12px">Loading…</div></div>`;
   $("#main").querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ MKT_TAB=b.dataset.tab; if(MKT_TAB==="new") MKT_EDIT={}; vMarketing(); });
   try{ MKT=await api("mkt"); }catch(e){ $("#mkBody").textContent=e.message; return; }
   const el=$("#mkBody"); el.classList.remove("muted");
   if(MKT_TAB==="posts") renderMktPosts(el);
   else if(MKT_TAB==="live") await renderMktLive(el,false);
+  else if(MKT_TAB==="leads") await renderMktLeads(el);
   else if(MKT_TAB==="new") await renderMktForm(el, MKT_EDIT||{});
   else if(MKT_TAB==="audiences") renderMktAudiences(el);
   else renderMktConnect(el);
@@ -4612,6 +4613,37 @@ async function renderMktLive(el,refresh){
   </div>`;
   el.innerHTML=h;
   $("#lvRefresh").onclick=()=>renderMktLive(el,true);
+}
+// Leads raised from the WhatsApp number (customer asked for a person / a call, or a quotation).
+let LEAD_FILTER="open";
+async function renderMktLeads(el){
+  el.innerHTML=`<div class="muted">Loading leads…</div>`;
+  let d; try{ d=await api("mkt/leads"); }catch(e){ el.innerHTML=`<div class="muted">${esc(e.message)}</div>`; return; }
+  const k=d.kpi; const when=(t)=>t?new Date(t).toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+  const pill=(st)=>`<span class="pill ${({New:"st-Rejected",Contacted:"st-Issued",Qualified:"st-Approved",Closed:"st-Paid"})[st]||"st-Draft"}">${esc(st)}</span>`;
+  const rows=d.leads.filter(l=>LEAD_FILTER==="all"||(LEAD_FILTER==="open"?l.status!=="Closed":l.status===LEAD_FILTER));
+  el.innerHTML=`
+   <div class="kpis">
+     <div class="kpi ${k.calls?'alert':''}"><div class="v">${k.calls}</div><div class="l">Call requests waiting</div></div>
+     <div class="kpi" style="border-top-color:var(--gold)"><div class="v">${k.open}</div><div class="l">Open leads</div></div>
+     <div class="kpi"><div class="v">${k.today}</div><div class="l">New today</div></div>
+     <div class="kpi"><div class="v">${k.contacts}</div><div class="l">WhatsApp contacts logged</div></div>
+   </div>
+   <div class="card" style="margin:12px 0 0;background:#f8f9fc;font-size:12px"><b>How it works:</b> every message to the MA Group WhatsApp number passes through this system on its way to the chatbot (the bot keeps answering). When a customer asks for a person / a call-back, or mentions a quotation, price, villa, office, project…, a lead is opened here and an e-mail goes to <b>${esc(d.leadEmails||"the CEO inbox")}</b> immediately.
+     ${mktCan.approve()?`<div class="flex" style="gap:8px;margin-top:6px"><input id="ldEmails" value="${esc(d.leadEmails||"")}" placeholder="extra e-mails for lead alerts, comma separated (e.g. marketing@maagroup.ae)" style="max-width:460px"><button class="btn ghost" id="ldEmailsSave">Save</button></div>`:""}
+     <div class="muted" style="margin-top:4px">Webhook endpoint: <code>${esc(d.webhook.url)}</code> ${d.webhook.verifySet?'<span class="pill st-Paid">verify token set</span>':'<span class="pill st-Rejected">verify token missing</span>'} · events are forwarded to the chatbot at <code>${esc(d.webhook.forward)}</code>.</div></div>
+   <div class="flex" style="gap:6px;margin:12px 0 8px;flex-wrap:wrap">${[["open","Open"],["New","New"],["Contacted","Contacted"],["Qualified","Qualified"],["Closed","Closed"],["all","All"]].map(([v,l])=>`<button class="btn ${LEAD_FILTER===v?'gold':'ghost'}" data-lf="${v}" style="padding:4px 10px;font-size:12px">${l}</button>`).join("")}<button class="btn ghost right" id="ldCsv" style="padding:4px 10px;font-size:12px">Export CSV</button></div>
+   <div style="overflow-x:auto"><table>
+    <tr><th>Lead</th><th>Received</th><th>Contact</th><th>Type</th><th>Message</th><th>Status</th><th>Assigned</th><th></th></tr>
+    ${rows.map(l=>`<tr style="${l.kind==="Agent call requested"&&l.status==="New"?'background:#fff4f4':''}"><td><b>${esc(l.id)}</b></td><td>${when(l.createdAt)}</td><td><b>${esc(l.name||"—")}</b><br><a href="https://wa.me/${esc(l.phone)}" target="_blank" rel="noopener">+${esc(l.phone)}</a></td><td>${l.kind==="Agent call requested"?'<span class="pill st-Rejected">📞 call request</span>':'<span class="pill st-Issued">enquiry</span>'}</td><td style="max-width:360px;font-size:12px">${esc((l.messages||[]).slice(-1)[0]?.text||l.text||"")}${(l.messages||[]).length>1?`<br><span class="muted">${l.messages.length} messages</span>`:""}</td><td>${pill(l.status)}</td><td>${esc(l.assignedTo||"—")}</td><td style="white-space:nowrap"><select data-ls="${esc(l.id)}" style="max-width:130px">${["New","Contacted","Qualified","Closed"].map(x=>`<option ${x===l.status?"selected":""}>${x}</option>`).join("")}</select> <a href="#" data-ln="${esc(l.id)}">note</a></td></tr>
+      ${l.notes?`<tr><td></td><td colspan="7" class="muted" style="font-size:11.5px">📝 ${esc(l.notes)}${l.assignedTo?" · "+esc(l.assignedTo):""}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No leads ${LEAD_FILTER==="all"?"yet":"in this view"} — they appear here the moment a customer asks for a call or a quotation on WhatsApp.</td></tr>`}
+   </table></div>
+   ${d.contacts.length?`<details style="margin-top:12px"><summary class="muted" style="cursor:pointer">Recent WhatsApp contacts (${d.contacts.length})</summary><div style="overflow-x:auto"><table style="margin-top:6px"><tr><th>Name</th><th>Phone</th><th>Messages</th><th>Last message</th><th>When</th></tr>${d.contacts.slice(0,60).map(c=>`<tr><td>${esc(c.name||"—")}</td><td><a href="https://wa.me/${esc(c.phone)}" target="_blank" rel="noopener">+${esc(c.phone)}</a></td><td>${c.count}</td><td style="font-size:12px">${esc(c.lastText||"")}</td><td>${when(c.lastAt)}</td></tr>`).join("")}</table></div></details>`:""}`;
+  el.querySelectorAll("[data-lf]").forEach(b=>b.onclick=()=>{ LEAD_FILTER=b.dataset.lf; renderMktLeads(el); });
+  el.querySelectorAll("[data-ls]").forEach(sel=>sel.onchange=async()=>{ try{ await api("mkt/lead/"+sel.dataset.ls,{method:"POST",body:{status:sel.value}}); toast("Lead "+sel.value); renderMktLeads(el); }catch(e){ toast(e.message); } });
+  el.querySelectorAll("[data-ln]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); const l=d.leads.find(x=>x.id===a.dataset.ln); const notes=prompt("Note / outcome for "+l.id+":",l.notes||""); if(notes===null) return; const who=prompt("Assigned to (name):",l.assignedTo||ME.name)||""; try{ await api("mkt/lead/"+l.id,{method:"POST",body:{notes,assignedTo:who}}); renderMktLeads(el); }catch(x){ toast(x.message); } });
+  const se=$("#ldEmailsSave"); if(se) se.onclick=async()=>{ try{ await api("mkt/leads/settings",{method:"POST",body:{leadEmails:$("#ldEmails").value}}); toast("Saved"); }catch(e){ toast(e.message); } };
+  $("#ldCsv").onclick=()=>exportCsv("MA_WhatsApp_Leads.csv",["ID","Received","Name","Phone","Type","Status","Assigned","Message","Notes"],d.leads.map(l=>[l.id,l.createdAt,l.name,"+"+l.phone,l.kind,l.status,l.assignedTo,l.text,l.notes]));
 }
 function renderMktPosts(el){
   const d=MKT, k=d.kpi;
