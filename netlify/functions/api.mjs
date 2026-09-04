@@ -12538,7 +12538,7 @@ async function getEmailCfg(s) {
     fromName: saved.fromName || "MA Group Accounts",
     replyTo: getEnv("MAIL_REPLYTO") || saved.replyTo || "info@maagroup.ae",
     adminEmail: getEnv("ADMIN_EMAIL") || saved.adminEmail || "ceo@maagroup.ae",
-    logoUrl: getEnv("LOGO_URL") || saved.logoUrl || "https://ma-group-payments.netlify.app/logo.png",
+    logoUrl: getEnv("LOGO_URL") || saved.logoUrl || (process.env.SITE_URL || "https://system.maagroup.ae") + "/logo.png",
     cc: saved.cc || "",
     bcc: saved.bcc || "",
     triggers: saved.triggers || {}
@@ -12559,7 +12559,7 @@ function emailShell(cfg, o) {
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(20,30,50,.08)">
 <tr><td style="background:#ffffff;padding:18px 30px 14px;border-bottom:1px solid #eef1f5">
 <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-<td style="padding-right:14px;vertical-align:middle"><img src="${cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png"}" alt="MA Group" width="66" style="display:block;width:66px;height:auto;border:0"></td>
+<td style="padding-right:14px;vertical-align:middle"><img src="${cfg.logoUrl || (process.env.SITE_URL || "https://system.maagroup.ae") + "/logo.png"}" alt="MA Group" width="66" style="display:block;width:66px;height:auto;border:0"></td>
 <td style="vertical-align:middle"><div style="color:#1f3864;font-size:20px;font-weight:800;letter-spacing:.3px">MA GROUP</div>
 <div style="color:#8a93a3;font-size:11px;margin-top:2px">Marvellous Art \u2022 MA Building Contracting \u2022 MA Building Maintenance</div></td>
 </tr></table>
@@ -14520,7 +14520,7 @@ function mktEnv() {
     liToken: process.env.LINKEDIN_ACCESS_TOKEN || "", liOrg: process.env.LINKEDIN_ORG_ID || "",
     liClientId: process.env.LINKEDIN_CLIENT_ID || "", liClientSecret: process.env.LINKEDIN_CLIENT_SECRET || "",
     metaAppId: process.env.META_APP_ID || "", metaAppSecret: process.env.META_APP_SECRET || "",
-    siteUrl: (process.env.SITE_URL || process.env.URL || "https://ma-group-payments.netlify.app").replace(/\/+$/, ""),
+    siteUrl: (process.env.SITE_URL || process.env.URL || "https://system.maagroup.ae").replace(/\/+$/, ""),
     waDefaultTemplate: process.env.WA_TEMPLATE || "", waLang: process.env.WA_TEMPLATE_LANG || "en"
   };
 }
@@ -15056,7 +15056,7 @@ function awardThreshold(settings) { return num(settings && settings.loaThreshold
 function awardTypeFor(amount, settings) { return num(amount) < awardThreshold(settings) ? "LOA" : "AGREEMENT"; }
 // Full letterhead legal document (LOA for small packages, Subcontract Agreement for larger ones).
 // ---- Shared MAA Group letterhead (matches the corporate letter design) ----
-function mahLogo(cfg) { return cfg && cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png"; }
+function mahLogo(cfg) { return cfg && cfg.logoUrl || (process.env.SITE_URL || "https://system.maagroup.ae") + "/logo.png"; }
 function mahHeader(cfg, entName) {
   return `<div class="mah"><img class="mah-logo" src="${mahLogo(cfg)}" alt="MA GROUP" onerror="this.style.display='none'">
     <div class="mah-co"><div class="mah-tag">CONTRACTING &nbsp;&middot;&nbsp; FIT-OUT &nbsp;&middot;&nbsp; CONSTRUCTION</div>
@@ -15241,7 +15241,7 @@ function buildRfqHtml(rec, cfg, vendor) {
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
   const ent = rec.entityName || "MA Group – Marvellous Art LLC";
   const entTrn = String(rec.entityTRN || (/marvellous/i.test(ent) ? "104117106500003" : "")).trim();
-  const logo = cfg && cfg.logoUrl || "https://ma-group-payments.netlify.app/logo.png";
+  const logo = cfg && cfg.logoUrl || (process.env.SITE_URL || "https://system.maagroup.ae") + "/logo.png";
   const vName = vendor ? (vendor.name || "") : "";
   const vAttn = vendor ? (vendor.contactName || "") : "";
   const scopeHtml = String(rec.scope || "").split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>As per the attached BOQ, drawings and specifications.</li>";
