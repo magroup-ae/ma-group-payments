@@ -18926,13 +18926,19 @@ var api_default = async (req, context) => {
     const out = { at: now(), facebook: null, instagram: null, linkedin: null, whatsapp: null, errors: {} };
     const fbTok = meta?.pageToken || env0.metaToken, fbPage = meta?.pageId || env0.fbPageId, igId = meta?.igUserId || env0.igUserId;
     if (fbTok && fbPage) {
+      let step = "page";
       try {
         const pg = await graphCall(`${GRAPH_API}/${fbPage}?fields=name,fan_count,followers_count,link,picture{url},category`, null, fbTok);
-        const ps = await graphCall(`${GRAPH_API}/${fbPage}/posts?fields=id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares&limit=12`, null, fbTok);
+        step = "posts";
+        let ps;
+        try { ps = await graphCall(`${GRAPH_API}/${fbPage}/published_posts?fields=id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares&limit=12`, null, fbTok); }
+        catch (e1) { try { ps = await graphCall(`${GRAPH_API}/${fbPage}/posts?fields=id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares&limit=12`, null, fbTok); } catch (e2) { ps = { data: [] }; out.errors.facebookPosts = e2.message; } }
         out.facebook = { name: pg.name, fans: pg.fan_count, followers: pg.followers_count, link: pg.link, picture: pg.picture?.data?.url || "", category: pg.category,
           posts: (ps.data || []).map((x) => ({ id: x.id, text: x.message || "", at: x.created_time, url: x.permalink_url, image: x.full_picture || "", likes: x.likes?.summary?.total_count || 0, comments: x.comments?.summary?.total_count || 0, shares: x.shares?.count || 0 })) };
       } catch (e) {
-        out.errors.facebook = e.message;
+        out.errors.facebook = `[${step}] ` + e.message;
+        // token diagnostics: which page the token is scoped to, and granular page grants
+        try { const e0 = mktEnv(); if (e0.metaAppId && e0.metaAppSecret) { const dbg = await fetch(`${GRAPH_API}/debug_token?input_token=${encodeURIComponent(fbTok)}&access_token=${encodeURIComponent(e0.metaAppId + "|" + e0.metaAppSecret)}`).then((r) => r.json()); const dd = dbg.data || {}; out.errors.facebookToken = { type: dd.type, appId: dd.app_id, profileId: dd.profile_id, scopes: dd.scopes, granular: dd.granular_scopes, pageUsed: fbPage, pageName: meta?.pageName, pagesSeen: (meta?.pages || []).map((p) => p.name + " (" + p.id + ")") }; } } catch {}
         // say exactly which permissions the sign-in granted / declined
         try { if (meta?.userToken) { const pm = await graphCall(`${GRAPH_API}/me/permissions`, null, meta.userToken); const g = (pm.data || []).filter((x) => x.status === "granted").map((x) => x.permission), dcl = (pm.data || []).filter((x) => x.status !== "granted").map((x) => x.permission); out.errors.facebookPerms = { granted: g, declined: dcl, missing: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"].filter((x) => !g.includes(x)) }; } } catch {}
       }
