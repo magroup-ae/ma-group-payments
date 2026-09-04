@@ -13297,15 +13297,18 @@ async function ensureInit() {
   // user must change the PIN at first login.
   // One-time (04/09/2026): custom domain — re-point the WhatsApp webhook subscription to
   // https://system.maagroup.ae (Meta does not follow the netlify.app → custom-domain redirect).
-  if (!settings.webhookV2 && process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.SITE_URL) {
+  if (!settings.webhookV3 && process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.SITE_URL) {
+    // Mark first, so Meta's verification GET (which also runs ensureInit) does not re-enter this block.
+    settings.webhookV3 = { at: now(), pending: true };
+    await s.setJSON("settings", settings);
     try {
       const cb = process.env.SITE_URL.replace(/\/+$/, "") + "/api/wa/webhook";
       const vt = process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
       const body = new URLSearchParams({ object: "whatsapp_business_account", callback_url: cb, verify_token: vt, fields: "messages", access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}` });
       const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.META_APP_ID}/subscriptions`, { method: "POST", body });
       const j = await r.json().catch(() => ({}));
-      settings.webhookV2 = { at: now(), cb, ok: !!j.success, resp: j };
-    } catch (e) { settings.webhookV2 = { at: now(), ok: false, error: e.message }; }
+      settings.webhookV3 = { at: now(), cb, ok: !!j.success, resp: j };
+    } catch (e) { settings.webhookV3 = { at: now(), ok: false, error: e.message }; }
     await s.setJSON("settings", settings);
   }
   if (!settings.staffV2) {
@@ -16141,7 +16144,7 @@ var api_default = async (req, context) => {
   }
   // WhatsApp webhook (public): verification handshake + inbound events.
   if (path === "wa/webhook" && req.method === "GET") {
-    if (url.searchParams.has("status")) { const w = settings.webhookV2 || null; return json(w ? { at: w.at, callback: w.cb, ok: w.ok, error: w.error || (w.resp && w.resp.error && w.resp.error.message) || "" } : { pending: true }); }
+    if (url.searchParams.has("status")) { const w = settings.webhookV3 || null; return json(w ? { at: w.at, callback: w.cb, ok: w.ok, error: w.error || (w.resp && w.resp.error && w.resp.error.message) || "" } : { pending: true }); }
     const vt = process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
     if (url.searchParams.get("hub.mode") === "subscribe" && vt && url.searchParams.get("hub.verify_token") === vt) return new Response(url.searchParams.get("hub.challenge") || "", { status: 200, headers: { "content-type": "text/plain" } });
     return err("Forbidden", 403);
