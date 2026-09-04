@@ -18969,7 +18969,12 @@ var api_default = async (req, context) => {
     const scopes = ["public_profile", "pages_show_list", "pages_manage_posts", "pages_read_engagement", "instagram_basic", "instagram_content_publish", "business_management"];
     const u = new URL("https://www.facebook.com/v20.0/dialog/oauth");
     u.searchParams.set("client_id", e.metaAppId); u.searchParams.set("redirect_uri", e.siteUrl + "/api/mkt/meta/callback");
-    u.searchParams.set("state", state); u.searchParams.set("scope", scopes.join(",")); u.searchParams.set("response_type", "code");
+    u.searchParams.set("state", state); u.searchParams.set("response_type", "code");
+    // "Facebook Login for Business" apps authorise through a login configuration
+    // (the permission set lives in the config), not a scope list.
+    const cfg = process.env.META_LOGIN_CONFIG_ID || "";
+    if (cfg) { u.searchParams.set("config_id", cfg); u.searchParams.set("override_default_response_type", "true"); }
+    else u.searchParams.set("scope", scopes.join(","));
     return json({ url: u.toString() });
   }
   if (path === "mkt/meta/disconnect" && req.method === "POST") {
