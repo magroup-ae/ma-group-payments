@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MA Group</title>
 <meta name="description" content="MA Group — Management System">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2">
@@ -63,12 +63,34 @@
   main { max-width:1180px; margin:0 auto; padding:16px; }
   .shell { margin-left:var(--sbw); transition:margin-left .18s ease; }
   @media (max-width:860px){
-    aside.sb { transform:translateX(-100%); width:238px; box-shadow:0 0 40px rgba(0,0,0,.3); }
-    body.sb-open aside.sb { transform:none; }
+    html, body { overflow-x:hidden; }
+    aside.sb { transform:translateX(-100%); width:min(280px,84vw); box-shadow:none; }
+    body.sb-open aside.sb { transform:none; box-shadow:0 0 40px rgba(0,0,0,.3); }
     body.sb-open .sb-mask { display:block; }
+    body.sb-collapsed aside.sb .lb, body.sb-collapsed aside.sb .grp, body.sb-collapsed aside.sb .nm, body.sb-collapsed aside.sb .sb-foot .txt { display:initial; }
+    body.sb-collapsed aside.sb button.nv { justify-content:flex-start; padding:10px 16px; }
+    aside.sb button.nv { padding:10px 16px; font-size:14px; }
     header.app, .shell { margin-left:0; }
     body.sb-collapsed { --sbw:0px; }
+    header.app { padding:0 10px; gap:8px; height:50px; }
+    header.app .t { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    header.app .u { font-size:11px; max-width:44vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    main { padding:10px; }
+    .card { padding:12px; border-radius:10px; }
+    /* wide tables scroll sideways inside their card instead of breaking the page */
+    .card { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .card table { min-width:max-content; }
+    .card th, .card td { white-space:nowrap; }
+    .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .kpi { padding:10px; } .kpi .v { font-size:17px; }
+    .grid { grid-template-columns:1fr; }
+    input, select, textarea { font-size:16px; padding:10px; }  /* 16px stops iOS auto-zoom */
+    .btn { padding:9px 12px; font-size:13px; min-height:40px; }
+    .flex > .right { margin-left:0; }
+    .hbar-row { grid-template-columns:90px 1fr auto; }
+    .login { width:min(360px,92vw); padding:26px 22px; }
   }
+  @supports (padding: env(safe-area-inset-bottom)) { aside.sb .sb-foot { padding-bottom:calc(9px + env(safe-area-inset-bottom)); } }
   @media print { aside.sb, header.app, .sb-mask { display:none !important; } .shell { margin-left:0 } }
   .card { background:#fff; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:16px 18px; margin-bottom:14px; }
   h2 { margin:2px 0 12px; font-size:16px; color:var(--navy); }
@@ -561,7 +583,7 @@ function render(){
   <div class="shell"><main id="main"></main></div>`;
   root.querySelectorAll("aside.sb button.nv").forEach(b=>b.onclick=async ()=>{
     if(b.dataset.v==="settings"){ if(!(await unlockSettings())) return; }
-    VIEW=b.dataset.v;CUR=null;render(); });
+    document.body.classList.remove("sb-open"); VIEW=b.dataset.v;CUR=null;render(); });
   // Wide screens: collapse to icons. Narrow screens: slide the menu in and out.
   $("#sbTog").onclick=()=>{
     if(window.innerWidth<=860){ document.body.classList.toggle("sb-open"); return; }
