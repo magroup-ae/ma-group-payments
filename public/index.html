@@ -4583,36 +4583,112 @@ async function vMarketing(){
   else if(MKT_TAB==="audiences") renderMktAudiences(el);
   else renderMktConnect(el);
 }
-// What the accounts look like right now — followers, latest posts, engagement.
+// Live channels: one dashboard across all channels + a dedicated page per channel.
+let LIVE_CH="dash", LIVE=null;
 async function renderMktLive(el,refresh){
-  el.innerHTML=`<div class="muted">Reading the live accounts…</div>`;
-  let d; try{ d=await api("mkt/live"+(refresh?"?refresh=1":"")); }catch(e){ el.innerHTML=`<div class="muted">${esc(e.message)}</div>`; return; }
-  const st=MKT.status, ago=(t)=>{ const m=Math.round((Date.now()-new Date(t))/6e4); return m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":dmy(t); };
-  const num0=(v)=>v==null?"—":Number(v).toLocaleString("en-AE");
-  const postCard=(p,ch)=>`<a href="${esc(p.url||"#")}" target="_blank" rel="noopener" style="display:block;border:1px solid #e3e6ee;border-radius:10px;overflow:hidden;background:#fff;text-decoration:none;color:inherit">
+  if(!LIVE||refresh){ el.innerHTML=`<div class="muted">Reading the live accounts…</div>`; try{ LIVE=await api("mkt/live"+(refresh?"?refresh=1":"")); }catch(e){ el.innerHTML=`<div class="muted">${esc(e.message)}</div>`; return; } }
+  if(!LIVE.leads){ try{ LIVE.leads=await api("mkt/leads"); }catch(e){ LIVE.leads={leads:[],contacts:[],kpi:{open:0,calls:0,today:0,contacts:0}}; } }
+  const d=LIVE, st=MKT.status;
+  const chips=[["dash","Dashboard"],["instagram","Instagram"],["facebook","Facebook"],["linkedin","LinkedIn"],["whatsapp","WhatsApp"],["email","E-mail"]];
+  el.innerHTML=`<div class="flex" style="flex-wrap:wrap;gap:6px;align-items:center">${chips.map(([v,l])=>`<button class="btn ${LIVE_CH===v?'gold':'ghost'}" data-lc="${v}" style="padding:5px 12px">${l}</button>`).join("")}
+    <span class="muted right" style="font-size:12px">Snapshot ${d.cached?"(cached, up to 10 min old)":"just now"} · ${new Date(d.at).toLocaleString("en-GB")}</span><button class="btn ghost" id="lvRefresh" style="padding:5px 12px">Refresh now</button></div><div id="lvBody" style="margin-top:12px"></div>`;
+  el.querySelectorAll("[data-lc]").forEach(b=>b.onclick=()=>{ LIVE_CH=b.dataset.lc; renderMktLive(el,false); });
+  $("#lvRefresh").onclick=()=>{ LIVE=null; renderMktLive(el,true); };
+  const body=$("#lvBody");
+  ({dash:liveDash,instagram:liveInstagram,facebook:liveFacebook,linkedin:liveLinkedIn,whatsapp:liveWhatsApp,email:liveEmail})[LIVE_CH](body,d,st);
+}
+const lvNum=(v)=>v==null?"—":Number(v).toLocaleString("en-AE");
+const lvAgo=(t)=>{ if(!t) return "—"; const m=Math.round((Date.now()-new Date(t))/6e4); return m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":dmy(t); };
+const lvKpi=(v,l,color)=>`<div class="kpi" style="min-width:150px${color?';border-top-color:'+color:''}"><div class="v">${typeof v==="number"?lvNum(v):v}</div><div class="l">${l}</div></div>`;
+const lvAvatar=(u,n,size)=>u?`<img src="${esc(u)}" style="width:${size||44}px;height:${size||44}px;border-radius:50%;object-fit:cover">`:`<div style="width:${size||44}px;height:${size||44}px;border-radius:50%;background:#1f3864;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${esc((n||"?")[0])}</div>`;
+function lvPostCard(p){ return `<a href="${esc(p.url||"#")}" target="_blank" rel="noopener" style="display:block;border:1px solid #e3e6ee;border-radius:10px;overflow:hidden;background:#fff;text-decoration:none;color:inherit">
      ${p.image?`<div style="height:150px;background:#f1f3f8 url('${esc(p.image)}') center/cover"></div>`:`<div style="height:60px;background:#f1f3f8"></div>`}
      <div style="padding:8px 10px;font-size:12px"><div style="height:34px;overflow:hidden;line-height:1.35">${esc((p.text||"").slice(0,110))||"<span class='muted'>(no caption)</span>"}</div>
-     <div class="muted" style="margin-top:6px;font-size:11px">${ago(p.at)} · ♥ ${num0(p.likes)} · 💬 ${num0(p.comments)}${p.shares!=null?" · ↗ "+num0(p.shares):""}</div></div></a>`;
-  const block=(title,head,posts,note)=>`<div class="card" style="margin:12px 0 0"><div class="flex" style="flex-wrap:wrap;gap:10px;align-items:center">${head}</div>${posts&&posts.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px">${posts.map(p=>postCard(p)).join("")}</div>`:`<div class="muted" style="margin-top:8px;font-size:12px">${note||"No posts found."}</div>`}</div>`;
-  const kpi=(v,l)=>`<div class="kpi" style="min-width:140px"><div class="v">${num0(v)}</div><div class="l">${l}</div></div>`;
-  const avatar=(u,n)=>u?`<img src="${esc(u)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`:`<div style="width:44px;height:44px;border-radius:50%;background:#1f3864;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${esc((n||"?")[0])}</div>`;
-  let h=`<div class="flex" style="gap:8px"><span class="muted" style="font-size:12px">Snapshot ${d.cached?"(cached, up to 10 min old)":"just now"} · ${new Date(d.at).toLocaleString("en-GB")}</span><button class="btn ghost right" id="lvRefresh">Refresh now</button></div>`;
-  // Instagram
-  const ig=d.instagram;
-  h+=block("Instagram", ig?`${avatar(ig.picture,ig.username)}<div><b>@${esc(ig.username)}</b><br><span class="muted" style="font-size:11.5px">${esc(ig.name||"")}${ig.website?" · "+esc(ig.website):""}</span></div><div class="kpis" style="margin:0;flex:1">${kpi(ig.followers,"Followers")}${kpi(ig.following,"Following")}${kpi(ig.mediaCount,"Posts")}</div>`:`<h3 style="margin:0">Instagram @magroup.ae</h3><span class="muted" style="font-size:12px">${d.errors.instagram?esc(d.errors.instagram):st.instagram&&st.instagram.ready?"connected — no data returned yet":"not connected — Connections → Connect Meta"}</span>`, ig?ig.posts:null, ig?"No media on the account yet.":"");
-  // Facebook
-  const fb=d.facebook;
-  h+=block("Facebook", fb?`${avatar(fb.picture,fb.name)}<div><b>${esc(fb.name)}</b><br><span class="muted" style="font-size:11.5px">${esc(fb.category||"")}${fb.link?` · <a href="${esc(fb.link)}" target="_blank" rel="noopener">open page</a>`:""}</span></div><div class="kpis" style="margin:0;flex:1">${kpi(fb.followers,"Followers")}${kpi(fb.fans,"Page likes")}${kpi(fb.posts.length,"Recent posts read")}</div>`:`<h3 style="margin:0">Facebook page</h3><span class="muted" style="font-size:12px">${d.errors.facebook?esc(d.errors.facebook):st.facebook&&st.facebook.ready?"connected — no data returned yet":"not connected — Connections → Connect Meta"}</span>`, fb?fb.posts:null, fb?"No posts on the page yet.":"");
-  // LinkedIn + WhatsApp
-  const li=d.linkedin, wa=d.whatsapp;
-  h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-    <div class="card" style="margin:0"><div class="flex" style="gap:10px;align-items:center">${li?avatar(li.picture,li.name):""}<div><b>LinkedIn</b><br><span class="muted" style="font-size:12px">${li?`${esc(li.name)} · posting as ${esc(li.mode)}${li.followers!=null?" · "+num0(li.followers)+" page followers":""}${li.expiresAt?" · token to "+dmy(li.expiresAt):""}`:d.errors.linkedin?esc(d.errors.linkedin):"not connected"}</span></div></div>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">LinkedIn's API does not return a member's own feed or follower numbers without the Community Management API; company-page followers and post statistics appear here once LinkedIn approves that access.</div></div>
-    <div class="card" style="margin:0"><b>WhatsApp Business</b><br><span class="muted" style="font-size:12px">${wa?`${esc(wa.name||"")} ${esc(wa.number||"")} · quality <b>${esc(wa.quality||"—")}</b> · sending tier ${esc(wa.tier||"—")}`:d.errors.whatsapp?esc(d.errors.whatsapp):"not connected"}</span>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">Quality rating and messaging tier come from Meta for the business number shared with the MA chatbot. Broadcast results per campaign are logged on each post.</div></div>
-  </div>`;
-  el.innerHTML=h;
-  $("#lvRefresh").onclick=()=>renderMktLive(el,true);
+     <div class="muted" style="margin-top:6px;font-size:11px">${lvAgo(p.at)} · ♥ ${lvNum(p.likes)} · 💬 ${lvNum(p.comments)}${p.shares!=null?" · ↗ "+lvNum(p.shares):""}</div></div></a>`; }
+function lvStats(posts){ const n=posts.length; const likes=posts.reduce((t,p)=>t+num(p.likes),0), comments=posts.reduce((t,p)=>t+num(p.comments),0); const best=posts.slice().sort((a,b)=>(num(b.likes)+num(b.comments))-(num(a.likes)+num(a.comments)))[0]; const last30=posts.filter(p=>Date.now()-new Date(p.at)<30*864e5).length; return {n,likes,comments,avg:n?Math.round((likes+comments)/n):0,best,last30}; }
+function lvOurPosts(ch){ return (MKT.posts||[]).filter(p=>p.channels.includes(ch)); }
+function lvOurTable(ch){ const rows=lvOurPosts(ch).slice(0,8); if(!rows.length) return `<div class="muted" style="font-size:12px">No posts planned for this channel in the system yet — use <b>+ New post</b>.</div>`;
+  return `<table><tr><th>ID</th><th>Title</th><th>When</th><th>Status</th><th>Result</th></tr>${rows.map(p=>`<tr class="click" data-open="${p.id}"><td>${esc(p.id)}</td><td>${esc(p.title)}</td><td>${mktWhen(p)}</td><td>${mktPill(p.status)}</td><td style="font-size:11.5px">${p.published&&p.published[ch]?'<b style="color:var(--green)">'+(p.published[ch].count!=null?"sent to "+p.published[ch].count:"published")+'</b>':p.failed&&p.failed[ch]?'<span style="color:var(--red)">'+esc(p.failed[ch].error)+'</span>':"—"}</td></tr>`).join("")}</table>`; }
+function lvWire(body){ body.querySelectorAll("[data-open]").forEach(x=>x.onclick=async e=>{ e.preventDefault(); await openMktPost(x.dataset.open); }); }
+function lvNotConnected(name,ch,d,st,extra){ return `<div class="card" style="margin:0"><h3 style="margin:0">${name}</h3><div class="muted" style="font-size:12px;margin-top:6px">${d.errors&&d.errors[ch]?esc(d.errors[ch])+" — press <b>Connections → Reconnect</b> and accept every permission.":st[ch]&&st[ch].ready?"connected — no data returned yet":"not connected — Connections tab"}${extra||""}</div></div>`; }
+function liveDash(body,d,st){
+  const ig=d.instagram, fb=d.facebook, li=d.linkedin, wa=d.whatsapp, ld=d.leads;
+  const igS=ig?lvStats(ig.posts):null, fbS=fb?lvStats(fb.posts):null;
+  const ours=MKT.posts||[]; const sched=ours.filter(p=>p.status==="Scheduled").length, review=ours.filter(p=>p.status==="Review").length, pub=ours.filter(p=>p.status==="Published").length;
+  const card=(ch,title,ok,lines,color)=>`<div class="card" style="margin:0;cursor:pointer;border-top:4px solid ${color}" data-lc2="${ch}"><div class="flex" style="align-items:center;gap:8px"><h3 style="margin:0">${title}</h3>${ok?'<span class="pill st-Paid">live</span>':'<span class="pill st-Draft">not connected</span>'}</div><div style="margin-top:8px;font-size:13px;line-height:1.7">${lines}</div></div>`;
+  body.innerHTML=`
+   <div class="kpis">
+     ${lvKpi(ig?ig.followers:"—","Instagram followers","#c13584")}
+     ${lvKpi(fb?fb.followers:"—","Facebook followers","#1877f2")}
+     ${lvKpi(li&&li.followers!=null?li.followers:(li?"✓":"—"),li&&li.followers!=null?"LinkedIn page followers":"LinkedIn "+(li?"connected":"not connected"),"#0a66c2")}
+     ${lvKpi(ld.kpi.open,"Open WhatsApp leads","#25d366")}
+     ${lvKpi(ld.kpi.calls,"Call requests waiting","var(--red)")}
+   </div>
+   <div class="kpis" style="margin-top:8px">
+     ${lvKpi((igS?igS.likes:0)+(fbS?fbS.likes:0),"Likes on recent posts (IG+FB)")}
+     ${lvKpi((igS?igS.comments:0)+(fbS?fbS.comments:0),"Comments on recent posts")}
+     ${lvKpi((igS?igS.last30:0)+(fbS?fbS.last30:0),"Posts published last 30 days")}
+     ${lvKpi(sched,"Scheduled in the system","var(--navy)")}
+     ${lvKpi(review,"Awaiting CEO approval","var(--gold)")}
+   </div>
+   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:14px">
+     ${card("instagram","Instagram",!!ig,ig?`<b>@${esc(ig.username)}</b> · ${lvNum(ig.followers)} followers · ${lvNum(ig.mediaCount)} posts<br>Last post ${ig.posts[0]?lvAgo(ig.posts[0].at):"—"} · avg ${igS.avg} interactions/post<br>Best recent: ♥ ${igS.best?lvNum(igS.best.likes):"—"} — ${esc((igS.best?igS.best.text:"").slice(0,50))}`:(d.errors.instagram?esc(d.errors.instagram):"Connect Meta on the Connections tab"),"#c13584")}
+     ${card("facebook","Facebook page",!!fb,fb?`<b>${esc(fb.name)}</b> · ${lvNum(fb.followers)} followers · ${lvNum(fb.fans)} likes<br>Last post ${fb.posts[0]?lvAgo(fb.posts[0].at):"—"} · avg ${fbS.avg} interactions/post`:(d.errors.facebook?"Permission missing — Reconnect Meta and accept all items":"Connect Meta on the Connections tab"),"#1877f2")}
+     ${card("linkedin","LinkedIn",!!li,li?`<b>${esc(li.name)}</b> · posting as ${esc(li.mode)}${li.followers!=null?" · "+lvNum(li.followers)+" page followers":""}<br>Token valid to ${li.expiresAt?dmy(li.expiresAt):"—"} · ${lvOurPosts("linkedin").length} post(s) planned here`:"Connect LinkedIn on the Connections tab","#0a66c2")}
+     ${card("whatsapp","WhatsApp Business",!!wa,wa?`<b>${esc(wa.name||"")}</b> ${esc(wa.number||"")} · quality <b>${esc(wa.quality||"—")}</b><br>${ld.kpi.open} open leads · ${ld.kpi.calls} call requests · ${ld.kpi.contacts} contacts logged<br>${ld.kpi.today} new lead(s) today`:"Not connected","#25d366")}
+     ${card("email","E-mail campaigns",true,`${lvOurPosts("email").length} campaign(s) in the system · ${lvOurPosts("email").filter(p=>p.published&&p.published.email).length} sent<br>Audiences: ${(MKT.audiences||[]).length} custom list(s) + clients, suppliers, staff<br>Sent from the company mailbox, one e-mail per recipient`,"#bf9000")}
+   </div>
+   <div class="muted" style="font-size:11.5px;margin-top:10px">Click a card for that channel's own page. ${pub} post(s) published through the system so far.</div>`;
+  body.querySelectorAll("[data-lc2]").forEach(c=>c.onclick=()=>{ LIVE_CH=c.dataset.lc2; renderMktLive(c.closest("#mkBody"),false); });
+}
+function liveInstagram(body,d,st){
+  const ig=d.instagram; if(!ig){ body.innerHTML=lvNotConnected("Instagram @magroup.ae","instagram",d,st); return; }
+  const S=lvStats(ig.posts);
+  body.innerHTML=`<div class="card" style="margin:0"><div class="flex" style="gap:12px;align-items:center;flex-wrap:wrap">${lvAvatar(ig.picture,ig.username,56)}<div><b style="font-size:16px">@${esc(ig.username)}</b><br><span class="muted" style="font-size:12px">${esc(ig.name||"")}${ig.website?" · <a href='"+esc(ig.website)+"' target='_blank' rel='noopener'>"+esc(ig.website)+"</a>":""}</span><br><span style="font-size:12px">${esc(ig.bio||"")}</span></div><a class="btn ghost right" href="https://www.instagram.com/${esc(ig.username)}/" target="_blank" rel="noopener">Open Instagram</a></div>
+    <div class="kpis" style="margin-top:12px">${lvKpi(ig.followers,"Followers","#c13584")}${lvKpi(ig.following,"Following")}${lvKpi(ig.mediaCount,"Total posts")}${lvKpi(S.last30,"Posts last 30 days")}${lvKpi(S.avg,"Avg interactions / recent post")}${lvKpi(S.likes,"Likes on last "+S.n)}${lvKpi(S.comments,"Comments on last "+S.n)}</div></div>
+   ${S.best?`<div class="card" style="margin:12px 0 0;background:#f8f9fc"><b>Best recent post:</b> ♥ ${lvNum(S.best.likes)} · 💬 ${lvNum(S.best.comments)} — <a href="${esc(S.best.url)}" target="_blank" rel="noopener">${esc((S.best.text||"").slice(0,120))}</a> <span class="muted">(${dmy(S.best.at)})</span></div>`:""}
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Latest posts on Instagram</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${ig.posts.map(lvPostCard).join("")}</div></div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Planned / published from the system — Instagram</h3>${lvOurTable("instagram")}</div>`;
+  lvWire(body);
+}
+function liveFacebook(body,d,st){
+  const fb=d.facebook; if(!fb){ body.innerHTML=lvNotConnected("Facebook page","facebook",d,st); return; }
+  const S=lvStats(fb.posts);
+  body.innerHTML=`<div class="card" style="margin:0"><div class="flex" style="gap:12px;align-items:center;flex-wrap:wrap">${lvAvatar(fb.picture,fb.name,56)}<div><b style="font-size:16px">${esc(fb.name)}</b><br><span class="muted" style="font-size:12px">${esc(fb.category||"")}</span></div>${fb.link?`<a class="btn ghost right" href="${esc(fb.link)}" target="_blank" rel="noopener">Open page</a>`:""}</div>
+    <div class="kpis" style="margin-top:12px">${lvKpi(fb.followers,"Followers","#1877f2")}${lvKpi(fb.fans,"Page likes")}${lvKpi(S.last30,"Posts last 30 days")}${lvKpi(S.avg,"Avg interactions / recent post")}${lvKpi(S.likes,"Likes on last "+S.n)}${lvKpi(S.comments,"Comments on last "+S.n)}</div></div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Latest posts on Facebook</h3>${fb.posts.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${fb.posts.map(lvPostCard).join("")}</div>`:'<div class="muted">No posts on the page yet.</div>'}</div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Planned / published from the system — Facebook</h3>${lvOurTable("facebook")}</div>`;
+  lvWire(body);
+}
+function liveLinkedIn(body,d,st){
+  const li=d.linkedin; if(!li){ body.innerHTML=lvNotConnected("LinkedIn","linkedin",d,st); return; }
+  body.innerHTML=`<div class="card" style="margin:0"><div class="flex" style="gap:12px;align-items:center;flex-wrap:wrap">${lvAvatar(li.picture,li.name,56)}<div><b style="font-size:16px">${esc(li.name)}</b><br><span class="muted" style="font-size:12px">Posting as <b>${esc(li.mode)}</b> · token valid to ${li.expiresAt?dmy(li.expiresAt):"—"}</span></div><a class="btn ghost right" href="https://www.linkedin.com/company/ma-group/" target="_blank" rel="noopener">Open LinkedIn</a></div>
+    <div class="kpis" style="margin-top:12px">${lvKpi(li.followers!=null?li.followers:"—","Company-page followers","#0a66c2")}${lvKpi(lvOurPosts("linkedin").length,"Posts planned in the system")}${lvKpi(lvOurPosts("linkedin").filter(p=>p.published&&p.published.linkedin).length,"Published via the system")}</div>
+    <div class="muted" style="font-size:11.5px;margin-top:8px">${li.mode==="company page"?"Company-page mode is active.":"LinkedIn's API does not return a member's own feed or follower numbers. Company-page followers, post statistics and page posting switch on automatically once LinkedIn approves the Community Management API for the <b>MA Group Company Page</b> app."}</div></div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Planned / published from the system — LinkedIn</h3>${lvOurTable("linkedin")}</div>`;
+  lvWire(body);
+}
+function liveWhatsApp(body,d,st){
+  const wa=d.whatsapp, ld=d.leads; if(!wa){ body.innerHTML=lvNotConnected("WhatsApp Business","whatsapp",d,st); return; }
+  const recent=ld.leads.slice(0,8), contacts=ld.contacts.slice(0,10);
+  const when=(t)=>t?new Date(t).toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+  body.innerHTML=`<div class="card" style="margin:0"><div class="flex" style="gap:12px;align-items:center;flex-wrap:wrap"><div style="width:56px;height:56px;border-radius:50%;background:#25d366;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px">WA</div><div><b style="font-size:16px">${esc(wa.name||"MA Group")}</b> <span class="muted">${esc(wa.number||"")}</span><br><span class="muted" style="font-size:12px">Quality <b>${esc(wa.quality||"—")}</b> · messaging tier ${esc(wa.tier||"—")} · name status ${esc(wa.nameStatus||"—")}</span></div><button class="btn ghost right" id="lvGoLeads">Open leads page</button></div>
+    <div class="kpis" style="margin-top:12px">${lvKpi(ld.kpi.calls,"Call requests waiting","var(--red)")}${lvKpi(ld.kpi.open,"Open leads","var(--gold)")}${lvKpi(ld.kpi.today,"New leads today")}${lvKpi(ld.kpi.contacts,"Contacts logged")}${lvKpi(lvOurPosts("whatsapp").length,"Broadcasts planned")}${lvKpi(lvOurPosts("whatsapp").reduce((t,p)=>t+num(p.published&&p.published.whatsapp&&p.published.whatsapp.count),0),"Broadcast messages sent")}</div></div>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+    <div class="card" style="margin:0"><h3 style="margin:0 0 6px">Latest leads</h3>${recent.length?`<table>${recent.map(l=>`<tr><td>${when(l.createdAt)}</td><td><b>${esc(l.name||"+"+l.phone)}</b></td><td>${l.kind==="Agent call requested"?'<span class="pill st-Rejected">📞 call</span>':'<span class="pill st-Issued">enquiry</span>'}</td><td>${esc(l.status)}</td></tr>`).join("")}</table>`:'<div class="muted" style="font-size:12px">No leads yet — they appear when a customer asks for a call or a quotation.</div>'}</div>
+    <div class="card" style="margin:0"><h3 style="margin:0 0 6px">Recent conversations</h3>${contacts.length?`<table>${contacts.map(c=>`<tr><td>${when(c.lastAt)}</td><td><b>${esc(c.name||"+"+c.phone)}</b></td><td style="font-size:12px">${esc((c.lastText||"").slice(0,60))}</td></tr>`).join("")}</table>`:'<div class="muted" style="font-size:12px">No conversations logged yet (logging starts from the webhook switch).</div>'}</div>
+   </div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Broadcasts from the system — WhatsApp</h3>${lvOurTable("whatsapp")}</div>`;
+  $("#lvGoLeads").onclick=()=>{ MKT_TAB="leads"; vMarketing(); };
+  lvWire(body);
+}
+function liveEmail(body,d,st){
+  const ours=lvOurPosts("email"); const sent=ours.filter(p=>p.published&&p.published.email);
+  body.innerHTML=`<div class="card" style="margin:0"><div class="flex" style="gap:12px;align-items:center"><div style="width:56px;height:56px;border-radius:50%;background:#bf9000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px">@</div><div><b style="font-size:16px">E-mail campaigns</b><br><span class="muted" style="font-size:12px">Sent from the company mailbox configured in Settings → Email notifications · one individual e-mail per recipient, no addresses exposed</span></div><button class="btn ghost right" id="lvGoAud">Audiences</button></div>
+    <div class="kpis" style="margin-top:12px">${lvKpi(ours.length,"Campaigns in the system")}${lvKpi(sent.length,"Campaigns sent")}${lvKpi(sent.reduce((t,p)=>t+num(p.published.email.count),0),"E-mails delivered")}${lvKpi((MKT.audiences||[]).length,"Custom audience lists")}</div></div>
+   <div class="card" style="margin:12px 0 0"><h3 style="margin:0 0 8px">Campaigns</h3>${lvOurTable("email")}</div>`;
+  $("#lvGoAud").onclick=()=>{ MKT_TAB="audiences"; vMarketing(); };
+  lvWire(body);
 }
 // Leads raised from the WhatsApp number (customer asked for a person / a call, or a quotation).
 let LEAD_FILTER="open";
