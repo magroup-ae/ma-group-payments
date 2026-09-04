@@ -209,6 +209,7 @@
   .cert .sec { background:var(--blue); color:#fff; font-weight:700; padding:4px 7px; font-size:10.8px; letter-spacing:.3px; }
   .cert .sec.navy { background:var(--navy); }
   .cert .tot { background:#eef2f8; font-weight:700; }
+  table tr.tot td { background:#eef2f8; font-weight:700; }
   .cert .pay { background:var(--navy); color:#fff; font-weight:800; font-size:12px; }
   .cert .pay td { border-color:var(--navy); color:#fff; }
   .cert .lab { font-weight:600; color:#33415a; width:34%; background:#fafbfd; }
@@ -467,6 +468,7 @@ const ICONS={
   expenses:ICO('<path d="M20 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6"/><circle cx="17" cy="14" r="1.4"/>'),
   pnl:ICO('<path d="M3 21V3M3 21h18"/><path d="m7 15 4-5 3 3 5-7"/><path d="M19 6h0.01M15 6h4v4"/>'),
   budget:ICO('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>'),
+  ops:ICO('<circle cx="9" cy="7" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M17 4v4M15 6h4"/><path d="M15 13h6M15 17h6M15 21h4"/>'),
   assets:ICO('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
   hocerts:ICO('<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>'),
   announce:ICO('<path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6"/>'),
@@ -497,7 +499,9 @@ function render(){
     ["Finance & control", [
       ["expenses","Expenses"],
       ["pnl","P&L"],
-      ["budget","Budget"],
+      ["budget","Budget"]]],
+    ["Operations & HR", [
+      ["ops","Operations cost"],
       ["assets","Assets"]]],
     ["Delivery & aftercare", [
       ...(has("CEO","PM","QS")?[["hocerts","Completion / DLP"]]:[])]],
@@ -540,7 +544,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
+  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, ops:vOps, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -3034,7 +3038,11 @@ function renderPnl(d){
         <tr style="background:#eef2f8;font-weight:700"><td>GROSS PROFIT</td><td class="num" style="color:${gColor}">${fmt(d.grossProfit)} · ${pctv(d.grossProfit)}</td></tr>
         <tr><td class="lab">Less: Indirect costs (site staff, prof. fees)</td><td class="num">(${fmt(indirect)})</td></tr>
         <tr style="background:#f3f6fb;font-weight:600"><td>OPERATING PROFIT</td><td class="num">${fmt(d.operatingProfit)} · ${pctv(d.operatingProfit)}</td></tr>
-        <tr><td class="lab">Less: Overheads${d.hqCost?" (incl. MA HQ "+fmt(d.hqCost)+")":""}</td><td class="num">(${fmt(overhead)})</td></tr>
+        ${d.allocApplied?`<tr><td class="lab">Less: Overheads — logged on the project</td><td class="num">(${fmt(overhead-num(d.allocatedOps))})</td></tr>
+        <tr><td class="lab">Less: Allocated operations cost (HQ share — payroll, rent, telecom, depreciation…) <span class="muted" style="font-size:11px">${(d.allocMonths||[]).length} month${(d.allocMonths||[]).length===1?"":"s"}</span></td><td class="num">(${fmt(d.allocatedOps)})</td></tr>`:
+        `<tr><td class="lab">Less: Overheads${d.hqCost?" (incl. MA HQ "+fmt(d.hqCost)+")":""}</td><td class="num">(${fmt(overhead)})</td></tr>`}
+        ${(!d.project&&num(d.allocatedOps)>0)?`<tr><td class="lab" style="padding-left:18px;color:#7a8494;font-size:12px">memo — of which HQ operations cost allocated to project P&amp;Ls</td><td class="num" style="color:#7a8494">${fmt(d.allocatedOps)}</td></tr>`:""}
+        ${(d.project&&d.project!=="MA HQ – Operations"&&!d.allocApplied)?`<tr><td colspan="2" style="background:#fff8e6;border-left:4px solid #bf9000;font-size:11.5px;color:#7a5c00">⚠ No HQ operations cost has been allocated to this project yet — its net profit excludes the company's running cost. Close the month in <b>Operations cost → Allocation</b>.</td></tr>`:""}
         <tr style="background:#e7efe9;font-weight:800"><td>NET PROFIT</td><td class="num" style="color:${nColor}">${fmt(d.netProfit)} · ${pctv(d.netProfit)}</td></tr>
        </table>
        <div class="muted" style="font-size:11px;margin-top:6px"><b>Basis: UAE progress billing</b> — revenue is the value of work certified (ex-VAT), <b>including certified materials on site</b>, recognised as the client certifies each IPC. Retention is <b>not</b> deducted here — it is revenue earned but withheld (a receivable, section B). Advances are <b>not</b> revenue — they are a liability (section C). Where cost exceeds certified revenue early on, it is a <b>timing effect</b> (procurement &amp; prelims incurred ahead of certification) — see Work-in-Progress below.</div></div>
@@ -3197,6 +3205,249 @@ async function parseLpoPdf(file){
   }
   items.forEach((it,i)=>{ const m=it.description.match(/\(Per\s+([^)]+)\)/i); it.unit=m?m[1].trim():""; it.ref=String(i+1); });
   return items.filter(it=>it.description&&it.rate>0);
+}
+/* ---------- Operations cost / HR management ---------- */
+let OPS_TAB="overview", OPS_MONTH=new Date().toISOString().slice(0,7), OPS=null, OPS_STAFF_EDIT=null;
+const opsCan={ edit:()=>["CEO","Accounts","Secretary"].includes(ME.role), payroll:()=>["CEO","Accounts"].includes(ME.role), post:()=>["CEO","Accounts"].includes(ME.role) };
+function monthLabel(m){ if(!m) return "—"; const [y,mo]=m.split("-"); return new Date(Date.UTC(+y,+mo-1,1)).toLocaleString("en-GB",{month:"long",year:"numeric",timeZone:"UTC"}); }
+async function vOps(){
+  const sub=(k,l)=>`<button class="btn ${OPS_TAB===k?'gold':'ghost'}" data-tab="${k}">${l}</button>`;
+  $("#main").innerHTML=`<div class="card"><div class="flex" style="flex-wrap:wrap;gap:8px">
+     <h2 style="margin:0">Operations cost &amp; HR</h2>
+     <span class="muted">payroll · fixed expenses · depreciation → HQ pool → allocated to every project P&amp;L</span>
+     <div class="right flex" style="gap:6px;flex-wrap:wrap">
+       <label class="muted" style="font-size:12px">Month</label><input type="month" id="opsMonth" value="${OPS_MONTH}" style="max-width:170px">
+       ${sub("overview","Overview")}${sub("payroll","Payroll & staff")}${sub("fixed","Fixed expenses")}${sub("alloc","Allocation")}${sub("ytd","Year view")}
+     </div></div>
+     <div id="opsBody" class="muted" style="margin-top:12px">Loading…</div></div>`;
+  $("#opsMonth").onchange=()=>{ OPS_MONTH=$("#opsMonth").value||OPS_MONTH; OPS_STAFF_EDIT=null; vOps(); };
+  $("#main").querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ OPS_TAB=b.dataset.tab; OPS_STAFF_EDIT=null; vOps(); });
+  if(OPS_TAB==="ytd") return renderOpsYtd();
+  try{ OPS=await api("ops?month="+OPS_MONTH); }catch(e){ $("#opsBody").textContent=e.message; return; }
+  const el=$("#opsBody"); el.classList.remove("muted");
+  if(OPS_TAB==="overview") renderOpsOverview(el);
+  else if(OPS_TAB==="payroll") renderOpsPayroll(el);
+  else if(OPS_TAB==="fixed") renderOpsFixed(el);
+  else if(OPS_TAB==="alloc") renderOpsAlloc(el);
+}
+async function opsPost(kind,body,label){
+  try{ const r=await api(kind,{method:"POST",body}); toast(label+(r.total!=null?" · AED "+fmt(r.total):"")); vOps(); }
+  catch(e){ toast(e.message); }
+}
+function renderOpsOverview(el){
+  const d=OPS, m=OPS_MONTH, ml=monthLabel(m);
+  const pay=d.payroll, dep=d.depreciation;
+  const step=(n,title,state,detail,btn)=>`<tr><td style="width:34px;text-align:center"><span class="pill" style="background:${state==="done"?"var(--green)":state==="todo"?"var(--gold)":"#8a94a6"}">${n}</span></td><td><b>${title}</b><div class="muted" style="font-size:11.5px">${detail}</div></td><td class="num" style="white-space:nowrap">${btn||""}</td></tr>`;
+  const payState=!pay?"none":pay.posted?"done":"todo";
+  const fixState=d.fixedExpected<=0?"none":d.fixedPosted+0.01>=d.fixedExpected?"done":"todo";
+  const depState=dep.expected<=0?"none":dep.isPosted?"done":"todo";
+  const allocState=d.alloc?"done":(d.pool>0?"todo":"none");
+  const otherHQ=num(d.bySource.other);
+  el.innerHTML=`
+   <div class="kpigrp">${esc(ml)} · HQ operations pool (posted to the cost ledger)</div>
+   <div class="kpis">
+     <div class="kpi" style="border-top-color:var(--navy)"><div class="v">AED ${fmt(d.pool)}</div><div class="l">HQ pool — total operations cost</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.bySource["ops-payroll"])}</div><div class="l">Payroll — HQ / unassigned staff${pay?` <span class="muted">(full payroll ${fmt(pay.totals.cost)})</span>`:""}</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.bySource["ops-fixed"])}</div><div class="l">Fixed expenses (rent, telecom, utilities…)</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.bySource["ops-depreciation"])}</div><div class="l">Depreciation (non-cash)</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(otherHQ)}</div><div class="l">Other HQ expenses (logged manually)</div></div>
+     <div class="kpi" style="border-top-color:${d.alloc?'var(--green)':'var(--gold)'}"><div class="v" style="color:${d.alloc?'var(--green)':'var(--gold)'}">AED ${fmt(d.alloc?d.alloc.total:0)}</div><div class="l">${d.alloc?"Allocated to projects · "+esc((d.bases.find(b=>b.code===d.alloc.basis)||{}).name||d.alloc.basis):"Not yet allocated to projects"}</div></div>
+   </div>
+   <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-top:14px">
+    <div class="card" style="margin:0"><h3>Monthly close — ${esc(ml)}</h3>
+     <table>
+      ${step(1,"Import payroll from the HR system",payState==="none"?"todo":"done",pay?`${pay.totals.count} staff · employer cost AED ${fmt(pay.totals.cost)} · imported ${dmy(pay.importedAt)} (${esc(pay.source)})`:"Export the salary list from the attendance / HR system (Payroll → Export Excel) and import it here, or pull it live.",`<button class="btn ghost" data-go="payroll">Open</button>`)}
+      ${step(2,"Assign staff to projects & post payroll",payState,pay?`Assigned to sites AED ${fmt(pay.totals.assigned)} · stays in HQ AED ${fmt(pay.totals.hq)}${pay.posted?" · posted":" · <b>not posted</b>"}`:"Waiting for payroll import.",pay&&opsCan.post()?`<button class="btn ${pay.posted?'ghost':'gold'}" data-post="ops/payroll/post">${pay.posted?"Re-post":"Post payroll"}</button>`:"")}
+      ${step(3,"Post fixed expenses (monthly accrual)",fixState,`${d.fixed.filter(f=>f.live).length} live items · expected AED ${fmt(d.fixedExpected)} · posted AED ${fmt(d.fixedPosted)}`,d.fixedExpected>0&&opsCan.post()?`<button class="btn ${fixState==="done"?'ghost':'gold'}" data-post="ops/fixed/post">Post fixed</button>`:`<button class="btn ghost" data-go="fixed">Register</button>`)}
+      ${step(4,"Post depreciation of the asset register",depState,`${dep.rows.length} assets depreciating · this month AED ${fmt(dep.expected)}${dep.isPosted?" · posted AED "+fmt(dep.posted):""}`,dep.expected>0&&opsCan.post()?`<button class="btn ${dep.isPosted?'ghost':'gold'}" data-post="ops/depreciation/post">${dep.isPosted?"Re-post":"Post depreciation"}</button>`:`<button class="btn ghost" data-go-view="assets">Assets</button>`)}
+      ${step(5,"Allocate the HQ pool to projects",allocState,d.alloc?`Posted ${dmy(d.alloc.postedAt)} by ${esc(d.alloc.postedBy)} — flows into each project P&amp;L as “Allocated operations cost”.`:"Choose the basis (revenue, cost, contract value, staff time or manual %) and post — every project P&amp;L then carries its share.",`<button class="btn ${d.alloc?'ghost':'gold'}" data-go="alloc">${d.alloc?"View":"Allocate"}</button>`)}
+     </table>
+     <div class="muted" style="font-size:11px;margin-top:8px">Group P&amp;L already contains every HQ line (no double count). Project P&amp;L adds the posted allocation as overhead. Cash is untouched — depreciation is non-cash and salaries are paid through the HR / WPS process.</div>
+    </div>
+    <div class="card" style="margin:0"><h3>HQ cost lines — ${esc(ml)}</h3>
+     ${d.hqExpenses.length?`<div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table><tr><th>Date</th><th>Description</th><th>Source</th><th class="num">AED</th></tr>
+      ${d.hqExpenses.map(e=>`<tr><td>${dmy(e.date)}</td><td>${esc(e.description||e.supplier||"—")}</td><td><span class="pill" style="background:${e.source==="ops-payroll"?"var(--navy)":e.source==="ops-fixed"?"#5b6b8a":e.source==="ops-depreciation"?"#8a94a6":"var(--gold)"}">${esc(e.source==="ops-payroll"?"payroll":e.source==="ops-fixed"?"fixed":e.source==="ops-depreciation"?"depreciation":"manual")}</span></td><td class="num">${fmt(e.amount)}</td></tr>`).join("")}
+      <tr class="tot"><td colspan="3">HQ POOL</td><td class="num">${fmt(d.pool)}</td></tr></table></div>`:`<div class="muted">No HQ expenses dated in ${esc(ml)} yet.</div>`}
+     <div class="muted" style="font-size:11px;margin-top:8px">Any other company expense (e.g. a one-off HQ purchase) is logged in <b>Expenses</b> against <b>${esc(d.project)}</b> and joins this pool automatically.</div>
+    </div>
+   </div>
+   ${dep.rows.length?`<div class="card" style="margin:14px 0 0"><h3>Depreciation schedule — ${esc(ml)}</h3><div style="overflow-x:auto"><table><tr><th>Asset</th><th>Description</th><th>Category</th><th class="num">Cost</th><th class="num">This month</th></tr>
+     ${dep.rows.map(r=>`<tr><td>${esc(r.code)}</td><td>${esc(r.description)}</td><td>${esc(r.cat)}</td><td class="num">${fmt(r.cost)}</td><td class="num">${fmt(r.month)}</td></tr>`).join("")}
+     <tr class="tot"><td colspan="4">TOTAL</td><td class="num">${fmt(dep.expected)}</td></tr></table></div>
+     <div class="muted" style="font-size:11px;margin-top:6px">Straight-line over each asset's useful life (set per asset in the Asset Registry), net of residual value, from the purchase month. Disposed / sold / written-off assets stop depreciating.</div></div>`:""}`;
+  el.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ OPS_TAB=b.dataset.go; vOps(); });
+  el.querySelectorAll("[data-go-view]").forEach(b=>b.onclick=()=>{ VIEW=b.dataset.goView; render(); });
+  el.querySelectorAll("[data-post]").forEach(b=>b.onclick=()=>{ const k=b.dataset.post; const lbl=k.includes("payroll")?"Payroll posted":k.includes("fixed")?"Fixed expenses posted":"Depreciation posted"; if(!confirm("Post to the cost ledger for "+monthLabel(m)+"?")) return; opsPost(k,{month:m},lbl); });
+}
+function renderOpsPayroll(el){
+  const d=OPS, m=OPS_MONTH, ml=monthLabel(m), pay=d.payroll;
+  const projOpts=`<option value="">—</option>`+d.projects.map(p=>`<option>${esc(p)}</option>`).join("");
+  el.innerHTML=`
+   <div class="flex" style="flex-wrap:wrap;gap:8px">
+     ${opsCan.payroll()?`<label class="btn gold" style="cursor:pointer">Import salary list (CSV / Excel)<input type="file" id="prFile" accept=".csv,.xlsx,.xls" style="display:none"></label>
+     <button class="btn ghost" id="prPull" title="${d.hrLink.configured?"Pull this month's payroll from "+esc(d.hrLink.url):"Set HR_API_KEY in Netlify to enable the live link"}">Pull from HR system${d.hrLink.configured?"":" (not linked)"}</button>`:""}
+     ${pay?`<button class="btn ghost" id="prCsv">Export CSV</button>`:""}
+     ${pay&&opsCan.post()?`<button class="btn ${pay.posted?'ghost':'gold'}" id="prPost">${pay.posted?"Re-post payroll to ledger":"Post payroll to ledger"}</button>`:""}
+     <span class="muted right" style="font-size:12px">Source of truth: the attendance / HR system (${esc(d.hrLink.url)}). Import the month's salary list here; nothing is re-typed.</span>
+   </div>
+   ${!pay?`<div class="muted" style="margin-top:12px">No payroll imported for <b>${esc(ml)}</b>. In the HR system open <b>Payroll → ${esc(ml)}</b>, press <b>Export Excel</b> (Salary_List_${m}.csv) and import that file here. Columns recognised: ID, Employee, Role, Company, Basic, Housing, Transport, Other, Gross, Overtime, Commission, Deductions, NET.</div>`:pay.restricted?`<div class="muted" style="margin-top:12px">Payroll detail is restricted to CEO / Accounts. Totals: ${pay.totals.count} staff · employer cost AED ${fmt(pay.totals.cost)}.</div>`:`
+   <div class="kpis" style="margin-top:12px">
+     <div class="kpi"><div class="v">${pay.totals.count}</div><div class="l">Staff on payroll · ${esc(ml)}</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(pay.totals.cost)}</div><div class="l">Employer cost (gross + OT + commission)</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(pay.totals.net)}</div><div class="l">Net payable · WPS ${fmt(pay.totals.wps)} · cash ${fmt(pay.totals.cash)}</div></div>
+     <div class="kpi" style="border-top-color:var(--navy)"><div class="v">AED ${fmt(pay.totals.assigned)}</div><div class="l">Charged to projects (assigned staff)</div></div>
+     <div class="kpi" style="border-top-color:var(--gold)"><div class="v">AED ${fmt(pay.totals.hq)}</div><div class="l">Stays in HQ pool (unassigned share)</div></div>
+   </div>
+   <div class="muted" style="font-size:11.5px;margin:8px 0">Imported ${dmy(pay.importedAt)} by ${esc(pay.importedBy)} (${esc(pay.source)}${pay.fileName?" · "+esc(pay.fileName):""}) · ${pay.posted?'<b style="color:var(--green)">posted to the cost ledger</b>':'<b style="color:var(--gold)">not yet posted</b>'}. Click a row to assign the employee to one or more projects (the % of their time); the remainder stays in HQ and is allocated with the pool.</div>
+   <div style="overflow-x:auto"><table>
+    <tr><th>ID</th><th>Employee</th><th>Role</th><th class="num">Gross</th><th class="num">OT</th><th class="num">Comm.</th><th class="num">Deduct.</th><th class="num">Net</th><th>Paid by</th><th class="num">Employer cost</th><th>Assigned to</th><th>Cost type</th><th class="num">To projects</th><th class="num">HQ</th></tr>
+    ${pay.rows.map(r=>`<tr class="click" data-emp="${esc(r.empId)}"><td>${esc(r.empId)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.role||"—")}</td><td class="num">${fmt(r.gross)}</td><td class="num">${fmt(r.ot)}</td><td class="num">${fmt(r.commission)}</td><td class="num">${fmt(r.deductions)}</td><td class="num">${fmt(r.net)}</td><td>${esc(r.payMethod||"WPS")}</td><td class="num"><b>${fmt(r.cost)}</b></td><td>${r.splits.length?r.splits.map(s=>`${esc(s.project)} <span class="muted">${fmt(s.pct*100)}%</span>`).join("<br>"):'<span class="muted">HQ (unassigned)</span>'}</td><td>${esc(r.costType)}</td><td class="num">${fmt(r.assigned)}</td><td class="num">${fmt(r.hqShare)}</td></tr>
+      ${OPS_STAFF_EDIT===r.empId?`<tr><td colspan="14" style="background:#f4f6fb"><div class="flex" style="flex-wrap:wrap;gap:8px;align-items:end">
+        ${[0,1,2].map(i=>`<div><label class="muted" style="font-size:11px">Project ${i+1}</label><br><select class="sp-proj" style="max-width:240px">${projOpts}</select></div><div><label class="muted" style="font-size:11px">% of time</label><br><input class="sp-pct" type="number" min="0" max="100" step="5" style="width:80px" value="${r.splits[i]?fmt(r.splits[i].pct*100).replace(/\.00$/,""):""}"></div>`).join("")}
+        <div><label class="muted" style="font-size:11px">Cost type on the project</label><br><select id="sp_ct">${d.staffCostTypes.map(t=>`<option ${t===r.costType?"selected":""}>${esc(t)}</option>`).join("")}</select></div>
+        <button class="btn gold" id="sp_save">Save assignment</button><button class="btn ghost" id="sp_cancel">Cancel</button>
+        <span class="muted" style="font-size:11px">Site staff (engineers, foremen, labour) → assign 100% to their project. Office / management → leave in HQ or split. Applies to every month until changed.</span></div></td></tr>`:""}`).join("")}
+    <tr class="tot"><td colspan="3">TOTAL · ${pay.totals.count} staff</td><td class="num">${fmt(pay.totals.gross)}</td><td class="num">${fmt(pay.totals.ot)}</td><td class="num">${fmt(pay.totals.commission)}</td><td class="num">${fmt(pay.totals.deductions)}</td><td class="num">${fmt(pay.totals.net)}</td><td></td><td class="num">${fmt(pay.totals.cost)}</td><td colspan="2"></td><td class="num">${fmt(pay.totals.assigned)}</td><td class="num">${fmt(pay.totals.hq)}</td></tr>
+   </table></div>
+   ${Object.keys(pay.byProject).length?`<div class="card" style="margin:14px 0 0"><h3>Payroll charged to projects — ${esc(ml)}</h3><table><tr><th>Project</th><th class="num">AED</th></tr>${Object.entries(pay.byProject).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<tr><td>${esc(p)}</td><td class="num">${fmt(v)}</td></tr>`).join("")}<tr><td>MA HQ (unassigned → allocated with the pool)</td><td class="num">${fmt(pay.totals.hq)}</td></tr></table></div>`:""}`}`;
+  const fi=$("#prFile"); if(fi) fi.onchange=()=>importPayrollFile(fi.files[0]);
+  const pl=$("#prPull"); if(pl) pl.onclick=async()=>{ if(!d.hrLink.configured){ alert("Live link not configured.\n\nIn Netlify → ma-group-payments → Site configuration → Environment variables add:\n  HR_API_KEY = the HR system's admin / master key\n  HR_API_URL = https://ma-group-attendance.netlify.app (optional)\n\nUntil then import the salary list file exported from the HR system."); return; } try{ toast("Contacting HR system…"); const r=await api("ops/payroll/pull",{method:"POST",body:{month:m}}); toast("Imported "+r.count+" staff from HR system"); vOps(); }catch(e){ alert(e.message); } };
+  const pc=$("#prCsv"); if(pc) pc.onclick=()=>exportCsv("MA_Payroll_"+m+".csv",["ID","Employee","Role","Company","Basic","Housing","Transport","Other","Gross","Overtime","Commission","Deductions","Net","Paid by","Employer cost","Assigned to","Cost type","To projects","HQ share"],pay.rows.map(r=>[r.empId,r.name,r.role,r.company,r.basic,r.housing,r.transport,r.other,r.gross,r.ot,r.commission,r.deductions,r.net,r.payMethod,r.cost,r.splits.map(s=>s.project+" "+fmt(s.pct*100)+"%").join("; "),r.costType,r.assigned,r.hqShare]));
+  const pp=$("#prPost"); if(pp) pp.onclick=()=>{ if(!confirm("Post "+ml+" payroll to the cost ledger?\n\nStaff assigned to projects are charged to those projects; the rest goes to the HQ pool. Re-posting replaces the month's payroll lines.")) return; opsPost("ops/payroll/post",{month:m},"Payroll posted"); };
+  el.querySelectorAll("tr[data-emp]").forEach(tr=>tr.onclick=()=>{ if(!opsCan.edit()) return; OPS_STAFF_EDIT=OPS_STAFF_EDIT===tr.dataset.emp?null:tr.dataset.emp; renderOpsPayroll(el); });
+  if(OPS_STAFF_EDIT&&pay&&!pay.restricted){
+    const r=pay.rows.find(x=>x.empId===OPS_STAFF_EDIT); const sels=el.querySelectorAll(".sp-proj"), pcts=el.querySelectorAll(".sp-pct");
+    if(r) sels.forEach((s,i)=>{ if(r.splits[i]) s.value=r.splits[i].project; });
+    const sv=$("#sp_save"); if(sv) sv.onclick=async()=>{ const splits=[]; sels.forEach((s,i)=>{ if(s.value&&num(pcts[i].value)>0) splits.push({project:s.value,pct:num(pcts[i].value)}); }); try{ await api("ops/staff",{method:"POST",body:{empId:r.empId,name:r.name,role:r.role,company:r.company,splits,costType:$("#sp_ct").value}}); toast("Assignment saved"+(pay.posted?" — re-post payroll to update the ledger":"")); OPS_STAFF_EDIT=null; vOps(); }catch(e){ toast(e.message); } };
+    const cc=$("#sp_cancel"); if(cc) cc.onclick=()=>{ OPS_STAFF_EDIT=null; renderOpsPayroll(el); };
+  }
+}
+async function importPayrollFile(file){
+  if(!file) return;
+  try{
+    const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array",raw:true});
+    const sh=wb.Sheets[wb.SheetNames[0]]; const rr=XLSX.utils.sheet_to_json(sh,{header:1,raw:true,defval:""});
+    const hi=rr.findIndex(r=>r.some(c=>/employee|name/i.test(String(c)))&&r.some(c=>/gross|basic|net/i.test(String(c))));
+    if(hi<0) throw new Error("Header row not found — expected columns like ID, Employee, Gross, Overtime, Commission, Deductions, NET.");
+    const H=rr[hi].map(h=>String(h).trim().toLowerCase());
+    const col=(...names)=>{ for(const n of names){ const i=H.findIndex(h=>h===n||h.startsWith(n)); if(i>=0) return i; } return -1; };
+    const C={empId:col("id","emp"),name:col("employee","name"),role:col("role","position","job"),company:col("company","entity"),basic:col("basic"),housing:col("housing"),transport:col("transport"),other:col("other"),gross:col("gross"),ot:col("overtime","ot"),commission:col("commission"),deductions:col("deduction","total deduction"),net:col("net"),payMethod:col("paid by","pay method","paymethod")};
+    const g=(row,k)=>C[k]>=0?row[C[k]]:"";
+    const rows=rr.slice(hi+1).filter(r=>r.some(c=>c!=="")).map(r=>({empId:g(r,"empId"),name:g(r,"name"),role:g(r,"role"),company:g(r,"company"),basic:g(r,"basic"),housing:g(r,"housing"),transport:g(r,"transport"),other:g(r,"other"),gross:g(r,"gross"),ot:g(r,"ot"),commission:g(r,"commission"),deductions:g(r,"deductions"),net:g(r,"net"),payMethod:g(r,"payMethod")})).filter(r=>!/^total/i.test(String(r.empId))&&!/^total/i.test(String(r.name)));
+    if(!rows.length) throw new Error("No employee rows found in the file.");
+    const mm=(file.name.match(/(\d{4}-\d{2})/)||[])[1]; if(mm&&mm!==OPS_MONTH&&!confirm(`The file looks like ${monthLabel(mm)} but the selected month is ${monthLabel(OPS_MONTH)}. Import it as ${monthLabel(OPS_MONTH)} anyway?`)) return;
+    const r=await api("ops/payroll/import",{method:"POST",body:{month:OPS_MONTH,rows,fileName:file.name,source:"file"}});
+    toast(`Imported ${r.count} staff · employer cost AED ${fmt(r.cost)}`); vOps();
+  }catch(e){ alert("Import failed: "+e.message); }
+}
+function renderOpsFixed(el){
+  const d=OPS, m=OPS_MONTH, ml=monthLabel(m);
+  const live=d.fixed.filter(f=>f.live), retired=d.fixed.filter(f=>!f.live);
+  const row=f=>`<tr class="click" data-fx="${esc(f.id)}"><td>${esc(f.id)}</td><td><b>${esc(f.name)}</b>${f.vendor?`<div class="muted" style="font-size:11px">${esc(f.vendor)}${f.ref?" · "+esc(f.ref):""}</div>`:""}</td><td>${esc(f.cat)}</td><td>${esc(f.entity||"—")}</td><td>${esc(f.freq)}</td><td class="num">${fmt(f.amount)}</td><td class="num"><b>${fmt(f.monthly)}</b></td><td>${f.startDate?dmy(f.startDate):"—"}${f.endDate?" → "+dmy(f.endDate):""}</td><td>${f.live?(f.posted?`<span class="pill" style="background:var(--green)">posted ${fmt(f.postedAmount)}</span>`:`<span class="pill" style="background:var(--gold)">to post</span>`):`<span class="pill" style="background:#8a94a6">${esc(f.status==="Active"?"not in month":f.status)}</span>`}</td></tr>`;
+  el.innerHTML=`
+   <div class="flex" style="flex-wrap:wrap;gap:8px">
+     ${opsCan.edit()?`<button class="btn gold" id="fxNew">+ Add fixed expense</button>`:""}
+     ${live.length&&opsCan.post()?`<button class="btn ${d.fixedPosted+0.01>=d.fixedExpected?'ghost':'gold'}" id="fxPost">Post ${esc(ml)} accrual to ledger</button>`:""}
+     <button class="btn ghost" id="fxCsv">Export CSV</button>
+     <span class="muted right" style="font-size:12px">Recurring company costs (rent, Etisalat, DEWA, insurance, licences, vehicles, software…). Quarterly / annual bills are spread evenly per month.</span>
+   </div>
+   <div class="kpis" style="margin-top:12px">
+     <div class="kpi"><div class="v">${live.length}</div><div class="l">Live items in ${esc(ml)}</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.fixedExpected)}</div><div class="l">Monthly accrual expected</div></div>
+     <div class="kpi" style="border-top-color:${d.fixedPosted+0.01>=d.fixedExpected&&d.fixedExpected>0?'var(--green)':'var(--gold)'}"><div class="v">AED ${fmt(d.fixedPosted)}</div><div class="l">Posted to the HQ ledger</div></div>
+     <div class="kpi"><div class="v">AED ${fmt(d.fixedExpected*12)}</div><div class="l">Annualised fixed cost run-rate</div></div>
+   </div>
+   <div id="fxForm"></div>
+   <div style="overflow-x:auto;margin-top:10px"><table><tr><th>ID</th><th>Item</th><th>Category</th><th>Entity</th><th>Frequency</th><th class="num">Bill amount</th><th class="num">Per month</th><th>Period</th><th>${esc(ml)}</th></tr>
+    ${live.map(row).join("")||`<tr><td colspan="9" class="muted">No fixed expenses registered yet — add rent, Etisalat, DEWA, insurance, licences, vehicles, software…</td></tr>`}
+    ${live.length?`<tr class="tot"><td colspan="6">TOTAL PER MONTH</td><td class="num">${fmt(d.fixedExpected)}</td><td colspan="2"></td></tr>`:""}
+    ${retired.length?`<tr><td colspan="9" class="muted" style="font-size:11px;padding-top:12px">Not live this month / retired</td></tr>${retired.map(row).join("")}`:""}
+   </table></div>`;
+  const nb=$("#fxNew"); if(nb) nb.onclick=()=>opsFixedForm(null);
+  const pb=$("#fxPost"); if(pb) pb.onclick=()=>{ if(!confirm("Post the "+ml+" accrual of every live fixed item to the HQ cost ledger?\n\nItems already posted for the month are skipped.")) return; opsPost("ops/fixed/post",{month:m},"Fixed expenses posted"); };
+  $("#fxCsv").onclick=()=>exportCsv("MA_Fixed_Expenses.csv",["ID","Item","Category","Vendor","Ref","Entity","Frequency","Bill amount","Per month","VAT %","Start","End","Status"],d.fixed.map(f=>[f.id,f.name,f.cat,f.vendor,f.ref,f.entity,f.freq,f.amount,f.monthly,num(f.vatPct)*100,f.startDate,f.endDate,f.status]));
+  el.querySelectorAll("[data-fx]").forEach(tr=>tr.onclick=()=>{ if(!opsCan.edit()) return; opsFixedForm(d.fixed.find(f=>f.id===tr.dataset.fx)); });
+}
+function opsFixedForm(f){
+  const d=OPS; const isNew=!f; f=f||{cat:"Rent & Office",freq:"monthly",vatPct:0.05,dueDay:1,status:"Active",startDate:OPS_MONTH+"-01"};
+  const ents=["","Marvellous Art Decoration & Fit Out Design LLC","MA Building Contracting LLC","MA Building Maintenance LLC","MA Group (shared)"];
+  $("#fxForm").innerHTML=`<div class="card" style="margin:12px 0;background:#f8f9fc"><h3>${isNew?"New fixed expense":"Edit "+esc(f.id)}</h3>
+   <div class="grid">
+    <label>Item name<input id="fx_name" value="${esc(f.name||"")}" placeholder="e.g. Office rent — Al Quoz"></label>
+    <label>Category<select id="fx_cat">${d.fixedCats.map(c=>`<option ${c===f.cat?"selected":""}>${esc(c)}</option>`).join("")}</select></label>
+    <label>Entity<select id="fx_ent">${ents.map(e=>`<option value="${esc(e)}" ${e===(f.entity||"")?"selected":""}>${esc(e||"— any —")}</option>`).join("")}</select></label>
+    <label>Vendor<input id="fx_vendor" value="${esc(f.vendor||"")}" placeholder="e.g. Etisalat"></label>
+    <label>Account / contract ref<input id="fx_ref" value="${esc(f.ref||"")}" placeholder="account no., tenancy contract, policy no."></label>
+    <label>Frequency<select id="fx_freq">${d.freqs.map(x=>`<option ${x===f.freq?"selected":""}>${x}</option>`).join("")}</select></label>
+    <label>Bill amount (ex-VAT, per bill)<input id="fx_amount" type="number" step="0.01" value="${f.amount||""}"></label>
+    <label>VAT %<input id="fx_vat" type="number" step="1" value="${num(f.vatPct)*100}"></label>
+    <label>Due day of month<input id="fx_day" type="number" min="1" max="28" value="${f.dueDay||1}"></label>
+    <label>Start (first month)<input id="fx_start" type="date" value="${esc(f.startDate||"")}"></label>
+    <label>End (last month, optional)<input id="fx_end" type="date" value="${esc(f.endDate||"")}"></label>
+    <label>Status<select id="fx_status">${["Active","Suspended","Retired"].map(x=>`<option ${x===f.status?"selected":""}>${x}</option>`).join("")}</select></label>
+   </div>
+   <label>Notes<input id="fx_notes" value="${esc(f.notes||"")}"></label>
+   <div class="flex" style="margin-top:10px"><button class="btn gold" id="fx_save">Save</button><button class="btn ghost" id="fx_cancel">Cancel</button>${!isNew?`<button class="btn ghost" id="fx_del" style="color:var(--red)">Delete / retire</button>`:""}<span class="muted" style="font-size:11px">Monthly accrual = bill amount ÷ months in the frequency.</span></div></div>`;
+  $("#fx_cancel").onclick=()=>{ $("#fxForm").innerHTML=""; };
+  $("#fx_save").onclick=async()=>{ const body={id:f.id,name:$("#fx_name").value.trim(),cat:$("#fx_cat").value,entity:$("#fx_ent").value,vendor:$("#fx_vendor").value,ref:$("#fx_ref").value,freq:$("#fx_freq").value,amount:num($("#fx_amount").value),vatPct:num($("#fx_vat").value)/100,dueDay:num($("#fx_day").value),startDate:$("#fx_start").value,endDate:$("#fx_end").value,status:$("#fx_status").value,notes:$("#fx_notes").value}; try{ await api("ops/fixed",{method:"POST",body}); toast("Saved"); vOps(); }catch(e){ toast(e.message); } };
+  const del=$("#fx_del"); if(del) del.onclick=async()=>{ if(!confirm("Delete "+f.name+"?\n(If it was ever posted it is retired instead, keeping history.)")) return; try{ const r=await api("ops/fixed/"+encodeURIComponent(f.id),{method:"DELETE"}); toast(r.retired?"Retired (history kept)":"Deleted"); vOps(); }catch(e){ toast(e.message); } };
+  $("#fx_name").focus();
+}
+let OPS_PREVIEW=null;
+function renderOpsAlloc(el){
+  const d=OPS, m=OPS_MONTH, ml=monthLabel(m);
+  const basis=(OPS_PREVIEW&&OPS_PREVIEW.month===m?OPS_PREVIEW.basis:null)||(d.alloc?d.alloc.basis:"revenue");
+  const manual=(OPS_PREVIEW&&OPS_PREVIEW.manual)||(d.alloc&&d.alloc.manual)||{};
+  const drv=d.drivers;
+  el.innerHTML=`
+   <div class="kpis">
+     <div class="kpi" style="border-top-color:var(--navy)"><div class="v">AED ${fmt(d.pool)}</div><div class="l">HQ pool to allocate · ${esc(ml)}</div></div>
+     <div class="kpi"><div class="v">${drv.length}</div><div class="l">Projects in scope</div></div>
+     <div class="kpi" style="border-top-color:${d.alloc?'var(--green)':'var(--gold)'}"><div class="v">${d.alloc?"POSTED":"OPEN"}</div><div class="l">${d.alloc?"Allocated "+dmy(d.alloc.postedAt)+" · "+esc(d.alloc.postedBy):"Not yet allocated"}</div></div>
+   </div>
+   <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:16px;margin-top:14px">
+    <div class="card" style="margin:0"><h3>Allocation drivers — ${esc(ml)}</h3>
+     <div style="overflow-x:auto"><table><tr><th>Project</th><th class="num">Revenue certified</th><th class="num">Direct cost</th><th class="num">Contract value</th><th class="num">Staff (man-months)</th><th class="num">Manual %</th></tr>
+      ${drv.map(x=>`<tr><td>${esc(x.project)}</td><td class="num">${fmt(x.revenue)}</td><td class="num">${fmt(x.cost)}</td><td class="num">${fmt(x.contract)}</td><td class="num">${fmt(x.staff)}</td><td class="num"><input type="number" class="al-man" data-p="${esc(x.project)}" min="0" max="100" step="1" style="width:70px;text-align:right" value="${manual[x.project]!=null?manual[x.project]:""}" ${d.alloc?"disabled":""}></td></tr>`).join("")||`<tr><td colspan="6" class="muted">No projects found — add projects in Settings or a client contract.</td></tr>`}
+     </table></div>
+     <div class="muted" style="font-size:11px;margin-top:6px">Revenue = client IPCs certified in the month (ex-VAT). Direct cost = expenses logged to the project in the month. Contract value = contract sum + variations of open contracts. Staff = share of payroll time assigned to the project this month.</div>
+    </div>
+    <div class="card" style="margin:0"><h3>${d.alloc?"Posted allocation":"Preview & post"}</h3>
+     <div class="flex" style="flex-wrap:wrap;gap:8px">
+      <label class="muted" style="font-size:12px">Basis</label><select id="alBasis" ${d.alloc?"disabled":""}>${d.bases.map(b=>`<option value="${b.code}" ${b.code===basis?"selected":""}>${esc(b.name)}</option>`).join("")}</select>
+      ${!d.alloc?`<button class="btn ghost" id="alPrev">Preview</button>${opsCan.post()?`<button class="btn gold" id="alPost">Post allocation</button>`:""}`:opsCan.post()?`<button class="btn ghost" id="alUndo" style="color:var(--red)">Un-post</button>`:""}
+      <button class="btn ghost" id="alCsv">Export CSV</button>
+     </div>
+     <div class="muted" style="font-size:11px;margin:6px 0">${esc((d.bases.find(b=>b.code===basis)||{}).hint||"")}</div>
+     <div id="alTable">${allocTableHtml(d.alloc||(OPS_PREVIEW&&OPS_PREVIEW.month===m?OPS_PREVIEW:null),d.pool)}</div>
+     <div class="muted" style="font-size:11px;margin-top:8px">Once posted, each project's P&amp;L shows <b>“Allocated operations cost (HQ share)”</b> under overheads and its net profit reflects the true cost of running the company. The group P&amp;L is unchanged (HQ lines are already in it). CFO tip: use <b>revenue</b> in normal months, <b>contract value</b> when a month has no certification, and <b>staff time</b> when overhead is driven by people rather than turnover.</div>
+    </div>
+   </div>`;
+  const getManual=()=>{ const o={}; el.querySelectorAll(".al-man").forEach(i=>{ if(num(i.value)>0) o[i.dataset.p]=num(i.value); }); return o; };
+  const bs=$("#alBasis"); if(bs&&!d.alloc) bs.onchange=()=>{ OPS_PREVIEW={month:m,basis:bs.value,manual:getManual(),rows:null}; renderOpsAlloc(el); };
+  const pv=$("#alPrev"); if(pv) pv.onclick=async()=>{ try{ const r=await api("ops/alloc/preview",{method:"POST",body:{month:m,basis:bs.value,manual:getManual()}}); OPS_PREVIEW={...r,manual:getManual()}; if(!r.rows.length) toast(r.reason||"Nothing to allocate"); renderOpsAlloc(el); }catch(e){ toast(e.message); } };
+  const po=$("#alPost"); if(po) po.onclick=async()=>{ const body={month:m,basis:bs.value,manual:getManual()}; const go=async(force)=>{ try{ await api("ops/alloc",{method:"POST",body:{...body,force}}); toast("Allocation posted — project P&L updated"); OPS_PREVIEW=null; vOps(); }catch(e){ const msg=e.message||""; if(msg.startsWith("NOT_POSTED:")&&!force){ if(confirm(msg.slice(11).trim()+"\n\nAllocate the current pool of AED "+fmt(d.pool)+" anyway?")) return go(true); return; } toast(msg); } }; if(confirm("Post the "+ml+" allocation of AED "+fmt(d.pool)+" across the projects?")) go(false); };
+  const un=$("#alUndo"); if(un) un.onclick=async()=>{ if(!confirm("Un-post the "+ml+" allocation? Project P&Ls will drop this month's share until re-posted.")) return; try{ await api("ops/alloc/"+m,{method:"DELETE"}); toast("Allocation removed"); vOps(); }catch(e){ toast(e.message); } };
+  $("#alCsv").onclick=()=>{ const src=d.alloc||OPS_PREVIEW; const rows=(src&&src.rows||[]).map(r=>[m,src.basis,r.project,r.driver,fmt(r.share*100),r.amount]); exportCsv("MA_Ops_Allocation_"+m+".csv",["Month","Basis","Project","Driver","Share %","Allocated AED"],rows); };
+}
+function allocTableHtml(a,pool){
+  if(!a||!a.rows||!a.rows.length) return `<div class="muted" style="padding:12px 0">${pool>0?"Choose a basis and press Preview.":"HQ pool is zero for this month — post payroll, fixed expenses or depreciation first."}</div>`;
+  return `<table><tr><th>Project</th><th class="num">Driver</th><th class="num">Share</th><th class="num">Allocated AED</th></tr>
+   ${a.rows.map(r=>`<tr><td>${esc(r.project)}</td><td class="num">${fmt(r.driver)}</td><td class="num">${fmt(r.share*100)}%</td><td class="num"><b>${fmt(r.amount)}</b></td></tr>`).join("")}
+   <tr class="tot"><td colspan="2">TOTAL</td><td class="num">100%</td><td class="num">${fmt(a.total)}</td></tr></table>`;
+}
+async function renderOpsYtd(){
+  const el=$("#opsBody"); const year=OPS_MONTH.slice(0,4);
+  let d; try{ d=await api("ops/ytd?year="+year); }catch(e){ el.textContent=e.message; return; }
+  el.classList.remove("muted");
+  const t={payroll:0,fixed:0,depreciation:0,other:0,pool:0,allocated:0}; for(const r of d.months) for(const k in t) t[k]+=num(r[k]);
+  el.innerHTML=`<div class="flex"><h3 style="margin:0">Operations cost by month — ${esc(year)}</h3><button class="btn ghost right" id="ytCsv">Export CSV</button></div>
+   <div style="overflow-x:auto;margin-top:8px"><table><tr><th>Month</th><th class="num">Payroll (HQ share)</th><th class="num">Fixed expenses</th><th class="num">Depreciation</th><th class="num">Other HQ</th><th class="num">HQ pool</th><th class="num">Allocated</th><th>Basis</th><th class="num">Unallocated</th></tr>
+    ${d.months.map(r=>`<tr class="click" data-m="${r.month}"><td>${esc(monthLabel(r.month))}</td><td class="num">${fmt(r.payroll)}</td><td class="num">${fmt(r.fixed)}</td><td class="num">${fmt(r.depreciation)}</td><td class="num">${fmt(r.other)}</td><td class="num"><b>${fmt(r.pool)}</b></td><td class="num">${fmt(r.allocated)}</td><td>${esc(r.basis||"—")}</td><td class="num" style="color:${r.pool-r.allocated>0.5?'var(--gold)':'inherit'}">${fmt(r.pool-r.allocated)}</td></tr>`).join("")}
+    <tr class="tot"><td>TOTAL ${esc(year)}</td><td class="num">${fmt(t.payroll)}</td><td class="num">${fmt(t.fixed)}</td><td class="num">${fmt(t.depreciation)}</td><td class="num">${fmt(t.other)}</td><td class="num">${fmt(t.pool)}</td><td class="num">${fmt(t.allocated)}</td><td></td><td class="num">${fmt(t.pool-t.allocated)}</td></tr></table></div>
+   <div class="muted" style="font-size:11px;margin-top:6px">Click a month to open it. “Unallocated” is HQ cost that no project is yet carrying — close every month so the project P&amp;Ls stay true.</div>`;
+  el.querySelectorAll("[data-m]").forEach(tr=>tr.onclick=()=>{ OPS_MONTH=tr.dataset.m; OPS_TAB="overview"; vOps(); });
+  $("#ytCsv").onclick=()=>exportCsv("MA_Ops_"+year+".csv",["Month","Payroll HQ share","Fixed","Depreciation","Other HQ","HQ pool","Allocated","Basis","Unallocated"],d.months.map(r=>[r.month,r.payroll,r.fixed,r.depreciation,r.other,r.pool,r.allocated,r.basis,r.pool-r.allocated]));
 }
 async function vAssets(){
   const canAsset=["CEO","PM","Secretary","QS","Clerk"].includes(ME.role);

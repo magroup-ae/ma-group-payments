@@ -13755,7 +13755,11 @@ var CAN = {
   expenseDelete: ["CEO", "PM"],
   pnl: ["CEO", "PM", "QS", "Accounts", "Clerk"],
   budget: ["CEO", "PM", "QS", "Accounts", "Clerk"],
-  budgetEdit: ["CEO", "PM", "QS"]
+  budgetEdit: ["CEO", "PM", "QS"],
+  ops: ["CEO", "PM", "QS", "Accounts", "Clerk", "Secretary"],
+  opsEdit: ["CEO", "Accounts", "Secretary"],
+  opsPayroll: ["CEO", "Accounts"],
+  opsPost: ["CEO", "Accounts"]
 };
 // Clerk = data-entry + view only: can add expenses, suppliers, clients, assets
 // and view P&L/budget, but CANNOT approve, record payments/print cheques,
@@ -14231,6 +14235,195 @@ async function computeTreasury(s) {
   };
   return { accounts, totalBalance, unallocated, preOpeningTotal, preOpeningCount, ledger: withRun.slice(0, 400), cheques, chequeSummary };
 }
+// ===================== OPERATIONS COST / HR MANAGEMENT =====================
+// CFO model: every dirham the company spends that is not a direct project cost
+// lands in the HQ cost centre (MA HQ – Operations) — staff payroll not assigned
+// to a site, fixed overheads (rent, telecom, utilities, insurance, licences…),
+// monthly depreciation of the asset register, and any other HQ expense. Each
+// month that HQ pool is ALLOCATED across the live projects on a chosen basis so
+// every project P&L carries its fair share of running the company.
+//
+//   Payroll (HR system) ─┬─ staff assigned to a site ──► project cost (Labour)
+//                        └─ HQ / unassigned ──────────┐
+//   Fixed expense register (monthly accrual) ─────────┤
+//   Asset register (monthly depreciation, non-cash) ──┼──► HQ pool ──► allocation ──► project P&L
+//   Other manual HQ expenses ─────────────────────────┘        (revenue / cost / contract / staff / manual %)
+var OPS_FIXED_CATS = [
+  "Rent & Office", "Telecom (Etisalat / du)", "Utilities (DEWA / Chiller)", "Insurance (medical, vehicles, office)",
+  "Licences, Visas & Government fees", "Vehicles & Fuel", "Software & Subscriptions", "Bank charges & Finance",
+  "Marketing & Branding", "Professional fees (audit, PRO, legal)", "Staff accommodation & welfare", "Other fixed"
+];
+var OPS_FREQ = { monthly: 1, quarterly: 3, "half-yearly": 6, annual: 12 };
+var OPS_BASES = [
+  { code: "revenue", name: "Revenue certified in the month", hint: "share of client IPC value certified in the month (ex-VAT)" },
+  { code: "cost", name: "Direct cost incurred in the month", hint: "share of project cost logged in the month (excl. HQ)" },
+  { code: "contract", name: "Contract value (active contracts)", hint: "share of contract sum + approved variations" },
+  { code: "staff", name: "Staff man-months (payroll assignment)", hint: "share of staff time assigned to each project this month" },
+  { code: "manual", name: "Manual %", hint: "percentages you enter (must total 100)" }
+];
+var OPS_STAFF_COST_TYPES = ["Labour (Indirect)", "Labour (Direct)", "Professional Fees", "Overhead / Admin"];
+function monthKeyOf(d) { return String(d || "").slice(0, 7); }
+function monthEnd(m) { const y = +m.slice(0, 4), mo = +m.slice(5, 7); const last = new Date(Date.UTC(y, mo, 0)).getUTCDate(); return `${m}-${String(last).padStart(2, "0")}`; }
+function validMonth(m) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(m || "")); }
+function projSlug(p) { return String(p || "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 40) || "x"; }
+async function listOpsFixed() { return (await getAllJSON(store(), "opsfixed/")).filter((v) => v && v.id).sort((a, b) => (a.id || "").localeCompare(b.id || "", void 0, { numeric: true })); }
+async function listOpsStaff() { return (await getAllJSON(store(), "opsstaff/")).filter((v) => v && v.empId); }
+async function listOpsAlloc() { return (await getAllJSON(store(), "opsalloc/")).filter((v) => v && v.month).sort((a, b) => a.month < b.month ? -1 : 1); }
+// A fixed item is "live" in a month when the month falls inside its start/end.
+function fixedActiveIn(f, m) {
+  if (f.status && f.status !== "Active") return false;
+  const st = monthKeyOf(f.startDate), en = monthKeyOf(f.endDate);
+  if (st && m < st) return false;
+  if (en && m > en) return false;
+  return true;
+}
+// Monthly accrual of a fixed item (quarterly / annual bills are spread evenly so
+// the allocation to projects is smooth and not lumpy in the billing month).
+function fixedMonthly(f) { const per = OPS_FREQ[f.freq] || 1; return r2(num(f.amount) / per); }
+// Employer cost of one payroll row: everything earned (basic + allowances + OT +
+// commission). Deductions (absence, advances, fines) are recoveries against the
+// employee, not a reduction of what the job costs — except absence, which the
+// HR system already nets out of gross where applicable.
+function payrollCost(r) { return r2(num(r.gross) + num(r.ot) + num(r.commission)); }
+// Straight-line depreciation charge for ONE month, capped at the remaining
+// depreciable value. Disposed / sold / written-off assets stop depreciating.
+function assetMonthDep(a, m) {
+  if (a.status && a.status !== "Active") return 0;
+  const pm = monthKeyOf(a.purchaseDate);
+  if (!pm || pm > m) return 0;
+  const cost = num(a.cost), life = num(a.life) || 0, resid = num(a.residPct) || 0;
+  if (!(cost > 0) || !(life > 0)) return 0;
+  const depreciable = r2(cost * (1 - resid)), perMonth = depreciable / (life * 12);
+  const monthsBefore = (+m.slice(0, 4) - +pm.slice(0, 4)) * 12 + (+m.slice(5, 7) - +pm.slice(5, 7));
+  const accumBefore = Math.min(depreciable, perMonth * monthsBefore);
+  return r2(Math.max(0, Math.min(perMonth, depreciable - accumBefore)));
+}
+function staffSplits(st) {
+  const sp = Array.isArray(st?.splits) ? st.splits.filter((x) => x && x.project && num(x.pct) > 0) : [];
+  // Percentages are "% of the employee's time"; anything not assigned stays
+  // with HQ. If someone keys more than 100% in total, scale back to 100%.
+  const tot = sp.reduce((t, x) => t + num(x.pct), 0);
+  const scale = tot > 100 ? 100 / tot : 1;
+  return sp.map((x) => ({ project: String(x.project), pct: r2(num(x.pct) * scale) / 100 }));
+}
+// Full monthly operations picture: pool components, what is posted vs still to
+// post, allocation drivers per project and the saved allocation (if any).
+async function computeOps(s, month) {
+  const [expenses, fixed, staff, assets, payroll, allocRec, contracts, allCC, names] = await Promise.all([
+    listExpenses(""), listOpsFixed(), listOpsStaff(), listAssets(), s.get("opspayroll/" + month, { type: "json" }),
+    s.get("opsalloc/" + month, { type: "json" }), listContracts(), getAllJSON(s, "clientcert/"), projectNames(s)
+  ]);
+  const st = await s.get("settings", { type: "json" }) || {};
+  const overheadNames = new Set([HQ_PROJECT, ...(st.projects || []).filter((p) => p && p.kind === "overhead").map((p) => p.name)]);
+  const projects = names.filter((p) => !overheadNames.has(p));
+  const mExp = expenses.filter((e) => monthKeyOf(e.date) === month);
+  const hqExp = mExp.filter((e) => e.project === HQ_PROJECT);
+  const bySource = { "ops-payroll": 0, "ops-fixed": 0, "ops-depreciation": 0, other: 0 };
+  for (const e of hqExp) { const k = bySource[e.source] !== void 0 ? e.source : "other"; bySource[k] = r2(bySource[k] + num(e.amount)); }
+  const pool = r2(hqExp.reduce((t, e) => t + num(e.amount), 0));
+  // ---- payroll ----
+  const staffMap = {}; for (const x of staff) staffMap[x.empId] = x;
+  const rows = (payroll?.rows || []).map((r) => {
+    const sm = staffMap[r.empId] || {};
+    const cost = payrollCost(r);
+    const splits = staffSplits(sm);
+    const assigned = r2(cost * splits.reduce((t, x) => t + x.pct, 0));
+    return { ...r, cost, splits, costType: sm.costType || "Labour (Indirect)", assigned, hqShare: r2(cost - assigned) };
+  });
+  const payrollTot = { count: rows.length, gross: 0, ot: 0, commission: 0, deductions: 0, net: 0, cost: 0, assigned: 0, hq: 0, wps: 0, cash: 0 };
+  const payrollByProject = {};
+  for (const r of rows) {
+    payrollTot.gross = r2(payrollTot.gross + num(r.gross)); payrollTot.ot = r2(payrollTot.ot + num(r.ot)); payrollTot.commission = r2(payrollTot.commission + num(r.commission));
+    payrollTot.deductions = r2(payrollTot.deductions + num(r.deductions)); payrollTot.net = r2(payrollTot.net + num(r.net)); payrollTot.cost = r2(payrollTot.cost + r.cost);
+    payrollTot.assigned = r2(payrollTot.assigned + r.assigned); payrollTot.hq = r2(payrollTot.hq + r.hqShare);
+    if (/cash/i.test(r.payMethod || "")) payrollTot.cash = r2(payrollTot.cash + num(r.net)); else payrollTot.wps = r2(payrollTot.wps + num(r.net));
+    for (const sp of r.splits) payrollByProject[sp.project] = r2((payrollByProject[sp.project] || 0) + r.cost * sp.pct);
+  }
+  const payrollPosted = mExp.some((e) => e.source === "ops-payroll");
+  // ---- fixed expenses ----
+  const fixedRows = fixed.map((f) => { const live = fixedActiveIn(f, month); const xid = `XFX-${month}-${f.id}`; const posted = expenses.find((e) => e.id === xid); return { ...f, monthly: fixedMonthly(f), live, posted: !!posted, postedAmount: posted ? num(posted.amount) : 0 }; });
+  const fixedExpected = r2(fixedRows.filter((f) => f.live).reduce((t, f) => t + f.monthly, 0));
+  // ---- depreciation ----
+  const depRows = assets.map((a) => ({ code: a.code, description: a.description, cat: a.cat, cost: num(a.cost), month: assetMonthDep(a, month) })).filter((x) => x.month > 0);
+  const depExpected = r2(depRows.reduce((t, x) => t + x.month, 0));
+  const depPosted = expenses.find((e) => e.id === `XDP-${month}`);
+  // ---- allocation drivers per project ----
+  const cids = {}; for (const c of contracts) cids[c.id] = c;
+  const drivers = {};
+  for (const p of projects) drivers[p] = { project: p, revenue: 0, cost: 0, contract: 0, staff: 0 };
+  for (const c of allCC) {
+    if (!c || !["Issued", "Approved"].includes(c.status) || monthKeyOf(c.date) !== month) continue;
+    const ct = cids[c.contractId]; const p = ct?.project || c.project; if (!drivers[p]) continue;
+    drivers[p].revenue = r2(drivers[p].revenue + Math.max(0, num(c.calc?.grossThis != null ? c.calc.grossThis : c.calc?.gross)));
+  }
+  for (const e of mExp) { if (drivers[e.project] && e.source !== "ops-allocation") drivers[e.project].cost = r2(drivers[e.project].cost + num(e.amount)); }
+  for (const c of contracts) { if (!c || /closed|complete|cancel/i.test(c.status || "")) continue; if (drivers[c.project]) drivers[c.project].contract = r2(drivers[c.project].contract + num(c.contractSum) + num(c.variations)); }
+  for (const r of rows) for (const sp of r.splits) { if (drivers[sp.project]) drivers[sp.project].staff = r2(drivers[sp.project].staff + sp.pct); }
+  return {
+    month, project: HQ_PROJECT, bases: OPS_BASES, fixedCats: OPS_FIXED_CATS, freqs: Object.keys(OPS_FREQ), staffCostTypes: OPS_STAFF_COST_TYPES,
+    projects, pool, bySource, hqExpenses: hqExp.sort((a, b) => a.date < b.date ? 1 : -1),
+    payroll: payroll ? { month, source: payroll.source, importedAt: payroll.importedAt, importedBy: payroll.importedBy, rows, totals: payrollTot, byProject: payrollByProject, posted: payrollPosted } : null,
+    fixed: fixedRows, fixedExpected, fixedPosted: r2(fixedRows.filter((f) => f.posted).reduce((t, f) => t + f.postedAmount, 0)),
+    depreciation: { rows: depRows, expected: depExpected, posted: depPosted ? num(depPosted.amount) : 0, isPosted: !!depPosted },
+    drivers: Object.values(drivers), alloc: allocRec || null,
+    staff: staff
+  };
+}
+// Split the HQ pool across projects on the chosen basis. Returns rows that
+// always sum to the pool (last row absorbs rounding).
+function allocateOps(pool, basis, drivers, manual) {
+  const rows = [];
+  let weights = [];
+  if (basis === "manual") {
+    const m = manual || {};
+    weights = Object.keys(m).filter((p) => num(m[p]) > 0).map((p) => ({ project: p, w: num(m[p]) }));
+  } else {
+    const k = basis === "revenue" ? "revenue" : basis === "cost" ? "cost" : basis === "contract" ? "contract" : "staff";
+    weights = drivers.filter((d) => num(d[k]) > 0).map((d) => ({ project: d.project, w: num(d[k]) }));
+  }
+  const tot = weights.reduce((t, x) => t + x.w, 0);
+  if (!(tot > 0)) return { rows: [], total: 0, reason: basis === "manual" ? "Enter a percentage for at least one project." : "No project has a non-zero driver for this basis in the month — choose another basis or enter manual %." };
+  let acc = 0;
+  weights.forEach((x, i) => {
+    const share = x.w / tot;
+    let amt = i === weights.length - 1 ? r2(pool - acc) : r2(pool * share);
+    acc = r2(acc + amt);
+    rows.push({ project: x.project, driver: r2(x.w), share: r2(share * 10000) / 10000, amount: amt });
+  });
+  return { rows, total: r2(acc), reason: "" };
+}
+// Sum of posted allocations that hit ONE project (used by the project P&L).
+async function allocatedOpsFor(s, project) {
+  const all = await listOpsAlloc();
+  let total = 0; const months = [];
+  for (const a of all) { if (a.status !== "Posted") continue; for (const r of a.rows || []) { if (r.project === project) { total = r2(total + num(r.amount)); months.push({ month: a.month, basis: a.basis, amount: num(r.amount) }); } } }
+  return { total, months };
+}
+// Tolerant reader for whatever the HR system returns for a month's payroll
+// (payroll-split rows / payslip rows). Field names differ between builds, so
+// every known spelling is honoured.
+function normalisePayrollRows(list) {
+  const pick = (o, ...ks) => { for (const k of ks) { if (o[k] !== void 0 && o[k] !== null && o[k] !== "") return o[k]; } return void 0; };
+  const out = [];
+  for (const o of list || []) {
+    if (!o || typeof o !== "object") continue;
+    const empId = String(pick(o, "empId", "id", "ID", "employeeId") || "").trim();
+    const name = String(pick(o, "name", "employee", "Employee", "fullName") || "").trim();
+    if (!empId && !name) continue;
+    if (/^total/i.test(empId) || /^total/i.test(name)) continue;
+    const basic = num(pick(o, "basic", "Basic", "basicSalary")), housing = num(pick(o, "housing", "Housing")), transport = num(pick(o, "transport", "Transport")), other = num(pick(o, "other", "Other", "otherAllowance"));
+    let gross = num(pick(o, "gross", "Gross", "grossSalary"));
+    if (!gross) gross = r2(basic + housing + transport + other);
+    const ot = num(pick(o, "ot", "otPay", "overtime", "Overtime", "otAmount"));
+    const commission = num(pick(o, "commission", "Commission", "commissionTotal"));
+    const deductions = num(pick(o, "deductions", "Deductions", "totalDeductions"));
+    let net = num(pick(o, "net", "NET", "Net", "netPay"));
+    if (!net) net = r2(gross + ot + commission - deductions);
+    out.push({ empId: empId || name, name: name || empId, role: String(pick(o, "role", "Role", "jobTitle") || ""), company: String(pick(o, "company", "Company") || ""),
+      basic, housing, transport, other, gross: r2(gross), ot: r2(ot), commission: r2(commission), deductions: r2(deductions), net: r2(net), payMethod: String(pick(o, "payMethod", "paidBy", "Paid by") || "WPS") });
+  }
+  return out;
+}
 async function computePnl(s, project) {
   const expenses = await listExpenses(project);
   let cost = 0, paidOut = 0, ipcCost = 0, advanceUtilised = 0, subAdvancePaid = 0;
@@ -14317,6 +14510,18 @@ async function computePnl(s, project) {
   advanceUtilised = r2(advanceUtilised);
   const advanceBalanceRemaining = r2(advanceAgreed - advanceUtilised);
   // ---- CFO income-statement waterfall ----
+  // ---- allocated operations cost (HQ pool share) ----
+  // Project view: the posted monthly allocations for this project are added as
+  // overhead so the project carries its share of running the company. Group
+  // view: HQ expenses are already in the ledger, so allocations are memo only
+  // (adding them again would double count).
+  let allocatedOps = 0, allocMonths = [];
+  try {
+    if (project && project !== HQ_PROJECT) { const ao = await allocatedOpsFor(s, project); allocatedOps = ao.total; allocMonths = ao.months; }
+    else if (!project) { const all = await listOpsAlloc(); for (const a of all) if (a.status === "Posted") allocatedOps = r2(allocatedOps + num(a.total)); }
+  } catch (e) {}
+  const allocApplied = !!project && project !== HQ_PROJECT && allocatedOps > 0;
+  if (allocApplied) { byGroup.Overhead = r2((byGroup.Overhead || 0) + allocatedOps); byType["Allocated operations cost (HQ share)"] = allocatedOps; byCat["Head Office Overhead (allocated)"] = allocatedOps; cost = r2(cost + allocatedOps); }
   const directCost = r2(byGroup.Direct || 0);
   const indirectCost = r2(byGroup.Indirect || 0);
   const overheadCost = r2(byGroup.Overhead || 0);
@@ -14343,6 +14548,7 @@ async function computePnl(s, project) {
     materialsOnSite: r2(materialsOnSite), workExecuted: r2(workExecuted),
     advanceReceived, progressCollected, totalCashIn, netCash,
     advanceUtilised, advanceBalanceRemaining, subAdvancePaid: r2(subAdvancePaid),
+    allocatedOps: r2(allocatedOps), allocApplied, allocMonths,
     byType, byCat, byGroup, byProject,
     count: expenses.length,
     byDate: Object.entries(byDate).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([d, v]) => ({ date: d, cost: r2(v.cost), paid: r2(v.paid) })),
@@ -18243,6 +18449,229 @@ var api_default = async (req, context) => {
     await s.delete("expense/" + decodeURIComponent(expDel[1]));
     return json({ ok: true });
   }
+  // ===================== OPERATIONS COST / HR MANAGEMENT ENDPOINTS =====================
+  if (path === "ops" && req.method === "GET") {
+    if (!can("ops")) return err("No rights", 403);
+    const month = url.searchParams.get("month") || now().slice(0, 7);
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const d = await computeOps(s, month);
+    if (!can("opsPayroll") && d.payroll) {
+      // Salary detail is CEO / Accounts only — others see totals without names.
+      d.payroll = { ...d.payroll, rows: [], restricted: true };
+    }
+    d.hrLink = { url: (process.env.HR_API_URL || "https://ma-group-attendance.netlify.app").replace(/\/+$/, ""), configured: !!process.env.HR_API_KEY };
+    return json(d);
+  }
+  // ---- fixed expense register ----
+  if (path === "ops/fixed" && req.method === "POST") {
+    if (!can("opsEdit")) return err("No rights to edit the fixed expense register", 403);
+    const b = await req.json();
+    if (!b.name) return err("Item name is required");
+    if (!(num(b.amount) > 0)) return err("Amount must be greater than zero");
+    if (!OPS_FREQ[b.freq || "monthly"]) return err("Choose a valid frequency");
+    const stg = await s.get("settings", { type: "json" });
+    let id = b.id; const ex = id ? await s.get("opsfixed/" + id, { type: "json" }) : null;
+    if (!id) { id = await nextId(s, stg, "opsFixedSeq", "FX", "opsfixed/", 3); await s.setJSON("settings", stg); }
+    const str = (k) => b[k] === void 0 ? ex?.[k] || "" : String(b[k] || "");
+    const item = {
+      id, name: String(b.name).trim(), cat: str("cat") || "Other fixed", vendor: str("vendor"), ref: str("ref"),
+      amount: r2(num(b.amount)), vatPct: b.vatPct === void 0 ? (ex ? num(ex.vatPct) : 0.05) : num(b.vatPct), freq: b.freq || ex?.freq || "monthly",
+      dueDay: Math.min(28, Math.max(1, num(b.dueDay) || num(ex?.dueDay) || 1)),
+      startDate: str("startDate").slice(0, 10), endDate: str("endDate").slice(0, 10),
+      entity: str("entity"), status: b.status || ex?.status || "Active", notes: str("notes"),
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
+    };
+    await s.setJSON("opsfixed/" + id, item);
+    return json(item);
+  }
+  if (path.startsWith("ops/fixed/") && req.method === "DELETE") {
+    if (!can("opsEdit")) return err("No rights", 403);
+    const id = path.slice("ops/fixed/".length);
+    const ex = await s.get("opsfixed/" + id, { type: "json" });
+    if (!ex) return err("Not found", 404);
+    // Keep history: retire instead of hard delete once it has ever been posted.
+    const posted = (await listExpenses(HQ_PROJECT)).some((e) => String(e.id || "").endsWith("-" + id) && e.source === "ops-fixed");
+    if (posted) { ex.status = "Retired"; ex.endDate = ex.endDate || now().slice(0, 10); ex.updatedAt = now(); ex.updatedBy = me.name; await s.setJSON("opsfixed/" + id, ex); return json({ ok: true, retired: true }); }
+    await s.delete("opsfixed/" + id);
+    return json({ ok: true, deleted: true });
+  }
+  // Post this month's accrual of every live fixed item into the HQ cost ledger
+  // (idempotent — an item already posted for the month is left untouched).
+  if (path === "ops/fixed/post" && req.method === "POST") {
+    if (!can("opsPost")) return err("No rights to post operations cost", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const fixed = (await listOpsFixed()).filter((f) => fixedActiveIn(f, month));
+    let created = 0, skipped = 0, total = 0;
+    for (const f of fixed) {
+      const xid = `XFX-${month}-${f.id}`;
+      if (await s.get("expense/" + xid)) { skipped++; continue; }
+      const amt = fixedMonthly(f);
+      if (!(amt > 0)) { skipped++; continue; }
+      const day = String(f.dueDay || 1).padStart(2, "0");
+      const exp = {
+        id: xid, seq: 0, project: HQ_PROJECT, date: `${month}-${day}`, area: "", category: "Head Office Overhead", costType: "Overhead / Admin",
+        supplier: f.vendor || "", supplierId: null, invoiceNo: f.ref || "", description: `${f.name} — ${f.cat}${f.freq !== "monthly" ? ` (${f.freq} bill accrued monthly)` : ""}`,
+        poRef: "", boqRef: "", budgeted: 0, amount: amt, vatPct: num(f.vatPct), status: "Pending", paid: 0, fromAdvance: false,
+        notes: `Fixed expense ${f.id} · ${month}`, supplierCertNo: null, source: "ops-fixed", opsRef: f.id, month,
+        createdBy: me.name, createdAt: now(), updatedAt: now(), updatedBy: me.name
+      };
+      exp.vat = r2(exp.amount * exp.vatPct); exp.gross = r2(exp.amount + exp.vat);
+      await s.setJSON("expense/" + xid, exp); created++; total = r2(total + amt);
+    }
+    return json({ ok: true, month, created, skipped, total });
+  }
+  // ---- payroll: import (CSV / Excel rows from the HR system) or pull live ----
+  if (path === "ops/payroll/import" && req.method === "POST") {
+    if (!can("opsPayroll")) return err("Payroll is CEO / Accounts only", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const rows = normalisePayrollRows(b.rows);
+    if (!rows.length) return err("No employee rows found — export the salary list from the HR system (Payroll → Export Excel) and import that file.");
+    const rec = { month, rows, source: b.source || "file", fileName: String(b.fileName || ""), importedBy: me.name, importedAt: now() };
+    await s.setJSON("opspayroll/" + month, rec);
+    // Seed staff records so every employee can be assigned to a project.
+    for (const r of rows) { const k = "opsstaff/" + r.empId.replace(/[^A-Za-z0-9_-]+/g, "_"); const ex = await s.get(k, { type: "json" }); if (!ex) await s.setJSON(k, { empId: r.empId, name: r.name, role: r.role, company: r.company, splits: [], costType: "Labour (Indirect)", updatedAt: now(), updatedBy: me.name }); else if (ex.name !== r.name || ex.role !== r.role) { ex.name = r.name; ex.role = r.role || ex.role; await s.setJSON(k, ex); } }
+    return json({ ok: true, month, count: rows.length, cost: r2(rows.reduce((t, r) => t + payrollCost(r), 0)) });
+  }
+  if (path === "ops/payroll/pull" && req.method === "POST") {
+    if (!can("opsPayroll")) return err("Payroll is CEO / Accounts only", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const base = (process.env.HR_API_URL || "https://ma-group-attendance.netlify.app").replace(/\/+$/, "");
+    const key = process.env.HR_API_KEY || "";
+    if (!key) return err("HR link not configured. In Netlify → Site configuration → Environment variables add HR_API_KEY (the HR system's admin key / master key) and, if different, HR_API_URL. Until then, import the salary list file (Payroll → Export Excel in the HR system).");
+    const tries = [`${base}/.netlify/functions/api/admin/payroll-split?month=${month}`, `${base}/api/admin/payroll-split?month=${month}`];
+    let data = null, lastErr = "";
+    for (const u of tries) {
+      try {
+        const rs = await fetch(u, { headers: { "Authorization": "Bearer " + key, "x-admin-key": key, "x-admin-token": key, "Accept": "application/json" } });
+        if (!rs.ok) { lastErr = `${rs.status} from ${u}`; continue; }
+        data = await rs.json(); break;
+      } catch (e) { lastErr = String(e.message || e); }
+    }
+    if (!data) return err("Could not reach the HR system (" + lastErr + "). Import the salary list file instead.");
+    const list = data.rows || data.employees || data.all?.rows || (Array.isArray(data) ? data : null) || [...(data.wps?.rows || []), ...(data.cash?.rows || [])];
+    const rows = normalisePayrollRows(list);
+    if (!rows.length) return err("HR system answered but no payroll rows were recognised — import the salary list file instead.");
+    await s.setJSON("opspayroll/" + month, { month, rows, source: "hr-api", importedBy: me.name, importedAt: now() });
+    for (const r of rows) { const k = "opsstaff/" + r.empId.replace(/[^A-Za-z0-9_-]+/g, "_"); if (!(await s.get(k))) await s.setJSON(k, { empId: r.empId, name: r.name, role: r.role, company: r.company, splits: [], costType: "Labour (Indirect)", updatedAt: now(), updatedBy: me.name }); }
+    return json({ ok: true, month, count: rows.length, source: "hr-api" });
+  }
+  if (path === "ops/staff" && req.method === "POST") {
+    if (!can("opsEdit")) return err("No rights", 403);
+    const b = await req.json();
+    if (!b.empId) return err("Employee id required");
+    const k = "opsstaff/" + String(b.empId).replace(/[^A-Za-z0-9_-]+/g, "_");
+    const ex = await s.get(k, { type: "json" }) || { empId: b.empId };
+    const splits = (Array.isArray(b.splits) ? b.splits : []).filter((x) => x && x.project && num(x.pct) > 0).map((x) => ({ project: String(x.project).trim(), pct: r2(num(x.pct)) }));
+    const tot = splits.reduce((t, x) => t + x.pct, 0);
+    if (tot > 100.01) return err("Project splits total " + r2(tot) + "% — they cannot exceed 100%. The remainder stays with MA HQ.");
+    const rec = { ...ex, name: b.name || ex.name || "", role: b.role || ex.role || "", company: b.company || ex.company || "", splits, costType: OPS_STAFF_COST_TYPES.includes(b.costType) ? b.costType : ex.costType || "Labour (Indirect)", updatedAt: now(), updatedBy: me.name };
+    await s.setJSON(k, rec);
+    return json(rec);
+  }
+  // Post payroll to the cost ledger: one line per project (staff time assigned
+  // there) + one HQ line for the unassigned remainder. Re-posting replaces the
+  // month's payroll lines so a changed assignment is reflected exactly once.
+  if (path === "ops/payroll/post" && req.method === "POST") {
+    if (!can("opsPost")) return err("No rights to post operations cost", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const d = await computeOps(s, month);
+    if (!d.payroll || !d.payroll.rows.length) return err("No payroll imported for " + month + " yet.");
+    const old = (await listExpenses("")).filter((e) => e.source === "ops-payroll" && e.month === month);
+    for (const e of old) await s.delete("expense/" + e.id);
+    const groups = {}; // project|costType -> amount, heads
+    for (const r of d.payroll.rows) {
+      for (const sp of r.splits) { const k = sp.project + "|" + r.costType; groups[k] = groups[k] || { project: sp.project, costType: r.costType, amount: 0, heads: 0 }; groups[k].amount = r2(groups[k].amount + r.cost * sp.pct); groups[k].heads += sp.pct; }
+      if (r.hqShare > 0) { const k = HQ_PROJECT + "|Overhead / Admin"; groups[k] = groups[k] || { project: HQ_PROJECT, costType: "Overhead / Admin", amount: 0, heads: 0 }; groups[k].amount = r2(groups[k].amount + r.hqShare); groups[k].heads += r.hqShare / (r.cost || 1); }
+    }
+    const date = monthEnd(month); let created = 0, total = 0;
+    for (const g of Object.values(groups)) {
+      if (!(g.amount > 0)) continue;
+      const isHQ = g.project === HQ_PROJECT;
+      const xid = `XPR-${month}-${projSlug(g.project)}-${projSlug(g.costType)}`;
+      const exp = {
+        id: xid, seq: 0, project: g.project, date, area: "", category: isHQ ? "Head Office Overhead" : "Site Management & Engineers", costType: g.costType,
+        supplier: "MA Group payroll (HR system)", supplierId: null, invoiceNo: `PAYROLL/${month}`, description: `Staff payroll ${month} — ${isHQ ? "HQ / unassigned staff" : "staff assigned to project"} (${r2(g.heads)} man-month${g.heads === 1 ? "" : "s"})`,
+        poRef: "", boqRef: "", budgeted: 0, amount: r2(g.amount), vatPct: 0, vat: 0, gross: r2(g.amount), status: "Pending", paid: 0, fromAdvance: false,
+        notes: `Employer cost = gross + overtime + commission · source: ${d.payroll.source}`, supplierCertNo: null, source: "ops-payroll", month,
+        createdBy: me.name, createdAt: now(), updatedAt: now(), updatedBy: me.name
+      };
+      await s.setJSON("expense/" + xid, exp); created++; total = r2(total + exp.amount);
+    }
+    return json({ ok: true, month, created, replaced: old.length, total });
+  }
+  // Post the month's depreciation (non-cash) as one HQ line.
+  if (path === "ops/depreciation/post" && req.method === "POST") {
+    if (!can("opsPost")) return err("No rights to post operations cost", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const assets = await listAssets();
+    const rows = assets.map((a) => ({ code: a.code, amt: assetMonthDep(a, month) })).filter((x) => x.amt > 0);
+    const total = r2(rows.reduce((t, x) => t + x.amt, 0));
+    const xid = `XDP-${month}`;
+    if (!(total > 0)) { if (await s.get("expense/" + xid)) await s.delete("expense/" + xid); return json({ ok: true, month, total: 0, removed: true }); }
+    const ex = await s.get("expense/" + xid, { type: "json" });
+    const exp = {
+      id: xid, seq: 0, project: HQ_PROJECT, date: monthEnd(month), area: "", category: "Head Office Overhead", costType: "Overhead / Admin",
+      supplier: "", supplierId: null, invoiceNo: `DEP/${month}`, description: `Depreciation ${month} — ${rows.length} asset${rows.length === 1 ? "" : "s"} (straight-line, non-cash)`,
+      poRef: "", boqRef: "", budgeted: 0, amount: total, vatPct: 0, vat: 0, gross: total, status: "Paid", paid: 0, fromAdvance: false, nonCash: true,
+      notes: rows.map((x) => `${x.code} ${x.amt.toFixed(2)}`).join(", ").slice(0, 900), supplierCertNo: null, source: "ops-depreciation", month,
+      createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
+    };
+    await s.setJSON("expense/" + xid, exp);
+    return json({ ok: true, month, total, count: rows.length, replaced: !!ex });
+  }
+  // ---- allocation of the HQ pool to projects ----
+  if (path === "ops/alloc/preview" && req.method === "POST") {
+    if (!can("ops")) return err("No rights", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    const d = await computeOps(s, month);
+    const out = allocateOps(d.pool, b.basis || "revenue", d.drivers, b.manual);
+    return json({ month, pool: d.pool, basis: b.basis || "revenue", ...out });
+  }
+  if (path === "ops/alloc" && req.method === "POST") {
+    if (!can("opsPost")) return err("No rights to post the allocation", 403);
+    const b = await req.json(); const month = b.month;
+    if (!validMonth(month)) return err("Month must be YYYY-MM");
+    if (!OPS_BASES.some((x) => x.code === b.basis)) return err("Choose an allocation basis");
+    const d = await computeOps(s, month);
+    if (!(d.pool > 0)) return err("The HQ pool for " + month + " is zero — post payroll, fixed expenses or depreciation first.");
+    const out = allocateOps(d.pool, b.basis, d.drivers, b.manual);
+    if (!out.rows.length) return err(out.reason || "Nothing to allocate");
+    const unposted = [];
+    if (d.payroll && !d.payroll.posted) unposted.push("payroll");
+    if (d.fixedExpected > d.fixedPosted + 0.01) unposted.push("fixed expenses");
+    if (d.depreciation.expected > 0 && !d.depreciation.isPosted) unposted.push("depreciation");
+    if (unposted.length && !b.force) return err("NOT_POSTED:" + unposted.join(", ") + " for " + month + " not yet posted to the ledger — post them first so the pool is complete, or confirm to allocate the current pool anyway.");
+    const rec = { month, basis: b.basis, manual: b.basis === "manual" ? b.manual || {} : null, pool: d.pool, bySource: d.bySource, rows: out.rows, total: out.total, status: "Posted", postedBy: me.name, postedAt: now(), note: String(b.note || "") };
+    await s.setJSON("opsalloc/" + month, rec);
+    return json(rec);
+  }
+  if (path.startsWith("ops/alloc/") && req.method === "DELETE") {
+    if (!can("opsPost")) return err("No rights", 403);
+    const month = path.slice("ops/alloc/".length);
+    await s.delete("opsalloc/" + month);
+    return json({ ok: true });
+  }
+  if (path === "ops/allocs" && req.method === "GET") {
+    if (!can("ops")) return err("No rights", 403);
+    return json(await listOpsAlloc());
+  }
+  // Year-to-date view: month by month pool, allocation and payroll.
+  if (path === "ops/ytd" && req.method === "GET") {
+    if (!can("ops")) return err("No rights", 403);
+    const year = url.searchParams.get("year") || now().slice(0, 4);
+    const [expenses, allocs] = await Promise.all([listExpenses(HQ_PROJECT), listOpsAlloc()]);
+    const months = {};
+    for (let i = 1; i <= 12; i++) { const m = `${year}-${String(i).padStart(2, "0")}`; months[m] = { month: m, payroll: 0, fixed: 0, depreciation: 0, other: 0, pool: 0, allocated: 0, basis: "" }; }
+    for (const e of expenses) { const m = monthKeyOf(e.date); if (!months[m]) continue; const k = e.source === "ops-payroll" ? "payroll" : e.source === "ops-fixed" ? "fixed" : e.source === "ops-depreciation" ? "depreciation" : "other"; months[m][k] = r2(months[m][k] + num(e.amount)); months[m].pool = r2(months[m].pool + num(e.amount)); }
+    for (const a of allocs) { if (months[a.month] && a.status === "Posted") { months[a.month].allocated = num(a.total); months[a.month].basis = a.basis; } }
+    return json({ year, months: Object.values(months) });
+  }
   if (path === "pnl" && req.method === "GET") {
     if (!can("pnl")) return err("No rights", 403);
     return json(await computePnl(s, url.searchParams.get("project") || ""));
@@ -18253,7 +18682,7 @@ var api_default = async (req, context) => {
   }
   if (path === "backup" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
-    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/"];
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/"];
     const data = {};
     for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
     data.settings = await s.get("settings", { type: "json" });
