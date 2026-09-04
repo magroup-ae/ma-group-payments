@@ -18966,10 +18966,10 @@ var api_default = async (req, context) => {
           // Company page identity is always shown; live numbers need the Community Management API (r_organization_social).
           out.linkedin.page = { id: orgId, name: process.env.LINKEDIN_ORG_NAME || "MA group", url: `https://www.linkedin.com/company/${orgId}/`, admin: `https://www.linkedin.com/company/${orgId}/admin/dashboard/`, live: false };
           const H = { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" };
-          const rs = await fetch(`${LI_API}/networkSizes/urn:li:organization:${orgId}?edgeType=CompanyFollowedByMember`, { headers: H });
+          const rs = await fetch(`${LI_API}/networkSizes/${encodeURIComponent("urn:li:organization:" + orgId)}?edgeType=CompanyFollowedByMember`, { headers: H });
           const j = await rs.json().catch(() => ({}));
           if (rs.ok) { out.linkedin.followers = j.firstDegreeSize; out.linkedin.page.live = true; }
-          else out.linkedin.page.pending = rs.status === 403 || rs.status === 401 ? "Community Management API approval pending" : `HTTP ${rs.status}`;
+          else out.linkedin.page.pending = [400, 401, 403].includes(rs.status) ? "waiting for LinkedIn to approve the Community Management API (page followers & statistics)" : `HTTP ${rs.status}`;
           if (rs.ok) {
             const ps = await fetch(`${LI_API}/posts?author=${encodeURIComponent("urn:li:organization:" + orgId)}&q=author&count=10&sortBy=LAST_MODIFIED`, { headers: H });
             const pj = await ps.json().catch(() => ({}));
