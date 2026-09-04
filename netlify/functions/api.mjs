@@ -14640,10 +14640,26 @@ async function publishInstagram(post, env) {
   }
   throw new Error(lastErr || "Instagram did not finish processing the image");
 }
+// LinkedIn versioned REST: a version is retired ~12 months after release (HTTP 426 = version
+// no longer accepted). Try the configured / newest versions first and remember the one that works.
+var LI_VERSIONS = [process.env.LINKEDIN_VERSION, "202508", "202507", "202506", "202505", "202504", "202503", "202502", "202501"].filter(Boolean);
+var LI_VERSION_OK = "";
+async function liFetch(url, opts = {}, token) {
+  const tries = LI_VERSION_OK ? [LI_VERSION_OK, ...LI_VERSIONS.filter((v) => v !== LI_VERSION_OK)] : LI_VERSIONS;
+  let last = null;
+  for (const v of tries) {
+    const headers = { Authorization: "Bearer " + token, "LinkedIn-Version": v, "X-Restli-Protocol-Version": "2.0.0", ...(opts.headers || {}) };
+    const r = await fetch(url, { ...opts, headers });
+    if (r.status === 426) { last = r; continue; }
+    LI_VERSION_OK = v;
+    return r;
+  }
+  return last;
+}
 async function publishLinkedIn(post, env) {
   const li = await liToken();
   if (!li) throw new Error("LinkedIn is not connected — open Marketing → Connections → Connect LinkedIn.");
-  const H = { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0", "Content-Type": "application/json" };
+  const H = { "Content-Type": "application/json" };
   // Company-page author needs the Community Management API (w_organization_social);
   // until LinkedIn approves it, posts go out from the CEO's own profile.
   const orgOk = li.orgId && /w_organization_social/.test(li.scopes || "") || (li.scopes === "env" && li.orgId);
@@ -14654,7 +14670,7 @@ async function publishLinkedIn(post, env) {
   const img = media.find((m) => /^image\//.test(m.type || ""));
   let content;
   if (img) {
-    const init = await fetch(`${LI_API}/images?action=initializeUpload`, { method: "POST", headers: H, body: JSON.stringify({ initializeUploadRequest: { owner: author } }) });
+    const init = await liFetch(`${LI_API}/images?action=initializeUpload`, { method: "POST", headers: H, body: JSON.stringify({ initializeUploadRequest: { owner: author } }) }, li.accessToken);
     const ij = await init.json().catch(() => ({}));
     if (!init.ok) throw new Error("LinkedIn image upload init failed: " + (ij.message || init.status));
     const buf = Buffer.from(String(img.data || "").split(",").pop(), "base64");
@@ -14665,7 +14681,7 @@ async function publishLinkedIn(post, env) {
     content = { article: { source: post.link, title: post.title || "MA Group" } };
   }
   const body = { author, commentary: postText(post), visibility: "PUBLIC", distribution: { feedDistribution: "MAIN_FEED", targetEntities: [], thirdPartyDistributionChannels: [] }, lifecycleState: "PUBLISHED", isReshareDisabledByAuthor: false, ...(content ? { content } : {}) };
-  const rs = await fetch(`${LI_API}/posts`, { method: "POST", headers: H, body: JSON.stringify(body) });
+  const rs = await liFetch(`${LI_API}/posts`, { method: "POST", headers: H, body: JSON.stringify(body) }, li.accessToken);
   if (!rs.ok) { const t = await rs.text(); throw new Error("LinkedIn: " + rs.status + " " + t.slice(0, 200)); }
   return { id: rs.headers.get("x-restli-id") || "ok" };
 }
@@ -19005,13 +19021,12 @@ var api_default = async (req, context) => {
         if (orgId) {
           // Company page identity is always shown; live numbers need the Community Management API (r_organization_social).
           out.linkedin.page = { id: orgId, name: process.env.LINKEDIN_ORG_NAME || "MA group", url: `https://www.linkedin.com/company/${orgId}/`, admin: `https://www.linkedin.com/company/${orgId}/admin/dashboard/`, live: false };
-          const H = { Authorization: "Bearer " + li.accessToken, "LinkedIn-Version": "202409", "X-Restli-Protocol-Version": "2.0.0" };
-          const rs = await fetch(`${LI_API}/networkSizes/${encodeURIComponent("urn:li:organization:" + orgId)}?edgeType=CompanyFollowedByMember`, { headers: H });
+          const rs = await liFetch(`${LI_API}/networkSizes/${encodeURIComponent("urn:li:organization:" + orgId)}?edgeType=CompanyFollowedByMember`, {}, li.accessToken);
           const j = await rs.json().catch(() => ({}));
           if (rs.ok) { out.linkedin.followers = j.firstDegreeSize; out.linkedin.page.live = true; }
-          else out.linkedin.page.pending = [400, 401, 403].includes(rs.status) ? "waiting for LinkedIn to approve the Community Management API (page followers & statistics)" : `HTTP ${rs.status}`;
+          else out.linkedin.page.pending = [400, 401, 403, 426].includes(rs.status) ? "waiting for LinkedIn to approve the Community Management API (page followers & statistics)" : `HTTP ${rs.status}`;
           if (rs.ok) {
-            const ps = await fetch(`${LI_API}/posts?author=${encodeURIComponent("urn:li:organization:" + orgId)}&q=author&count=10&sortBy=LAST_MODIFIED`, { headers: H });
+            const ps = await liFetch(`${LI_API}/posts?author=${encodeURIComponent("urn:li:organization:" + orgId)}&q=author&count=10&sortBy=LAST_MODIFIED`, {}, li.accessToken);
             const pj = await ps.json().catch(() => ({}));
             if (ps.ok) out.linkedin.posts = (pj.elements || []).map((x) => ({ id: x.id, text: x.commentary || "", at: x.publishedAt ? new Date(x.publishedAt).toISOString() : "", url: x.id ? `https://www.linkedin.com/feed/update/${x.id}/` : "" }));
           }
