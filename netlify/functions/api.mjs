@@ -14501,6 +14501,7 @@ function mktEnv() {
     fbPageId: process.env.META_PAGE_ID || "", igUserId: process.env.IG_USER_ID || "",
     liToken: process.env.LINKEDIN_ACCESS_TOKEN || "", liOrg: process.env.LINKEDIN_ORG_ID || "",
     liClientId: process.env.LINKEDIN_CLIENT_ID || "", liClientSecret: process.env.LINKEDIN_CLIENT_SECRET || "",
+    metaAppId: process.env.META_APP_ID || "", metaAppSecret: process.env.META_APP_SECRET || "",
     siteUrl: (process.env.SITE_URL || process.env.URL || "https://ma-group-payments.netlify.app").replace(/\/+$/, ""),
     waDefaultTemplate: process.env.WA_TEMPLATE || "", waLang: process.env.WA_TEMPLATE_LANG || "en"
   };
@@ -14515,12 +14516,20 @@ async function liToken() {
   if (e.liToken) return { accessToken: e.liToken, personUrn: "", orgId: e.liOrg, scopes: "env" };
   return null;
 }
-function mktChannelStatus(li) {
+// Facebook page + Instagram business account connected by OAuth (Facebook Login):
+// the page access token derived from a long-lived user token does not expire.
+async function metaLink() {
+  const rec = await store().get("mkt/token/meta", { type: "json" }).catch(() => null);
+  return rec && rec.pageToken ? rec : null;
+}
+function mktChannelStatus(li, meta) {
   const e = mktEnv();
+  const fbReady = !!(meta && meta.pageToken && meta.pageId) || !!(e.metaToken && e.fbPageId);
+  const igReady = !!(meta && meta.pageToken && meta.igUserId) || !!(e.metaToken && e.igUserId);
   return {
+    facebook: { ready: fbReady, need: e.metaAppId ? "press Connect Meta (CEO signs in with Facebook once)" : "META_APP_ID + META_APP_SECRET", who: meta ? meta.pageName || meta.pageId : "", canConnect: !!(e.metaAppId && e.metaAppSecret) },
+    instagram: { ready: igReady, need: e.metaAppId ? (meta && !meta.igUserId ? "no Instagram business account is linked to the connected Facebook page — link @magroup.ae to the page in Meta Business Suite, then reconnect" : "press Connect Meta (CEO signs in with Facebook once)") : "META_APP_ID + META_APP_SECRET", who: meta && meta.igUsername ? "@" + meta.igUsername : "", canConnect: !!(e.metaAppId && e.metaAppSecret) },
     linkedin: { ready: !!li, need: e.liClientId ? "press Connect LinkedIn (CEO signs in once)" : "LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET", who: li ? (li.orgId ? "company page" : li.name || "member") : "", expiresAt: li ? li.expiresAt || "" : "", canConnect: !!(e.liClientId && e.liClientSecret) },
-    instagram: { ready: !!(e.metaToken && e.igUserId), need: "META_ACCESS_TOKEN (instagram_content_publish) + IG_USER_ID" },
-    facebook: { ready: !!(e.metaToken && e.fbPageId), need: "META_ACCESS_TOKEN (pages_manage_posts) + META_PAGE_ID" },
     whatsapp: { ready: !!(e.metaToken && e.waPhoneId), need: "META_ACCESS_TOKEN + META_PHONE_NUMBER_ID" },
     email: { ready: true, need: "" }
   };
@@ -14570,13 +14579,22 @@ function postText(post) {
   return [post.body || "", post.link ? post.link : "", tags].filter(Boolean).join("\n\n").trim();
 }
 function mediaUrl(env, post, i) { return `${env.siteUrl}/api/mkt/media/${post.id}/${i}?k=${post.mediaKey}`; }
+async function metaEnvFor(env) {
+  const m = await metaLink();
+  if (m) return { ...env, metaToken: m.pageToken, fbPageId: m.pageId || env.fbPageId, igUserId: m.igUserId || env.igUserId };
+  return env;
+}
 async function publishFacebook(post, env) {
+  env = await metaEnvFor(env);
+  if (!env.fbPageId) throw new Error("Facebook page not connected — Marketing → Connections → Connect Meta.");
   const text = postText(post), media = post.media || [];
   const img = media.find((m) => /^image\//.test(m.type || ""));
   if (img) return await graphCall(`${GRAPH_API}/${env.fbPageId}/photos`, { url: mediaUrl(env, post, media.indexOf(img)), caption: text, published: true }, env.metaToken);
   return await graphCall(`${GRAPH_API}/${env.fbPageId}/feed`, { message: text, ...(post.link ? { link: post.link } : {}) }, env.metaToken);
 }
 async function publishInstagram(post, env) {
+  env = await metaEnvFor(env);
+  if (!env.igUserId) throw new Error("Instagram business account not connected — Marketing → Connections → Connect Meta.");
   const media = post.media || [];
   const img = media.find((m) => /^image\//.test(m.type || ""));
   if (!img) throw new Error("Instagram needs a picture — attach an image (JPEG) to this post.");
@@ -14630,7 +14648,7 @@ async function sendWhatsApp(env, to, post, opts) {
   return (r.messages && r.messages[0] && r.messages[0].id) || "sent";
 }
 async function publishToChannel(s, post, ch) {
-  const env = mktEnv(), st = mktChannelStatus(await liToken());
+  const env = mktEnv(), st = mktChannelStatus(await liToken(), await metaLink());
   if (!st[ch] || !st[ch].ready) throw new Error(`${ch} is not connected yet — set ${st[ch] ? st[ch].need : ch} in Netlify environment variables.`);
   if (ch === "facebook") return await publishFacebook(post, env);
   if (ch === "instagram") return await publishInstagram(post, env);
@@ -15985,6 +16003,31 @@ var api_default = async (req, context) => {
         personUrn: ui.sub ? "urn:li:person:" + ui.sub : "", name: ui.name || "", email: ui.email || "", orgId: st.org || "", connectedBy: st.by, connectedAt: now() };
       await s.setJSON("mkt/token/linkedin", rec);
       return back(`Signed in as ${rec.name || "LinkedIn member"}. Token valid until ${rec.expiresAt.slice(0, 10)}.`, true);
+    } catch (x) { return back(x.message, false); }
+  }
+  // Meta (Facebook / Instagram) OAuth callback (public).
+  if (path === "mkt/meta/callback" && req.method === "GET") {
+    const e = mktEnv();
+    const back = (msg, ok) => new Response(`<!doctype html><meta charset="utf-8"><title>Meta</title><body style="font-family:system-ui;padding:40px;text-align:center"><h2>${ok ? "Facebook / Instagram connected" : "Meta connection failed"}</h2><p>${String(msg).replace(/</g, "&lt;")}</p><p><a href="/">Back to MA Group</a></p><script>setTimeout(()=>location.href="/#marketing",${ok ? 2000 : 8000})</script></body>`, { status: ok ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8" } });
+    const code = url.searchParams.get("code"), state = url.searchParams.get("state") || "";
+    if (url.searchParams.get("error")) return back(url.searchParams.get("error_description") || url.searchParams.get("error"), false);
+    const st = state ? await s.get("mkt/oauth/" + state, { type: "json" }).catch(() => null) : null;
+    if (!code || !st) return back("Invalid or expired sign-in state — start again from Marketing → Connections.", false);
+    try { await s.delete("mkt/oauth/" + state); } catch {}
+    try {
+      const redirect = e.siteUrl + "/api/mkt/meta/callback";
+      const t1 = await fetch(`${GRAPH_API}/oauth/access_token?client_id=${encodeURIComponent(e.metaAppId)}&client_secret=${encodeURIComponent(e.metaAppSecret)}&redirect_uri=${encodeURIComponent(redirect)}&code=${encodeURIComponent(code)}`).then((r) => r.json());
+      if (!t1.access_token) return back((t1.error && t1.error.message) || "code exchange failed", false);
+      const t2 = await fetch(`${GRAPH_API}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(e.metaAppId)}&client_secret=${encodeURIComponent(e.metaAppSecret)}&fb_exchange_token=${encodeURIComponent(t1.access_token)}`).then((r) => r.json());
+      const userToken = t2.access_token || t1.access_token;
+      const me2 = await graphCall(`${GRAPH_API}/me?fields=id,name`, null, userToken);
+      const acc = await graphCall(`${GRAPH_API}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&limit=50`, null, userToken);
+      const pages = (acc.data || []).map((p) => ({ id: p.id, name: p.name, token: p.access_token, igUserId: p.instagram_business_account?.id || "", igUsername: p.instagram_business_account?.username || "" }));
+      if (!pages.length) return back("This Facebook account manages no Facebook page. The MA Group page (with @magroup.ae linked to it) must be managed by the account you signed in with.", false);
+      const pick = pages.find((p) => p.igUserId) || pages.find((p) => /ma ?group/i.test(p.name)) || pages[0];
+      const rec = { userId: me2.id, userName: me2.name, userToken, userTokenExpiresAt: t2.expires_in ? new Date(Date.now() + num(t2.expires_in) * 1e3).toISOString() : "", pages: pages.map((p) => ({ ...p })), pageId: pick.id, pageName: pick.name, pageToken: pick.token, igUserId: pick.igUserId, igUsername: pick.igUsername, connectedBy: st.by, connectedAt: now() };
+      await s.setJSON("mkt/token/meta", rec);
+      return back(`Signed in as ${rec.userName}. Page: ${rec.pageName}${rec.igUsername ? " · Instagram @" + rec.igUsername : " · no Instagram business account linked to this page yet"}.`, true);
     } catch (x) { return back(x.message, false); }
   }
   // Scheduled publishing runner (called by cron-mkt every 15 min with the shared key).
@@ -18775,7 +18818,7 @@ var api_default = async (req, context) => {
     const [posts, audiences] = await Promise.all([listPosts(), listAudiences()]);
     const light = posts.map((p) => ({ ...p, media: (p.media || []).map((m, i) => ({ name: m.name, type: m.type, size: m.size, i })) }));
     const kpi = { total: posts.length, published: posts.filter((p) => p.status === "Published").length, scheduled: posts.filter((p) => p.status === "Scheduled").length, review: posts.filter((p) => p.status === "Review").length, draft: posts.filter((p) => p.status === "Draft").length, failed: posts.filter((p) => p.status === "Failed").length };
-    return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(await liToken()), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
+    return json({ posts: light, audiences: audiences.map((a) => ({ id: a.id, name: a.name, count: (a.contacts || []).length, updatedAt: a.updatedAt })), channels: MKT_CHANNELS, statuses: MKT_STATUS, types: MKT_TYPES, status: mktChannelStatus(await liToken(), await metaLink()), kpi, builtIn: [{ id: "clients", name: "Clients (registered)" }, { id: "suppliers", name: "Suppliers & subcontractors" }, { id: "staff", name: "Staff (HR system)" }], waTemplate: mktEnv().waDefaultTemplate, cronReady: !!process.env.CRON_KEY });
   }
   if (path === "mkt/post" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
@@ -18915,17 +18958,47 @@ var api_default = async (req, context) => {
     try { await s.delete("mkt/token/linkedin"); } catch {}
     return json({ ok: true });
   }
+  // Meta OAuth start (Facebook Login): CEO signs in with Facebook once; the
+  // callback picks the page + Instagram business account and stores a page token.
+  if (path === "mkt/meta/connect" && req.method === "POST") {
+    if (!can("marketingPublish")) return err("Only the CEO connects the company's Facebook / Instagram", 403);
+    const e = mktEnv();
+    if (!e.metaAppId || !e.metaAppSecret) return err("META_APP_ID / META_APP_SECRET are not set on the site.");
+    const state = Date.now().toString(36) + "." + randomBytes(6).toString("hex");
+    await s.setJSON("mkt/oauth/" + state, { by: me.name, at: now(), kind: "meta" });
+    const scopes = ["public_profile", "pages_show_list", "pages_manage_posts", "pages_read_engagement", "instagram_basic", "instagram_content_publish", "business_management"];
+    const u = new URL("https://www.facebook.com/v20.0/dialog/oauth");
+    u.searchParams.set("client_id", e.metaAppId); u.searchParams.set("redirect_uri", e.siteUrl + "/api/mkt/meta/callback");
+    u.searchParams.set("state", state); u.searchParams.set("scope", scopes.join(",")); u.searchParams.set("response_type", "code");
+    return json({ url: u.toString() });
+  }
+  if (path === "mkt/meta/disconnect" && req.method === "POST") {
+    if (!can("marketingPublish")) return err("CEO only", 403);
+    try { await s.delete("mkt/token/meta"); } catch {}
+    return json({ ok: true });
+  }
+  if (path === "mkt/meta/pages" && req.method === "POST") {
+    // pick another page when the account manages several
+    if (!can("marketingPublish")) return err("CEO only", 403);
+    const b = await req.json(); const m = await store().get("mkt/token/meta", { type: "json" }).catch(() => null);
+    if (!m || !m.pages) return err("Connect Meta first");
+    const pg = (m.pages || []).find((x) => x.id === b.pageId); if (!pg) return err("Page not found");
+    Object.assign(m, { pageId: pg.id, pageName: pg.name, pageToken: pg.token, igUserId: pg.igUserId || "", igUsername: pg.igUsername || "" });
+    await s.setJSON("mkt/token/meta", m);
+    return json({ ok: true, pageName: m.pageName, igUsername: m.igUsername });
+  }
   if (path === "mkt/test" && req.method === "POST") {
     // Connection test per channel: a cheap read against each API with the stored token.
     if (!can("marketing")) return err("No rights", 403);
-    const li = await liToken();
-    const env = mktEnv(), st = mktChannelStatus(li), out = {};
+    const li = await liToken(), meta = await metaLink();
+    const env0 = mktEnv(), st = mktChannelStatus(li, meta), out = {};
+    const env = await metaEnvFor(env0);
     for (const ch of ["facebook", "instagram", "whatsapp", "linkedin"]) {
       if (!st[ch].ready) { out[ch] = { ok: false, error: "not configured — " + st[ch].need }; continue; }
       try {
         if (ch === "facebook") { const r = await graphCall(`${GRAPH_API}/${env.fbPageId}?fields=name`, null, env.metaToken); out[ch] = { ok: true, detail: r.name }; }
         else if (ch === "instagram") { const r = await graphCall(`${GRAPH_API}/${env.igUserId}?fields=username`, null, env.metaToken); out[ch] = { ok: true, detail: "@" + r.username }; }
-        else if (ch === "whatsapp") { const r = await graphCall(`${GRAPH_API}/${env.waPhoneId}?fields=display_phone_number,verified_name`, null, env.metaToken); out[ch] = { ok: true, detail: `${r.verified_name || ""} ${r.display_phone_number || ""}`.trim() }; }
+        else if (ch === "whatsapp") { const r = await graphCall(`${GRAPH_API}/${env0.waPhoneId}?fields=display_phone_number,verified_name`, null, env0.metaToken); out[ch] = { ok: true, detail: `${r.verified_name || ""} ${r.display_phone_number || ""}`.trim() }; }
         else { const rs = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + li.accessToken } }); const j = await rs.json().catch(() => ({})); out[ch] = rs.ok ? { ok: true, detail: (j.name || "connected") + (li.orgId ? " · company page " + li.orgId : " · posts as this profile until page access is approved") + (li.expiresAt ? " · valid to " + String(li.expiresAt).slice(0, 10) : "") } : { ok: false, error: j.message || ("HTTP " + rs.status + " — reconnect LinkedIn") }; }
       } catch (e) { out[ch] = { ok: false, error: e.message }; }
     }
