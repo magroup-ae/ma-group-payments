@@ -16078,6 +16078,7 @@ var api_default = async (req, context) => {
       const rec = { accessToken: tk.access_token, refreshToken: tk.refresh_token || "", scopes: tk.scope || "", expiresAt: new Date(Date.now() + (num(tk.expires_in) || 5184e3) * 1e3).toISOString(),
         personUrn: ui.sub ? "urn:li:person:" + ui.sub : "", name: ui.name || "", email: ui.email || "", orgId: st.org || "", connectedBy: st.by, connectedAt: now() };
       await s.setJSON("mkt/token/linkedin", rec);
+      try { await s.delete("mkt/live-cache"); } catch {}
       return back(`Signed in as ${rec.name || "LinkedIn member"}. Token valid until ${rec.expiresAt.slice(0, 10)}.`, true);
     } catch (x) { return back(x.message, false); }
   }
@@ -16103,6 +16104,7 @@ var api_default = async (req, context) => {
       const pick = pages.find((p) => p.igUserId) || pages.find((p) => /ma ?group/i.test(p.name)) || pages[0];
       const rec = { userId: me2.id, userName: me2.name, userToken, userTokenExpiresAt: t2.expires_in ? new Date(Date.now() + num(t2.expires_in) * 1e3).toISOString() : "", pages: pages.map((p) => ({ ...p })), pageId: pick.id, pageName: pick.name, pageToken: pick.token, igUserId: pick.igUserId, igUsername: pick.igUsername, connectedBy: st.by, connectedAt: now() };
       await s.setJSON("mkt/token/meta", rec);
+      try { await s.delete("mkt/live-cache"); } catch {}
       return back(`Signed in as ${rec.userName}. Page: ${rec.pageName}${rec.igUsername ? " · Instagram @" + rec.igUsername : " · no Instagram business account linked to this page yet"}.`, true);
     } catch (x) { return back(x.message, false); }
   }
@@ -18929,7 +18931,11 @@ var api_default = async (req, context) => {
         const ps = await graphCall(`${GRAPH_API}/${fbPage}/posts?fields=id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares&limit=12`, null, fbTok);
         out.facebook = { name: pg.name, fans: pg.fan_count, followers: pg.followers_count, link: pg.link, picture: pg.picture?.data?.url || "", category: pg.category,
           posts: (ps.data || []).map((x) => ({ id: x.id, text: x.message || "", at: x.created_time, url: x.permalink_url, image: x.full_picture || "", likes: x.likes?.summary?.total_count || 0, comments: x.comments?.summary?.total_count || 0, shares: x.shares?.count || 0 })) };
-      } catch (e) { out.errors.facebook = e.message; }
+      } catch (e) {
+        out.errors.facebook = e.message;
+        // say exactly which permissions the sign-in granted / declined
+        try { if (meta?.userToken) { const pm = await graphCall(`${GRAPH_API}/me/permissions`, null, meta.userToken); const g = (pm.data || []).filter((x) => x.status === "granted").map((x) => x.permission), dcl = (pm.data || []).filter((x) => x.status !== "granted").map((x) => x.permission); out.errors.facebookPerms = { granted: g, declined: dcl, missing: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"].filter((x) => !g.includes(x)) }; } } catch {}
+      }
     }
     if (fbTok && igId) {
       try {
