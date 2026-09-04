@@ -13295,6 +13295,19 @@ async function ensureInit() {
   // One-time (04/09/2026): staff accounts per the CEO's list. Starting PINs come from
   // env STAFF_PINS_V2 = {"jesse":"......",...} so they are not in the source; every
   // user must change the PIN at first login.
+  // One-time (04/09/2026): custom domain — re-point the WhatsApp webhook subscription to
+  // https://system.maagroup.ae (Meta does not follow the netlify.app → custom-domain redirect).
+  if (!settings.webhookV2 && process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.SITE_URL) {
+    try {
+      const cb = process.env.SITE_URL.replace(/\/+$/, "") + "/api/wa/webhook";
+      const vt = process.env.WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
+      const body = new URLSearchParams({ object: "whatsapp_business_account", callback_url: cb, verify_token: vt, fields: "messages", access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}` });
+      const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.META_APP_ID}/subscriptions`, { method: "POST", body });
+      const j = await r.json().catch(() => ({}));
+      settings.webhookV2 = { at: now(), cb, ok: !!j.success, resp: j };
+    } catch (e) { settings.webhookV2 = { at: now(), ok: false, error: e.message }; }
+    await s.setJSON("settings", settings);
+  }
   if (!settings.staffV2) {
     let pins = {}; try { pins = JSON.parse(process.env.STAFF_PINS_V2 || "{}"); } catch {}
     const staff = [
