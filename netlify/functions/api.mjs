@@ -19075,6 +19075,37 @@ var api_default = async (req, context) => {
   // admin panel in the CEO's browser). Shown on Live channels → LinkedIn until the API is approved.
   // Queue for the browser assistant: approved & scheduled posts due by the end of today (Dubai)
   // that still need publishing on the given channel. Media come as public URLs.
+  // Automation register: the scheduled Claude tasks report each run here; the Connections tab shows them.
+  if (path === "mkt/assistant/run" && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const b = await req.json();
+    const runs = (await s.get("mkt/assistant-runs", { type: "json" })) || [];
+    runs.unshift({ at: now(), task: String(b.task || "other").slice(0, 40), ok: b.ok !== false, summary: String(b.summary || "").slice(0, 400), by: me.name });
+    await s.setJSON("mkt/assistant-runs", runs.slice(0, 60));
+    return json({ ok: true });
+  }
+  if (path === "mkt/automation" && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const [runs, snap, posts] = await Promise.all([s.get("mkt/assistant-runs", { type: "json" }).then((v) => v || []), s.get("mkt/linkedin-snapshot", { type: "json" }).catch(() => null), listPosts()]);
+    const tasks = [
+      { key: "monday-prep", name: "LinkedIn — Monday content prep", when: "Mondays 09:00 (Dubai)", does: "Drafts the week's 3 posts (Tue page · Wed CEO profile · Thu page) with branded slides and saves them here as Review", runsOn: "Claude, on the CEO's Mac" },
+      { key: "publisher", name: "LinkedIn — publisher (system queue)", when: "Mon–Fri 09:00 (Dubai)", does: "Publishes on LinkedIn exactly what is Approved + Scheduled here for the day, then marks it Published with the link", runsOn: "Claude, on the CEO's Mac (browser)" },
+      { key: "analytics", name: "LinkedIn — page analytics → system", when: "Daily 06:30 (Dubai)", does: "Reads followers, impressions, engagement and per-post stats from the LinkedIn admin panel into the LinkedIn tab", runsOn: "Claude, on the CEO's Mac (browser)" },
+      { key: "monthly-review", name: "LinkedIn — monthly performance review", when: "1st of the month 09:00", does: "Benchmark report vs IFZA (PDF) saved to the CEO's project and Mac", runsOn: "Claude, on the CEO's Mac" },
+      { key: "cron", name: "System scheduler (Instagram · Facebook · WhatsApp · e-mail)", when: "Every 15 minutes", does: "Publishes scheduled posts directly through the Meta / Zoho APIs", runsOn: "System (Netlify)" }
+    ];
+    const lastOf = (k) => runs.find((r) => r.task === k) || null;
+    const d30 = new Date(Date.now() - 30 * 864e5).toISOString();
+    return json({
+      linkedinMode: process.env.LINKEDIN_VIA_BROWSER === "1" ? "browser" : "api",
+      tasks: tasks.map((t) => ({ ...t, last: lastOf(t.key) })),
+      snapshotAt: snap ? snap.at : "",
+      queued: posts.filter((p) => p.status === "Scheduled" && (p.channels || []).includes("linkedin") && !(p.published && p.published.linkedin)).map((p) => ({ id: p.id, title: p.title, scheduledAt: p.scheduledAt, author: p.liAuthor || "page" })),
+      awaitingApproval: posts.filter((p) => p.status === "Review" && (p.channels || []).includes("linkedin")).length,
+      publishedByAssistant30: posts.filter((p) => p.published && p.published.linkedin && /assistant/i.test(p.published.linkedin.via || "") && p.published.linkedin.at >= d30).length,
+      runs: runs.slice(0, 15)
+    });
+  }
   if (path === "mkt/queue" && req.method === "GET") {
     if (!can("marketing")) return err("No rights", 403);
     const ch = url.searchParams.get("channel") || "linkedin";

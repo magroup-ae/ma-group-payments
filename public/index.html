@@ -4924,11 +4924,30 @@ function renderMktConnect(el){
    ${row("email","E-mail campaigns","Uses the Zoho mailbox already configured in Settings → Email notifications. Each recipient gets an individual e-mail (no address is exposed).")}
    </table>
    <div class="muted" style="font-size:11.5px;margin-top:8px">Scheduled posts are pushed automatically every 15 minutes (${MKT.cronReady?'<b style="color:var(--green)">scheduler active</b>':'<b style="color:var(--gold)">scheduler key not set</b>'}). The vendor <b>Announcements</b> page remains the formal channel for suppliers &amp; subcontractors.</div>`;
+  el.insertAdjacentHTML("beforeend",`<div class="card" style="margin:14px 0 0" id="mkAuto"><h3 style="margin:0 0 8px">Automation — what runs by itself</h3><div class="muted">Loading…</div></div>`);
+  renderMktAutomation($("#mkAuto"));
   const mc=$("#metaConnect"); if(mc) mc.onclick=async()=>{ try{ const r=await api("mkt/meta/connect",{method:"POST",body:{}}); location.href=r.url; }catch(e){ alert(e.message); } };
   const md=$("#metaDisc"); if(md) md.onclick=async()=>{ if(!confirm("Disconnect Facebook / Instagram?")) return; try{ await api("mkt/meta/disconnect",{method:"POST",body:{}}); vMarketing(); }catch(e){ toast(e.message); } };
   const lc=$("#liConnect"); if(lc) lc.onclick=async()=>{ try{ const r=await api("mkt/linkedin/connect",{method:"POST",body:{}}); location.href=r.url; }catch(e){ alert(e.message); } };
   const ld=$("#liDisc"); if(ld) ld.onclick=async()=>{ if(!confirm("Disconnect LinkedIn?")) return; try{ await api("mkt/linkedin/disconnect",{method:"POST",body:{}}); vMarketing(); }catch(e){ toast(e.message); } };
   $("#ctTest").onclick=async()=>{ $("#ctTest").disabled=true; try{ const r=await api("mkt/test",{method:"POST",body:{}}); for(const c in r){ const t=$("#ct_"+c); if(t) t.innerHTML=r[c].ok?`<b style="color:var(--green)">OK</b> — ${esc(r[c].detail||"")}`:`<b style="color:var(--red)">✗</b> ${esc(r[c].error||"")}`; } }catch(e){ toast(e.message); } $("#ctTest").disabled=false; };
+}
+
+async function renderMktAutomation(box){
+  let a; try{ a=await api("mkt/automation"); }catch(e){ box.innerHTML=`<h3 style="margin:0 0 8px">Automation</h3><div class="muted">${esc(e.message)}</div>`; return; }
+  const when=(t)=>t?new Date(t).toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+  const lastCell=(r)=>r?`<span class="pill ${r.ok?"st-Paid":"st-Rejected"}" style="font-size:10px">${r.ok?"ok":"failed"}</span> ${when(r.at)}<br><span class="muted" style="font-size:11px">${esc(r.summary||"")}</span>`:'<span class="muted">not run yet</span>';
+  box.innerHTML=`<div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">Automation — what runs by itself</h3>
+     <span class="pill" style="background:${a.linkedinMode==="browser"?"#7a5c00":"#375623"};font-size:10px">LinkedIn: ${a.linkedinMode==="browser"?"via CEO's browser (API approval pending)":"direct API"}</span>
+     <button class="btn ghost right" id="mkAutoRefresh">Refresh</button></div>
+   <div class="kpis" style="margin:10px 0">${lvKpi(a.awaitingApproval,"LinkedIn posts awaiting your approval",a.awaitingApproval?"#b45309":"#375623")}${lvKpi(a.queued.length,"Scheduled — waiting for the publisher")}${lvKpi(a.publishedByAssistant30,"Published by the assistant · 30 days")}${lvKpi(a.snapshotAt?when(a.snapshotAt):"—","Last page-analytics snapshot","#0a66c2")}</div>
+   <div style="overflow-x:auto"><table><tr><th>Task</th><th>Runs</th><th>What it does</th><th>Where</th><th>Last run</th></tr>
+    ${a.tasks.map(t=>`<tr><td><b>${esc(t.name)}</b></td><td style="white-space:nowrap">${esc(t.when)}</td><td style="font-size:12px">${esc(t.does)}</td><td style="font-size:12px;white-space:nowrap">${esc(t.runsOn)}</td><td style="font-size:12px">${lastCell(t.last)}</td></tr>`).join("")}
+   </table></div>
+   ${a.queued.length?`<h3 style="margin:12px 0 6px">Next in the LinkedIn queue</h3><table><tr><th>When</th><th>Post</th><th>As</th></tr>${a.queued.map(q=>`<tr><td style="white-space:nowrap">${when(q.scheduledAt)}</td><td>${esc(q.title)}</td><td>${q.author==="personal"?"CEO profile":"MA group page"}</td></tr>`).join("")}</table>`:""}
+   ${a.runs.length?`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Run log (${a.runs.length})</summary><table style="margin-top:6px"><tr><th>When</th><th>Task</th><th></th><th>Summary</th></tr>${a.runs.map(r=>`<tr><td style="white-space:nowrap">${when(r.at)}</td><td>${esc(r.task)}</td><td>${r.ok?'<span class="pill st-Paid" style="font-size:10px">ok</span>':'<span class="pill st-Rejected" style="font-size:10px">failed</span>'}</td><td style="font-size:12px">${esc(r.summary||"")}</td></tr>`).join("")}</table></details>`:""}
+   <div class="muted" style="font-size:11.5px;margin-top:8px">These tasks are Claude scheduled tasks (visible in the Claude app under <b>Scheduled</b>); they take their instructions from this system and report back here. The system is the single source of truth — nothing is published on LinkedIn unless it is Approved and Scheduled here.</div>`;
+  $("#mkAutoRefresh").onclick=()=>renderMktAutomation(box);
 }
 
 async function vAnnounce(){
