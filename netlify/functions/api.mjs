@@ -16184,7 +16184,11 @@ var api_default = async (req, context) => {
   }
   const auth = req.headers.get("authorization") || "";
   const userId = await verifyToken(auth.startsWith("Bearer ") ? auth.slice(7) : null);
-  const me = users.find((x) => x.id === userId);
+  let me = users.find((x) => x.id === userId);
+  // Service identity for the scheduled Claude assistant (posts via the CEO's browser and
+  // reports LinkedIn page analytics). Marketing-level rights only, never final approval.
+  const apiKey = req.headers.get("x-api-key") || "";
+  if (!me && apiKey && process.env.MKT_API_KEY && apiKey === process.env.MKT_API_KEY) me = { id: "assistant", name: "LinkedIn assistant (Claude)", role: "Marketing", final: false, title: "Scheduled assistant" };
   if (!me) return err("Not logged in", 401);
   // Final-approval authority: the CEO account (super admin) or a user flagged final:true.
   // "Access all" accounts (CFO, HR & Admin) carry role CEO for access but final:false.
@@ -19018,6 +19022,8 @@ var api_default = async (req, context) => {
         const ui = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: "Bearer " + li.accessToken } }).then((r) => r.json());
         out.linkedin = { name: ui.name || li.name || "", picture: ui.picture || "", email: ui.email || "", mode: li.orgId && /w_organization_social/.test(li.scopes || "") ? "company page" : "personal profile", expiresAt: li.expiresAt || "" };
         const orgId = li.orgId || env0.liOrg;
+        const snap = await s.get("mkt/linkedin-snapshot", { type: "json" }).catch(() => null);
+        if (snap) out.linkedin.snapshot = snap;
         if (orgId) {
           // Company page identity is always shown; live numbers need the Community Management API (r_organization_social).
           out.linkedin.page = { id: orgId, name: process.env.LINKEDIN_ORG_NAME || "MA group", url: `https://www.linkedin.com/company/${orgId}/`, admin: `https://www.linkedin.com/company/${orgId}/admin/dashboard/`, live: false };
@@ -19062,6 +19068,45 @@ var api_default = async (req, context) => {
     const b = await req.json(); const stg = await s.get("settings", { type: "json" }) || {};
     stg.leadEmails = String(b.leadEmails || "").trim(); await s.setJSON("settings", stg);
     return json({ ok: true, leadEmails: stg.leadEmails });
+  }
+  // LinkedIn page analytics snapshot pushed by the scheduled assistant (read from the LinkedIn
+  // admin panel in the CEO's browser). Shown on Live channels → LinkedIn until the API is approved.
+  if (path === "mkt/linkedin/snapshot" && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const b = await req.json();
+    const n = (v) => (v === "" || v == null || isNaN(+v) ? null : +v);
+    const snap = {
+      at: now(), by: me.name, source: String(b.source || "LinkedIn admin panel (browser)"),
+      followers: n(b.followers), followersDelta30: n(b.followersDelta30), impressions30: n(b.impressions30), engagementRate30: n(b.engagementRate30),
+      pageViews30: n(b.pageViews30), searchAppearances7: n(b.searchAppearances7), posts30: n(b.posts30),
+      posts: (Array.isArray(b.posts) ? b.posts : []).slice(0, 25).map((p) => ({ url: String(p.url || ""), text: String(p.text || "").slice(0, 400), at: String(p.at || ""), impressions: n(p.impressions), reactions: n(p.reactions), comments: n(p.comments), reposts: n(p.reposts), image: String(p.image || "") })),
+      notes: String(b.notes || "").slice(0, 1000)
+    };
+    await s.setJSON("mkt/linkedin-snapshot", snap);
+    try { await s.delete("mkt/live-cache"); } catch {}
+    return json({ ok: true, at: snap.at });
+  }
+  if (path === "mkt/linkedin/snapshot" && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    return json(await s.get("mkt/linkedin-snapshot", { type: "json" }) || null);
+  }
+  // A post the assistant published through the browser (page or CEO profile) — recorded in the
+  // calendar as Published so the system is the single register of what went out.
+  if (path === "mkt/linkedin/record" && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const b = await req.json();
+    if (!b.url || !b.title) return err("url and title are required");
+    const all = await listPosts();
+    let post = all.find((p) => p.published && p.published.linkedin && p.published.linkedin.url === String(b.url));
+    const stg = await s.get("settings", { type: "json" }) || {};
+    if (!post) { const id = await nextId(s, stg, "mktSeq", "MK", "mkt/post/", 4); await s.setJSON("settings", stg); post = { id, createdBy: me.name, createdAt: now(), log: [], published: {}, failed: {}, media: [], mediaKey: randomBytes(8).toString("hex") }; }
+    post.title = String(b.title).slice(0, 200); post.type = MKT_TYPES.includes(b.type) ? b.type : "Other"; post.channels = ["linkedin"]; post.body = String(b.body || "").slice(0, 3000);
+    post.hashtags = String(b.hashtags || ""); post.link = String(b.link || ""); post.status = "Published"; post.updatedAt = now(); post.updatedBy = me.name;
+    post.author = b.author === "personal" ? "personal profile" : "company page"; post.campaign = String(b.campaign || ""); post.project = String(b.project || "");
+    post.published.linkedin = { id: String(b.url), url: String(b.url), at: b.at ? String(b.at) : now(), via: "Claude assistant (browser)", author: post.author, thumb: String(b.image || "") };
+    mktLog(post, { action: `Published on LinkedIn (${post.author}) via browser assistant`, by: me.name });
+    await s.setJSON("mkt/post/" + post.id, post);
+    return json({ ok: true, id: post.id });
   }
   if (path === "mkt/post" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
