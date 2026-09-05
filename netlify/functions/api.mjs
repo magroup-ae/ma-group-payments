@@ -15815,23 +15815,30 @@ function momNumber(items) {
   }
   return out;
 }
+function momScopeLabel(sc) { return !sc ? "General" : sc === "ALL" ? "All projects" : sc; }
+// Items inherit the scope of the section above them unless they set their own.
+function momWithScope(items) {
+  let cur = ""; return momNumber(items).map((it) => { if (it.type === "section") { cur = it.scope || ""; return { ...it, scopeEff: cur }; } return { ...it, scopeEff: it.scope || cur }; });
+}
 function momActions(items) {
-  const acts = momNumber(items).filter((it) => it.type !== "section" && String(it.actionBy || "").trim());
+  const acts = momWithScope(items).filter((it) => it.type !== "section" && String(it.actionBy || "").trim());
   const key = (d) => { const m = String(d || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : "9999"; };
   acts.sort((a, b) => key(a.due).localeCompare(key(b.due)));
-  return acts.map((it, i) => ({ code: "A" + (i + 1), item: it.no, text: it.text, actionBy: it.actionBy, due: it.due, dueText: it.dueText || "", status: it.status || "Open" }));
+  return acts.map((it, i) => ({ code: "A" + (i + 1), item: it.no, text: it.text, actionBy: it.actionBy, due: it.due, dueText: it.dueText || "", status: it.status || "Open", scope: it.scopeEff || "", project: momScopeLabel(it.scopeEff) }));
 }
 function momDueLabel(d, txt) { if (txt) return txt; if (!d) return "—"; const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d); }
 function buildMomHtml(rec, cfg, assets) {
   const esc = (x) => emEsc(x);
   const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
   const dayName = rec.date ? new Date(rec.date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" }) : "";
-  const numbered = momNumber(rec.items || []);
+  const numbered = momWithScope(rec.items || []);
+  const scopeTag = (sc) => `<span class="sc ${!sc ? "g" : sc === "ALL" ? "a" : "p"}">${esc(momScopeLabel(sc))}</span>`;
   const rows = numbered.map((it) => it.type === "section"
-    ? `<tr class="sec-row"><td>${esc(it.no)}</td><td colspan="3"><b>${esc(it.text)}</b></td></tr>`
-    : `<tr><td>${esc(it.no)}</td><td>${esc(it.text).replace(/\n/g, "<br>")}</td><td>${esc(it.actionBy || "—")}</td><td>${esc(momDueLabel(it.due, it.dueText))}${it.status && it.status !== "Open" ? `<br><span class="st">${esc(it.status)}</span>` : ""}</td></tr>`).join("");
+    ? `<tr class="sec-row"><td>${esc(it.no)}</td><td colspan="4"><b>${esc(it.text)}</b> &nbsp;${scopeTag(it.scopeEff)}</td></tr>`
+    : `<tr><td>${esc(it.no)}</td><td>${scopeTag(it.scopeEff)}</td><td>${esc(it.text).replace(/\n/g, "<br>")}</td><td>${esc(it.actionBy || "—")}</td><td>${esc(momDueLabel(it.due, it.dueText))}${it.status && it.status !== "Open" ? `<br><span class="st">${esc(it.status)}</span>` : ""}</td></tr>`).join("");
   const acts = momActions(rec.items || []);
-  const actRows = acts.map((a) => `<tr><td>${a.code}</td><td>${esc(a.text)}</td><td>${esc(a.actionBy)}</td><td>${esc(momDueLabel(a.due, a.dueText))}</td></tr>`).join("") || `<tr><td colspan="4" style="color:#6b7280">No actions recorded.</td></tr>`;
+  const actRows = acts.map((a) => `<tr><td>${a.code}</td><td>${scopeTag(a.scope)}</td><td>${esc(a.text)}</td><td>${esc(a.actionBy)}</td><td>${esc(momDueLabel(a.due, a.dueText))}</td></tr>`).join("") || `<tr><td colspan="5" style="color:#6b7280">No actions recorded.</td></tr>`;
+  const projectsCovered = [...new Set(numbered.map((it) => it.scopeEff).filter((x) => x && x !== "ALL"))];
   const att = (rec.attendees || []).filter((a) => a && (a.name || "").trim());
   const attRows = [...att, ...Array(Math.max(0, 8 - att.length)).fill(null)].map((a, i) => `<tr><td>${i + 1}</td><td>${a ? esc(a.name) : ""}</td><td>${a ? esc(a.designation || "") : ""}</td><td>${a ? esc(a.company || "") : ""}</td></tr>`).join("");
   const notes = (rec.notes && rec.notes.length ? rec.notes : MOM_NOTES_DEFAULT).filter(Boolean).map((n) => `<li>${esc(n)}</li>`).join("");
@@ -15853,6 +15860,8 @@ function buildMomHtml(rec, cfg, assets) {
   table.pt th{background:#1F3864;color:#fff;font-size:11px}
   tr.sec-row td{background:#D9E2F3;color:#1F3864}
   .st{display:inline-block;font-size:9.5px;color:#375623;font-weight:700}
+  .sc{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:9px;white-space:nowrap;vertical-align:middle}
+  .sc.g{background:#eef0f4;color:#5b6472} .sc.a{background:#1F3864;color:#fff} .sc.p{background:#fff3d6;color:#7a5c00;border:1px solid #e3c98a}
   .sec{color:#1F3864;font-size:13px;font-weight:800;margin:14px 0 4px;border-left:4px solid #B8860B;padding-left:8px}
   ul.notes{margin:4px 0 10px 18px;padding:0;font-size:11.5px} ul.notes li{margin-bottom:3px}
   table.sig{width:100%;border-collapse:collapse;margin-top:16px;font-size:11px}
@@ -15867,16 +15876,16 @@ function buildMomHtml(rec, cfg, assets) {
   <div class="band"><div class="t">MINUTES OF MEETING</div><div class="s">${esc(rec.title || "")}</div></div><div class="goldrule"></div>
   <table class="pt">
     <tr><td class="k">Meeting</td><td>${esc(rec.title || "")}</td><td class="k">Reference</td><td><b>${esc(rec.ref)}</b>${issued ? "" : ' <span style="color:#C00000;font-weight:700">DRAFT</span>'}</td></tr>
-    <tr><td class="k">Project</td><td>${esc(rec.project || "Internal management")}</td><td class="k">Date · Time</td><td>${esc(dayName)}${dayName ? ", " : ""}${momDueLabel(rec.date)}${rec.time ? " · " + esc(rec.time) : ""}</td></tr>
+    <tr><td class="k">Projects</td><td>${esc(rec.project || (projectsCovered.length ? "All projects — " + projectsCovered.join(", ") : "All projects"))}</td><td class="k">Date · Time</td><td>${esc(dayName)}${dayName ? ", " : ""}${momDueLabel(rec.date)}${rec.time ? " · " + esc(rec.time) : ""}</td></tr>
     <tr><td class="k">Venue</td><td>${esc(rec.venue || "MA Group Head Office")}</td><td class="k">Chaired by</td><td>${esc(rec.chair || "Eng. Mohammed Abuassba, CEO")}</td></tr>
     <tr><td class="k">Minutes by</td><td>${esc(rec.minutesBy || "")}</td><td class="k">Distribution</td><td>${esc(rec.distributionText || "All office staff, site engineers and site supervisors")}</td></tr>
   </table>
   <div class="sec">1. ATTENDEES</div>
   <table class="pt"><tr><th style="width:36px">No.</th><th>Name</th><th>Designation</th><th>Company / Site</th></tr>${attRows}</table>
   <div class="sec">2. MINUTES, DECISIONS AND ACTIONS</div>
-  <table class="pt"><tr><th style="width:44px">Item</th><th>Discussion / Decision</th><th style="width:150px">Action by</th><th style="width:130px">Due / Status</th></tr>${rows || `<tr><td colspan="4" style="color:#6b7280">—</td></tr>`}</table>
+  <table class="pt"><tr><th style="width:44px">Item</th><th style="width:96px">Project</th><th>Discussion / Decision</th><th style="width:140px">Action by</th><th style="width:120px">Due / Status</th></tr>${rows || `<tr><td colspan="5" style="color:#6b7280">—</td></tr>`}</table>
   <div class="sec">3. SUMMARY OF ACTIONS (BY DEADLINE)</div>
-  <table class="pt"><tr><th style="width:36px">#</th><th>Action</th><th style="width:150px">Responsible</th><th style="width:110px">Deadline</th></tr>${actRows}</table>
+  <table class="pt"><tr><th style="width:36px">#</th><th style="width:96px">Project</th><th>Action</th><th style="width:140px">Responsible</th><th style="width:105px">Deadline</th></tr>${actRows}</table>
   <div class="sec">4. GENERAL NOTES</div>
   <ul class="notes">${notes}${rec.nextMeeting ? `<li>Next meeting: ${esc(rec.nextMeeting)}</li>` : ""}</ul>
   <table class="sig"><tr>
@@ -15894,8 +15903,8 @@ function buildMomHtml(rec, cfg, assets) {
 function momEmailHtml(rec, cfg, link) {
   const esc = (x) => emEsc(x);
   const acts = momActions(rec.items || []);
-  const table = [["Reference", rec.ref], ["Project", rec.project || "Internal management"], ["Date", momDueLabel(rec.date) + (rec.time ? " · " + rec.time : "")], ["Chaired by", rec.chair || "Eng. Mohammed Abuassba, CEO"], ["Actions recorded", String(acts.length)]];
-  const actList = acts.map((a) => `<b>${a.code}</b> — ${esc(a.text)} <span style="color:#5b6472">(${esc(a.actionBy)} · ${esc(momDueLabel(a.due, a.dueText))})</span>`);
+  const table = [["Reference", rec.ref], ["Projects", rec.project || "All projects"], ["Date", momDueLabel(rec.date) + (rec.time ? " · " + rec.time : "")], ["Chaired by", rec.chair || "Eng. Mohammed Abuassba, CEO"], ["Actions recorded", String(acts.length)]];
+  const actList = acts.map((a) => `<b>${a.code}</b> [${esc(a.project)}] ${esc(a.text)} <span style="color:#5b6472">(${esc(a.actionBy)} · ${esc(momDueLabel(a.due, a.dueText))})</span>`);
   return emailShell(cfg, {
     title: `Minutes of Meeting — ${rec.title || ""}`, band: "#1F3864", greeting: "Team", preheader: `${rec.ref} — ${rec.title || "Minutes of Meeting"}`,
     lead: [`Please find attached the minutes of the <b>${esc(rec.title || "meeting")}</b>${rec.project ? ` for <b>${esc(rec.project)}</b>` : ""} held on ${momDueLabel(rec.date)}. The decisions and instructions recorded are binding on all staff with immediate effect unless stated otherwise.`,
@@ -15908,11 +15917,11 @@ function momDigestHtml(cfg, moms, link) {
   const esc = (x) => emEsc(x);
   const today = now().slice(0, 10);
   const open = [];
-  for (const m of moms) for (const a of momActions(m.items || [])) if (a.status !== "Done" && a.status !== "Closed") open.push({ ...a, ref: m.ref, project: m.project || "Internal management", overdue: a.due && a.due.slice(0, 10) < today });
+  for (const m of moms) for (const a of momActions(m.items || [])) if (a.status !== "Done" && a.status !== "Closed") open.push({ ...a, ref: m.ref, overdue: a.due && a.due.slice(0, 10) < today });
   open.sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999")));
   const byProj = {}; for (const o of open) (byProj[o.project] = byProj[o.project] || []).push(o);
   const blocks = Object.keys(byProj).sort().map((p) => `<b style="color:#1F3864">${esc(p)}</b><br>` + byProj[p].map((o) => `${o.overdue ? '<span style="color:#C00000;font-weight:700">OVERDUE</span> ' : ""}${esc(o.text)} <span style="color:#5b6472">(${esc(o.actionBy)} · due ${esc(momDueLabel(o.due, o.dueText))} · ${esc(o.ref)})</span>`).join("<br>"));
-  const recent = moms.filter((m) => m.status === "Issued" && m.issuedAt && Date.now() - new Date(m.issuedAt).getTime() < 8 * 864e5).map((m) => `${esc(m.ref)} — ${esc(m.title)} (${esc(m.project || "Internal management")}, ${momDueLabel(m.date)})`);
+  const recent = moms.filter((m) => m.status === "Issued" && m.issuedAt && Date.now() - new Date(m.issuedAt).getTime() < 8 * 864e5).map((m) => `${esc(m.ref)} — ${esc(m.title)} (${momDueLabel(m.date)})`);
   return emailShell(cfg, {
     title: "Weekly minutes digest — open actions", band: "#1F3864", greeting: "Team", preheader: `${open.length} open actions across ${Object.keys(byProj).length} projects`,
     lead: [`Weekly summary of the minutes of meeting and the actions still open, as of ${momDueLabel(today)}.`, recent.length ? "<b>Minutes issued this week</b><br>" + recent.join("<br>") : "No new minutes were issued this week.", ...(blocks.length ? blocks : ["No open actions."])],
@@ -19266,28 +19275,28 @@ var api_default = async (req, context) => {
     if (!can("mom")) return err("No rights", 403);
     const all = await listMoms();
     const today = now().slice(0, 10);
-    const light = all.map((m) => { const acts = momActions(m.items || []); return { id: m.id, ref: m.ref, title: m.title, project: m.project || "", date: m.date, status: m.status, issuedAt: m.issuedAt || "", sentTo: (m.sentTo || []).length, attendees: (m.attendees || []).filter((a) => a && a.name).length, actions: acts.length, open: acts.filter((a) => a.status !== "Done" && a.status !== "Closed").length, overdue: acts.filter((a) => a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today).length, updatedAt: m.updatedAt, updatedBy: m.updatedBy }; });
+    const light = all.map((m) => { const acts = momActions(m.items || []); const covered = [...new Set(momWithScope(m.items || []).map((it) => it.scopeEff).filter((x) => x && x !== "ALL"))]; return { id: m.id, ref: m.ref, title: m.title, project: m.project || "", covered, date: m.date, status: m.status, issuedAt: m.issuedAt || "", sentTo: (m.sentTo || []).length, attendees: (m.attendees || []).filter((a) => a && a.name).length, actions: acts.length, open: acts.filter((a) => a.status !== "Done" && a.status !== "Closed").length, overdue: acts.filter((a) => a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today).length, updatedAt: m.updatedAt, updatedBy: m.updatedBy }; });
     const stg = settings;
     return json({ moms: light, distribution: momDist(stg), organizers: MOM_ORGANIZERS, canIssue: can("momIssue"), canEditDist: can("admin"), projects: (stg.projects || []).filter((p) => p && p.name && !p.fixed).map((p) => p.name), notesDefault: MOM_NOTES_DEFAULT });
   }
   if (path === "mom/actions" && req.method === "GET") {
     if (!can("mom")) return err("No rights", 403);
     const all = await listMoms(); const today = now().slice(0, 10); const out = [];
-    for (const m of all) for (const a of momActions(m.items || [])) out.push({ ...a, momId: m.id, ref: m.ref, project: m.project || "Internal management", momDate: m.date, momStatus: m.status, overdue: a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today });
+    for (const m of all) for (const a of momActions(m.items || [])) out.push({ ...a, momId: m.id, ref: m.ref, momDate: m.date, momStatus: m.status, overdue: a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today });
     out.sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999")));
     return json({ actions: out });
   }
   // Prefill for a new MOM: next reference, previous attendees and open actions of the same project carried into section 1.
   if (path === "mom/new" && req.method === "GET") {
     if (!can("mom")) return err("No rights", 403);
-    const project = url.searchParams.get("project") || "";
+    // One weekly meeting covers all projects: carry every open action of the latest minutes, keeping each item's project tag.
     const all = await listMoms();
-    const prev = all.find((m) => (m.project || "") === project) || null;
+    const prev = all[0] || null;
     const carry = [];
-    if (prev) for (const a of momActions(prev.items || [])) if (a.status !== "Done" && a.status !== "Closed") carry.push({ type: "item", text: `Review of previous action ${a.code} (${prev.ref}): ${a.text}`, actionBy: a.actionBy, due: a.due || "", dueText: a.dueText || "", status: "Open", carriedFrom: prev.id });
-    const items = carry.length ? [{ type: "section", text: `Review of previous minutes (${prev.ref})` }, ...carry] : [];
+    if (prev) for (const a of momActions(prev.items || [])) if (a.status !== "Done" && a.status !== "Closed") carry.push({ type: "item", scope: a.scope || "", text: `Review of previous action ${a.code} (${prev.ref}): ${a.text}`, actionBy: a.actionBy, due: a.due || "", dueText: a.dueText || "", status: "Open", carriedFrom: prev.id });
+    const items = carry.length ? [{ type: "section", scope: "", text: `Review of previous minutes (${prev.ref})` }, ...carry] : [];
     const nextNo = (num(settings.momSeq) || 0) + 1;
-    return json({ refPreview: `MA/MOM/${now().slice(0, 10)}/${String(nextNo).padStart(2, "0")}`, attendees: prev ? (prev.attendees || []) : [{ name: "Eng. Mohammed Abuassba", designation: "CEO (Chair)", company: "MA Group" }], items, title: prev ? prev.title : (project ? `Weekly Project Meeting — ${project}` : "Internal Management Meeting — Office & Site Operations"), venue: prev ? prev.venue : "MA Group Head Office", minutesBy: prev ? prev.minutesBy : "", projectLead: prev ? prev.projectLead || "" : "", notes: MOM_NOTES_DEFAULT });
+    return json({ refPreview: `MA/MOM/${now().slice(0, 10)}/${String(nextNo).padStart(2, "0")}`, attendees: prev ? (prev.attendees || []) : [{ name: "Eng. Mohammed Abuassba", designation: "CEO (Chair)", company: "MA Group" }], items, title: prev ? prev.title : "Weekly Management Meeting — Office & Site Operations", venue: prev ? prev.venue : "MA Group Head Office", minutesBy: prev ? prev.minutesBy : "", projectLead: prev ? prev.projectLead || "" : "", notes: MOM_NOTES_DEFAULT });
   }
   if (path === "mom/settings" && req.method === "POST") {
     if (!can("admin")) return err("CEO only", 403);
@@ -19315,7 +19324,7 @@ var api_default = async (req, context) => {
     rec.title = clean(b.title, 160); rec.project = clean(b.project, 120); rec.date = String(b.date); rec.time = clean(b.time, 40); rec.venue = clean(b.venue, 120);
     rec.chair = clean(b.chair, 120) || "Eng. Mohammed Abuassba, CEO"; rec.minutesBy = clean(b.minutesBy, 120); rec.distributionText = clean(b.distributionText, 200); rec.projectLead = clean(b.projectLead, 120); rec.nextMeeting = clean(b.nextMeeting, 160);
     rec.attendees = (Array.isArray(b.attendees) ? b.attendees : []).filter((a) => a && String(a.name || "").trim()).slice(0, 40).map((a) => ({ name: clean(a.name, 80), designation: clean(a.designation, 80), company: clean(a.company, 80) }));
-    rec.items = (Array.isArray(b.items) ? b.items : []).filter((it) => it && String(it.text || "").trim()).slice(0, 200).map((it) => ({ type: it.type === "section" ? "section" : "item", text: clean(it.text, 1500), actionBy: clean(it.actionBy, 120), due: /^\d{4}-\d{2}-\d{2}$/.test(String(it.due || "")) ? String(it.due) : "", dueText: clean(it.dueText, 80), status: ["Open", "In progress", "Done", "Closed"].includes(it.status) ? it.status : "Open", carriedFrom: clean(it.carriedFrom, 40) }));
+    rec.items = (Array.isArray(b.items) ? b.items : []).filter((it) => it && String(it.text || "").trim()).slice(0, 200).map((it) => ({ type: it.type === "section" ? "section" : "item", scope: clean(it.scope, 120), text: clean(it.text, 1500), actionBy: clean(it.actionBy, 120), due: /^\d{4}-\d{2}-\d{2}$/.test(String(it.due || "")) ? String(it.due) : "", dueText: clean(it.dueText, 80), status: ["Open", "In progress", "Done", "Closed"].includes(it.status) ? it.status : "Open", carriedFrom: clean(it.carriedFrom, 40) }));
     rec.notes = (Array.isArray(b.notes) ? b.notes : []).map((n) => clean(n, 500)).filter(Boolean).slice(0, 12);
     rec.updatedAt = now(); rec.updatedBy = me.name;
     rec.log.push({ at: now(), by: me.name, action: b.id ? "Edited" : "Created" });
