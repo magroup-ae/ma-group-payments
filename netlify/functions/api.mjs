@@ -13801,7 +13801,10 @@ var CAN = {
   marketing: ["CEO", "Marketing"],
   marketingApprove: ["CEO"],
   marketingPublish: ["CEO"],
-  users: ["CEO"]
+  users: ["CEO"],
+  // Meeting minutes: prepared by projects / admin staff, issued (e-mailed) by CEO, PM or the organizer.
+  mom: ["CEO", "PM", "QS", "Secretary", "HR", "Clerk", "Accounts"],
+  momIssue: ["CEO", "PM", "Secretary"]
 };
 // Clerk = data-entry + view only: can add expenses, suppliers, clients, assets
 // and view P&L/budget, but CANNOT approve, record payments/print cheques,
@@ -15781,6 +15784,144 @@ function buildCompReportHtml(rec, cfg, assets) {
   ${mahFooter(ent)}
 </div>${MAPG_JS}</body></html>`;
 }
+// ======================= Meeting minutes (MOM) =======================
+// One record per meeting, per project (or "Internal management"). Format follows the
+// CEO's approved template (05/09/2026): header block, attendees, numbered minutes
+// (sections + items with Action by / Due), auto action summary, general notes,
+// signature block. Issued minutes are e-mailed (PDF attached) to the staff list.
+var MOM_DIST_DEFAULT = ["ceo@maagroup.ae", "cfo@maagroup.ae", "hr@maagroup.ae", "melsayed@maagroup.ae", "account@maagroup.ae", "jayar@maagroup.ae", "ma.office@maagroup.ae", "info@marvellousart.net", "maria.ellaine@maagroup.ae", "raheem@maagroup.ae", "nasir@maagroup.ae", "sinan@maagroup.ae"];
+var MOM_ORGANIZERS = ["ma.office@maagroup.ae", "info@marvellousart.net"];
+var MOM_NOTES_DEFAULT = [
+  "These minutes record the decisions and instructions issued by management and are binding on all staff with immediate effect unless stated otherwise.",
+  "Any objection or correction to these minutes must be raised in writing to the CEO within two (2) working days of circulation; otherwise the minutes are deemed accepted.",
+  "Progress against the agreed dates is to be reported by the responsible team at the next weekly meeting."
+];
+function momDist(settings) {
+  const list = Array.isArray(settings.momDistribution) && settings.momDistribution.length ? settings.momDistribution : MOM_DIST_DEFAULT;
+  return [...new Set(list.map((e) => String(e || "").trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)))];
+}
+async function listMoms() {
+  const out = (await getAllJSON(store(), "mom/")).filter((v) => v && v.id);
+  out.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.ref || "").localeCompare(String(a.ref || "")));
+  return out;
+}
+function momNumber(items) {
+  // Sections get 1, 2, 3; items under a section get 1.1, 1.2; items before any section get plain numbers.
+  let sec = 0, sub = 0; const out = [];
+  for (const it of items || []) {
+    if (!it) continue;
+    if (it.type === "section") { sec++; sub = 0; out.push({ ...it, no: String(sec) }); }
+    else { sub++; out.push({ ...it, no: sec ? `${sec}.${sub}` : String(sub) }); }
+  }
+  return out;
+}
+function momActions(items) {
+  const acts = momNumber(items).filter((it) => it.type !== "section" && String(it.actionBy || "").trim());
+  const key = (d) => { const m = String(d || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : "9999"; };
+  acts.sort((a, b) => key(a.due).localeCompare(key(b.due)));
+  return acts.map((it, i) => ({ code: "A" + (i + 1), item: it.no, text: it.text, actionBy: it.actionBy, due: it.due, dueText: it.dueText || "", status: it.status || "Open" }));
+}
+function momDueLabel(d, txt) { if (txt) return txt; if (!d) return "—"; const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d); }
+function buildMomHtml(rec, cfg, assets) {
+  const esc = (x) => emEsc(x);
+  const ent = rec.entityName || "Marvellous Art Decoration Design & Fit Out Co. L.L.C";
+  const dayName = rec.date ? new Date(rec.date + "T00:00:00Z").toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" }) : "";
+  const numbered = momNumber(rec.items || []);
+  const rows = numbered.map((it) => it.type === "section"
+    ? `<tr class="sec-row"><td>${esc(it.no)}</td><td colspan="3"><b>${esc(it.text)}</b></td></tr>`
+    : `<tr><td>${esc(it.no)}</td><td>${esc(it.text).replace(/\n/g, "<br>")}</td><td>${esc(it.actionBy || "—")}</td><td>${esc(momDueLabel(it.due, it.dueText))}${it.status && it.status !== "Open" ? `<br><span class="st">${esc(it.status)}</span>` : ""}</td></tr>`).join("");
+  const acts = momActions(rec.items || []);
+  const actRows = acts.map((a) => `<tr><td>${a.code}</td><td>${esc(a.text)}</td><td>${esc(a.actionBy)}</td><td>${esc(momDueLabel(a.due, a.dueText))}</td></tr>`).join("") || `<tr><td colspan="4" style="color:#6b7280">No actions recorded.</td></tr>`;
+  const att = (rec.attendees || []).filter((a) => a && (a.name || "").trim());
+  const attRows = [...att, ...Array(Math.max(0, 8 - att.length)).fill(null)].map((a, i) => `<tr><td>${i + 1}</td><td>${a ? esc(a.name) : ""}</td><td>${a ? esc(a.designation || "") : ""}</td><td>${a ? esc(a.company || "") : ""}</td></tr>`).join("");
+  const notes = (rec.notes && rec.notes.length ? rec.notes : MOM_NOTES_DEFAULT).filter(Boolean).map((n) => `<li>${esc(n)}</li>`).join("");
+  const signImg = assets && assets.sign ? `<img src="${assets.sign}" style="height:46px;max-width:150px;object-fit:contain;display:block">` : `<div style="height:46px"></div>`;
+  const stampImg = assets && assets.stamp ? `<img src="${assets.stamp}" style="height:80px;opacity:.85;object-fit:contain">` : "";
+  const issued = rec.status === "Issued";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(rec.ref)} — Minutes of Meeting</title>
+<style>
+  *{box-sizing:border-box} body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2733;margin:0;background:#fff;font-size:12px;line-height:1.5}
+  .page{max-width:820px;margin:0 auto;padding:26px 34px}
+  ${MAH_CSS}
+  .band{background:#1F3864;color:#fff;text-align:center;padding:9px 12px;margin-top:12px}
+  .band .t{font-size:17px;font-weight:800;letter-spacing:1.6px}
+  .band .s{font-size:11px;color:#d8e0ea;margin-top:2px}
+  .goldrule{height:3px;background:#B8860B;margin-bottom:12px}
+  table.pt{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:11.5px}
+  table.pt td,table.pt th{border:1px solid #c9d1de;padding:5px 8px;vertical-align:top;text-align:left}
+  table.pt td.k{background:#D9E2F3;color:#1F3864;width:120px;font-weight:700}
+  table.pt th{background:#1F3864;color:#fff;font-size:11px}
+  tr.sec-row td{background:#D9E2F3;color:#1F3864}
+  .st{display:inline-block;font-size:9.5px;color:#375623;font-weight:700}
+  .sec{color:#1F3864;font-size:13px;font-weight:800;margin:14px 0 4px;border-left:4px solid #B8860B;padding-left:8px}
+  ul.notes{margin:4px 0 10px 18px;padding:0;font-size:11.5px} ul.notes li{margin-bottom:3px}
+  table.sig{width:100%;border-collapse:collapse;margin-top:16px;font-size:11px}
+  table.sig td{border:1px solid #c9d1de;padding:10px 12px;width:50%;vertical-align:top}
+  .sh{color:#5b6472;font-weight:700;font-size:10.5px;letter-spacing:.5px;text-transform:uppercase}
+  .sn{font-weight:800;color:#1F3864;margin:3px 0 8px}
+  .sl{color:#444;font-size:11px;margin-top:5px}
+  .draft{position:absolute;left:0;right:0;top:40%;text-align:center;font-size:90px;color:rgba(192,0,0,.10);font-weight:900;letter-spacing:12px;pointer-events:none}
+  ${MAPG_CSS}
+</style></head><body><div class="page">
+  ${mahHeader(cfg, ent)}
+  <div class="band"><div class="t">MINUTES OF MEETING</div><div class="s">${esc(rec.title || "")}</div></div><div class="goldrule"></div>
+  <table class="pt">
+    <tr><td class="k">Meeting</td><td>${esc(rec.title || "")}</td><td class="k">Reference</td><td><b>${esc(rec.ref)}</b>${issued ? "" : ' <span style="color:#C00000;font-weight:700">DRAFT</span>'}</td></tr>
+    <tr><td class="k">Project</td><td>${esc(rec.project || "Internal management")}</td><td class="k">Date · Time</td><td>${esc(dayName)}${dayName ? ", " : ""}${momDueLabel(rec.date)}${rec.time ? " · " + esc(rec.time) : ""}</td></tr>
+    <tr><td class="k">Venue</td><td>${esc(rec.venue || "MA Group Head Office")}</td><td class="k">Chaired by</td><td>${esc(rec.chair || "Eng. Mohammed Abuassba, CEO")}</td></tr>
+    <tr><td class="k">Minutes by</td><td>${esc(rec.minutesBy || "")}</td><td class="k">Distribution</td><td>${esc(rec.distributionText || "All office staff, site engineers and site supervisors")}</td></tr>
+  </table>
+  <div class="sec">1. ATTENDEES</div>
+  <table class="pt"><tr><th style="width:36px">No.</th><th>Name</th><th>Designation</th><th>Company / Site</th></tr>${attRows}</table>
+  <div class="sec">2. MINUTES, DECISIONS AND ACTIONS</div>
+  <table class="pt"><tr><th style="width:44px">Item</th><th>Discussion / Decision</th><th style="width:150px">Action by</th><th style="width:130px">Due / Status</th></tr>${rows || `<tr><td colspan="4" style="color:#6b7280">—</td></tr>`}</table>
+  <div class="sec">3. SUMMARY OF ACTIONS (BY DEADLINE)</div>
+  <table class="pt"><tr><th style="width:36px">#</th><th>Action</th><th style="width:150px">Responsible</th><th style="width:110px">Deadline</th></tr>${actRows}</table>
+  <div class="sec">4. GENERAL NOTES</div>
+  <ul class="notes">${notes}${rec.nextMeeting ? `<li>Next meeting: ${esc(rec.nextMeeting)}</li>` : ""}</ul>
+  <table class="sig"><tr>
+    <td><div class="sh">Prepared / Approved by</div><div class="sn">${esc(rec.chair || "Eng. Mohammed Abuassba")}</div>
+      <div style="position:relative">${issued ? signImg : `<div style="height:46px"></div>`}<div style="position:absolute;left:130px;top:-12px">${issued ? stampImg : ""}</div></div>
+      <div class="sl">Chief Executive Officer — MA Group</div><div class="sl">Date: ${momDueLabel(rec.issuedAt ? rec.issuedAt.slice(0, 10) : rec.date)}</div></td>
+    <td><div class="sh">Acknowledged by (Project / Site Lead)</div><div class="sn">${esc(rec.projectLead || "")}</div>
+      <div style="height:46px"></div>
+      <div class="sl">Name: ______________________________</div><div class="sl">Signature &amp; Date</div></td>
+  </tr></table>
+  <div style="color:#7a8494;font-size:9.5px;margin-top:8px">Ref: ${esc(rec.ref)} &nbsp;|&nbsp; ${esc(rec.title || "Minutes of Meeting")} &nbsp;|&nbsp; Confidential — for MA Group staff only.</div>
+  ${mahFooter(ent)}
+</div>${MAPG_JS}</body></html>`;
+}
+function momEmailHtml(rec, cfg, link) {
+  const esc = (x) => emEsc(x);
+  const acts = momActions(rec.items || []);
+  const table = [["Reference", rec.ref], ["Project", rec.project || "Internal management"], ["Date", momDueLabel(rec.date) + (rec.time ? " · " + rec.time : "")], ["Chaired by", rec.chair || "Eng. Mohammed Abuassba, CEO"], ["Actions recorded", String(acts.length)]];
+  const actList = acts.map((a) => `<b>${a.code}</b> — ${esc(a.text)} <span style="color:#5b6472">(${esc(a.actionBy)} · ${esc(momDueLabel(a.due, a.dueText))})</span>`);
+  return emailShell(cfg, {
+    title: `Minutes of Meeting — ${rec.title || ""}`, band: "#1F3864", greeting: "Team", preheader: `${rec.ref} — ${rec.title || "Minutes of Meeting"}`,
+    lead: [`Please find attached the minutes of the <b>${esc(rec.title || "meeting")}</b>${rec.project ? ` for <b>${esc(rec.project)}</b>` : ""} held on ${momDueLabel(rec.date)}. The decisions and instructions recorded are binding on all staff with immediate effect unless stated otherwise.`,
+      ...(actList.length ? ["<b>Summary of actions by deadline</b><br>" + actList.join("<br>")] : [])],
+    table, note: `Any objection or correction must be raised in writing to the CEO within two (2) working days of circulation; otherwise the minutes are deemed accepted.${link ? ` View in the management system: <a href="${link}" style="color:#1f3864">${link}</a>` : ""}`,
+    closing: "Regards,<br><b>Mohammed Abuassba</b><br>Chief Executive Officer — MA Group"
+  });
+}
+function momDigestHtml(cfg, moms, link) {
+  const esc = (x) => emEsc(x);
+  const today = now().slice(0, 10);
+  const open = [];
+  for (const m of moms) for (const a of momActions(m.items || [])) if (a.status !== "Done" && a.status !== "Closed") open.push({ ...a, ref: m.ref, project: m.project || "Internal management", overdue: a.due && a.due.slice(0, 10) < today });
+  open.sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999")));
+  const byProj = {}; for (const o of open) (byProj[o.project] = byProj[o.project] || []).push(o);
+  const blocks = Object.keys(byProj).sort().map((p) => `<b style="color:#1F3864">${esc(p)}</b><br>` + byProj[p].map((o) => `${o.overdue ? '<span style="color:#C00000;font-weight:700">OVERDUE</span> ' : ""}${esc(o.text)} <span style="color:#5b6472">(${esc(o.actionBy)} · due ${esc(momDueLabel(o.due, o.dueText))} · ${esc(o.ref)})</span>`).join("<br>"));
+  const recent = moms.filter((m) => m.status === "Issued" && m.issuedAt && Date.now() - new Date(m.issuedAt).getTime() < 8 * 864e5).map((m) => `${esc(m.ref)} — ${esc(m.title)} (${esc(m.project || "Internal management")}, ${momDueLabel(m.date)})`);
+  return emailShell(cfg, {
+    title: "Weekly minutes digest — open actions", band: "#1F3864", greeting: "Team", preheader: `${open.length} open actions across ${Object.keys(byProj).length} projects`,
+    lead: [`Weekly summary of the minutes of meeting and the actions still open, as of ${momDueLabel(today)}.`, recent.length ? "<b>Minutes issued this week</b><br>" + recent.join("<br>") : "No new minutes were issued this week.", ...(blocks.length ? blocks : ["No open actions."])],
+    table: [["Open actions", String(open.length)], ["Overdue", String(open.filter((o) => o.overdue).length)], ["Projects with open actions", String(Object.keys(byProj).length)]],
+    note: link ? `Full minutes and the action tracker: <a href="${link}" style="color:#1f3864">${link}</a>` : "",
+    closing: "Regards,<br><b>MA Group — Management System</b>"
+  });
+}
+
 function buildAwardDocHtml(rec, cfg, assets) {
   const isAgr = rec.type === "AGREEMENT";
   const money = (n) => emMoney(n), dt = (d) => emDate(d), esc = (x) => emEsc(x);
@@ -16177,6 +16318,20 @@ var api_default = async (req, context) => {
     try { const payload = JSON.parse(raw); if (payload && payload.object === "whatsapp_business_account") leads = await waHandleInbound(s, payload); } catch (e) { console.log("wa inbound parse failed", e.message); }
     await fwdP;
     return json({ ok: true, leads });
+  }
+  // Weekly MOM digest (cron-mom, Monday 08:00 Dubai): open actions by project to the staff list.
+  if (path === "mom/weekly-digest") {
+    const k = process.env.CRON_KEY || "";
+    if (!k || (req.headers.get("x-cron-key") || url.searchParams.get("k")) !== k) return err("Forbidden", 403);
+    try {
+      const cfg = await getEmailCfg(s); const moms = await listMoms(); const dist = momDist(settings);
+      if (!moms.length || !dist.length) return json({ ok: true, skipped: "no minutes or no distribution" });
+      const html = momDigestHtml(cfg, moms, `${mktEnv().siteUrl}/#mom`);
+      const orgs = dist.filter((e) => MOM_ORGANIZERS.includes(e)); const others = dist.filter((e) => !MOM_ORGANIZERS.includes(e));
+      const to = orgs[0] || others[0]; const cc = [...orgs.slice(1), ...others].filter((e) => e !== to);
+      const r = await sendMail(s, cfg, { type: "mom", to, toName: "MA Group staff", cc, subject: `Weekly minutes digest — open actions (${momDueLabel(now().slice(0, 10))})`, html });
+      return json({ ok: true, status: r.status, count: dist.length });
+    } catch (e) { return err(e.message, 500); }
   }
   // Scheduled publishing runner (called by cron-mkt every 15 min with the shared key).
   if (path === "mkt/run-scheduled") {
@@ -19106,6 +19261,127 @@ var api_default = async (req, context) => {
       runs: runs.slice(0, 15)
     });
   }
+  // ---- Meeting minutes (MOM) ----
+  if (path === "mom/list" && req.method === "GET") {
+    if (!can("mom")) return err("No rights", 403);
+    const all = await listMoms();
+    const today = now().slice(0, 10);
+    const light = all.map((m) => { const acts = momActions(m.items || []); return { id: m.id, ref: m.ref, title: m.title, project: m.project || "", date: m.date, status: m.status, issuedAt: m.issuedAt || "", sentTo: (m.sentTo || []).length, attendees: (m.attendees || []).filter((a) => a && a.name).length, actions: acts.length, open: acts.filter((a) => a.status !== "Done" && a.status !== "Closed").length, overdue: acts.filter((a) => a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today).length, updatedAt: m.updatedAt, updatedBy: m.updatedBy }; });
+    const stg = settings;
+    return json({ moms: light, distribution: momDist(stg), organizers: MOM_ORGANIZERS, canIssue: can("momIssue"), canEditDist: can("admin"), projects: (stg.projects || []).filter((p) => p && p.name && !p.fixed).map((p) => p.name), notesDefault: MOM_NOTES_DEFAULT });
+  }
+  if (path === "mom/actions" && req.method === "GET") {
+    if (!can("mom")) return err("No rights", 403);
+    const all = await listMoms(); const today = now().slice(0, 10); const out = [];
+    for (const m of all) for (const a of momActions(m.items || [])) out.push({ ...a, momId: m.id, ref: m.ref, project: m.project || "Internal management", momDate: m.date, momStatus: m.status, overdue: a.status !== "Done" && a.status !== "Closed" && a.due && a.due.slice(0, 10) < today });
+    out.sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999")));
+    return json({ actions: out });
+  }
+  // Prefill for a new MOM: next reference, previous attendees and open actions of the same project carried into section 1.
+  if (path === "mom/new" && req.method === "GET") {
+    if (!can("mom")) return err("No rights", 403);
+    const project = url.searchParams.get("project") || "";
+    const all = await listMoms();
+    const prev = all.find((m) => (m.project || "") === project) || null;
+    const carry = [];
+    if (prev) for (const a of momActions(prev.items || [])) if (a.status !== "Done" && a.status !== "Closed") carry.push({ type: "item", text: `Review of previous action ${a.code} (${prev.ref}): ${a.text}`, actionBy: a.actionBy, due: a.due || "", dueText: a.dueText || "", status: "Open", carriedFrom: prev.id });
+    const items = carry.length ? [{ type: "section", text: `Review of previous minutes (${prev.ref})` }, ...carry] : [];
+    const nextNo = (num(settings.momSeq) || 0) + 1;
+    return json({ refPreview: `MA/MOM/${now().slice(0, 10)}/${String(nextNo).padStart(2, "0")}`, attendees: prev ? (prev.attendees || []) : [{ name: "Eng. Mohammed Abuassba", designation: "CEO (Chair)", company: "MA Group" }], items, title: prev ? prev.title : (project ? `Weekly Project Meeting — ${project}` : "Internal Management Meeting — Office & Site Operations"), venue: prev ? prev.venue : "MA Group Head Office", minutesBy: prev ? prev.minutesBy : "", projectLead: prev ? prev.projectLead || "" : "", notes: MOM_NOTES_DEFAULT });
+  }
+  if (path === "mom/settings" && req.method === "POST") {
+    if (!can("admin")) return err("CEO only", 403);
+    const b = await req.json();
+    const list = String(b.distribution || "").split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (!list.length) return err("Enter at least one valid e-mail");
+    settings.momDistribution = [...new Set(list)];
+    await s.setJSON("settings", settings);
+    return json({ ok: true, distribution: settings.momDistribution });
+  }
+  if (path === "mom" && req.method === "POST") {
+    if (!can("mom")) return err("No rights", 403);
+    const b = await req.json();
+    let rec = b.id ? await s.get("mom/" + b.id, { type: "json" }) : null;
+    if (b.id && !rec) return err("Minutes not found", 404);
+    if (rec && rec.status === "Issued" && !can("momIssue")) return err("Issued minutes can only be amended by the CEO / PM", 403);
+    if (!b.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.date))) return err("Meeting date is required");
+    if (!String(b.title || "").trim()) return err("Meeting title is required");
+    if (!rec) {
+      const n = (num(settings.momSeq) || 0) + 1; settings.momSeq = n; await s.setJSON("settings", settings);
+      const id = `MOM-${String(b.date).replace(/-/g, "")}-${String(n).padStart(2, "0")}`;
+      rec = { id, ref: `MA/MOM/${b.date}/${String(n).padStart(2, "0")}`, status: "Draft", createdAt: now(), createdBy: me.name, log: [] };
+    }
+    const clean = (v, n = 300) => String(v == null ? "" : v).slice(0, n);
+    rec.title = clean(b.title, 160); rec.project = clean(b.project, 120); rec.date = String(b.date); rec.time = clean(b.time, 40); rec.venue = clean(b.venue, 120);
+    rec.chair = clean(b.chair, 120) || "Eng. Mohammed Abuassba, CEO"; rec.minutesBy = clean(b.minutesBy, 120); rec.distributionText = clean(b.distributionText, 200); rec.projectLead = clean(b.projectLead, 120); rec.nextMeeting = clean(b.nextMeeting, 160);
+    rec.attendees = (Array.isArray(b.attendees) ? b.attendees : []).filter((a) => a && String(a.name || "").trim()).slice(0, 40).map((a) => ({ name: clean(a.name, 80), designation: clean(a.designation, 80), company: clean(a.company, 80) }));
+    rec.items = (Array.isArray(b.items) ? b.items : []).filter((it) => it && String(it.text || "").trim()).slice(0, 200).map((it) => ({ type: it.type === "section" ? "section" : "item", text: clean(it.text, 1500), actionBy: clean(it.actionBy, 120), due: /^\d{4}-\d{2}-\d{2}$/.test(String(it.due || "")) ? String(it.due) : "", dueText: clean(it.dueText, 80), status: ["Open", "In progress", "Done", "Closed"].includes(it.status) ? it.status : "Open", carriedFrom: clean(it.carriedFrom, 40) }));
+    rec.notes = (Array.isArray(b.notes) ? b.notes : []).map((n) => clean(n, 500)).filter(Boolean).slice(0, 12);
+    rec.updatedAt = now(); rec.updatedBy = me.name;
+    rec.log.push({ at: now(), by: me.name, action: b.id ? "Edited" : "Created" });
+    await s.setJSON("mom/" + rec.id, rec);
+    return json({ ok: true, id: rec.id, ref: rec.ref });
+  }
+  const momHtml = path.match(/^mom\/([^/]+)\/html$/);
+  if (momHtml && req.method === "GET") {
+    if (!can("mom")) return err("No rights", 403);
+    const rec = await s.get("mom/" + momHtml[1], { type: "json" }); if (!rec) return err("Not found", 404);
+    const cfg = await getEmailCfg(s);
+    const sign = await s.get("asset/sign").catch(() => "") || ""; const stamp = await s.get("asset/stamp").catch(() => "") || "";
+    // ?issued=1 renders the signed version (used for the PDF attached at the moment of issue).
+    const asIssued = url.searchParams.get("issued") === "1" && can("momIssue");
+    const view = asIssued ? { ...rec, status: "Issued", issuedAt: rec.issuedAt || now() } : rec;
+    return new Response(buildMomHtml(view, cfg, { sign, stamp }), { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  const momAct = path.match(/^mom\/([^/]+)\/action$/);
+  if (momAct && req.method === "POST") {
+    // Update one action's status (Open / In progress / Done) from the tracker.
+    if (!can("mom")) return err("No rights", 403);
+    const rec = await s.get("mom/" + momAct[1], { type: "json" }); if (!rec) return err("Not found", 404);
+    const b = await req.json(); const numbered = momNumber(rec.items || []); const idx = numbered.findIndex((it) => it.no === String(b.item));
+    if (idx < 0) return err("Item not found", 404);
+    rec.items[idx].status = ["Open", "In progress", "Done", "Closed"].includes(b.status) ? b.status : "Open";
+    rec.log.push({ at: now(), by: me.name, action: `Item ${b.item} → ${rec.items[idx].status}` }); rec.updatedAt = now(); rec.updatedBy = me.name;
+    await s.setJSON("mom/" + rec.id, rec);
+    return json({ ok: true });
+  }
+  const momIssue = path.match(/^mom\/([^/]+)\/issue$/);
+  if (momIssue && req.method === "POST") {
+    // Issue and e-mail to the staff distribution list (PDF rendered in the browser and attached).
+    if (!can("momIssue")) return err("Only the CEO / PM / organizer can issue minutes", 403);
+    const rec = await s.get("mom/" + momIssue[1], { type: "json" }); if (!rec) return err("Not found", 404);
+    const b = await req.json().catch(() => ({}));
+    const cfg = await getEmailCfg(s);
+    const dist = momDist(settings);
+    if (!dist.length) return err("Distribution list is empty — set it in Meeting minutes → Distribution", 400);
+    if (!rec.issuedAt) { rec.issuedAt = now(); rec.issuedBy = me.name; }
+    rec.status = "Issued";
+    const link = `${mktEnv().siteUrl}/#mom=${rec.id}`;
+    const html = momEmailHtml(rec, cfg, link);
+    let attachments;
+    if (b && b.pdfBase64) attachments = [{ filename: String(b.pdfName || (rec.ref.replace(/[^A-Za-z0-9._-]+/g, "_") + ".pdf")), content: Buffer.from(String(b.pdfBase64), "base64"), contentType: "application/pdf" }];
+    const subject = `${rec.ref} — Minutes of Meeting — ${rec.title}${rec.project ? " — " + rec.project : ""} (${momDueLabel(rec.date)})`;
+    // One e-mail: To = organizers, CC = everyone else (internal list, visible to all).
+    const orgs = dist.filter((e) => MOM_ORGANIZERS.includes(e)); const others = dist.filter((e) => !MOM_ORGANIZERS.includes(e));
+    const to = orgs[0] || others[0]; const cc = [...orgs.slice(1), ...others].filter((e) => e !== to);
+    const r = await sendMail(s, cfg, { type: "mom", to, toName: "MA Group staff", cc, subject, html, attachments });
+    rec.sentTo = dist; rec.sentAt = now(); rec.sendStatus = r.status; rec.sendCount = (rec.sendCount || 0) + 1;
+    rec.log.push({ at: now(), by: me.name, action: `Issued & sent to ${dist.length} recipients (${r.status})${attachments ? " with PDF" : ""}` });
+    await s.setJSON("mom/" + rec.id, rec);
+    return json({ ok: true, status: r.status, count: dist.length, to, cc });
+  }
+  if (path.startsWith("mom/") && req.method === "GET" && !path.includes("/", 4)) {
+    if (!can("mom")) return err("No rights", 403);
+    const rec = await s.get("mom/" + path.slice(4), { type: "json" }); if (!rec) return err("Not found", 404);
+    return json({ ...rec, numbered: momNumber(rec.items || []), actions: momActions(rec.items || []) });
+  }
+  if (path.startsWith("mom/") && req.method === "DELETE") {
+    if (!can("admin")) return err("CEO only", 403);
+    const rec = await s.get("mom/" + path.slice(4), { type: "json" }); if (!rec) return err("Not found", 404);
+    if (rec.status === "Issued") return err("Issued minutes cannot be deleted — they are a record", 400);
+    await s.delete("mom/" + rec.id); return json({ ok: true });
+  }
+
   if (path === "mkt/queue" && req.method === "GET") {
     if (!can("marketing")) return err("No rights", 403);
     const ch = url.searchParams.get("channel") || "linkedin";
@@ -19654,7 +19930,7 @@ var api_default = async (req, context) => {
   }
   if (path === "backup" && req.method === "GET") {
     if (!can("admin")) return err("CEO only", 403);
-    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/", "mkt/post/", "mkt/audience/", "mkt/sent/", "mkt/lead/", "wa/contact/"];
+    const prefixes = ["supplier/", "cert/", "client/", "contract/", "clientcert/", "clientreceipt/", "expense/", "budget/", "asset/", "opsfixed/", "opspayroll/", "opsstaff/", "opsalloc/", "opsatt/", "mom/", "mkt/post/", "mkt/audience/", "mkt/sent/", "mkt/lead/", "wa/contact/"];
     const data = {};
     for (const p of prefixes) data[p.replace(/\//g, "")] = await getAllJSON(s, p);
     data.settings = await s.get("settings", { type: "json" });

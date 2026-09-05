@@ -495,6 +495,7 @@ async function unlockSettings(){
 // Monochrome line icons — inherit the menu colour, no emoji, corporate look.
 const ICO=(d,extra="")=>`<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}${extra}</svg>`;
 const ICONS={
+  mom:ICO('<path d="M8 3h8l3 3v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 11h6M9 15h6M9 7h3"/>'),
   dash:ICO('<rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="11" width="7" height="10" rx="1"/>'),
   clients:ICO('<path d="M3 21h18M5 21V6l7-3v18M19 21V11l-7-3"/><path d="M8 9h1M8 13h1M8 17h1M15 14h1M15 18h1"/>'),
   ccerts:ICO('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),
@@ -523,7 +524,7 @@ function render(){
   const has=(...roles)=>roles.includes(r);
   // Department logins see only their own pages. HR & Admin → operations cost,
   // assets, expenses, suppliers, announcements. Marketing → marketing pages.
-  const DEPT_PAGES={ HR:["ops","assets","expenses","sups","announce"], Marketing:["marketing","announce"] };
+  const DEPT_PAGES={ HR:["ops","assets","expenses","sups","announce","mom"], Marketing:["marketing","announce","mom"] };
   const allowed=(k)=>!DEPT_PAGES[r]||DEPT_PAGES[r].includes(k);
   // Menu grouped the way the business actually works: money in, money out,
   // finance & control, delivery, then administration.
@@ -533,7 +534,8 @@ function render(){
       ["clients","Clients"],
       ["ccerts","Client IPCs"],
       ["vos","Variations"],
-      ["projects","Projects"]]],
+      ["projects","Projects"],
+      ["mom","Meeting minutes"]]],
     ["Cost — supplier side", [
       ["certs","Supplier IPCs"],
       ["sups","Suppliers"],
@@ -595,7 +597,7 @@ function render(){
   $("#outBtn").onclick=e=>{e.preventDefault();TOKEN="";settingsUnlocked=false;sessionStorage.removeItem("tok");renderLogin();};
   $("#pinBtn").onclick=async e=>{e.preventDefault(); const p=prompt("New PIN (4-8 digits):"); if(!p) return;
     try{ await api("pin",{method:"POST",body:{pin:p}}); toast("PIN changed"); }catch(x){ toast(x.message); }};
-  ({dash:vDash, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, ops:vOps, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, marketing:vMarketing, settings:vSettings})[VIEW]();
+  ({dash:vDash, mom:vMom, certs:vCerts, projects:vProjects, sups:vSups, cheques:vCheques, reg:vReg, clients:vClients, ccerts:vClientCerts, vos:vVos, expenses:vExpenses, pnl:vPnl, budget:vBudget, ops:vOps, assets:vAssets, bank:vBank, procure:vProc, awards:vAwards, hocerts:vCompCerts, announce:vAnnounce, marketing:vMarketing, settings:vSettings})[VIEW]();
 }
 
 // Live sync: when a user returns to the tab, pull the latest shared data so the
@@ -4950,6 +4952,152 @@ async function renderMktAutomation(box){
   $("#mkAutoRefresh").onclick=()=>renderMktAutomation(box);
 }
 
+/* ---------- Meeting minutes (MOM) ---------- */
+let MOM_TAB="list", MOM_EDIT=null, MOM_OPEN_ID=null, MOM_DATA=null;
+const momCan={ edit:()=>["CEO","PM","QS","Secretary","HR","Clerk","Accounts"].includes(ME.role), issue:()=>["CEO","PM","Secretary"].includes(ME.role) };
+function momPill(st){ return `<span class="pill ${st==="Issued"?"st-Approved":"st-Draft"}">${esc(st||"Draft")}</span>`; }
+function momDue(d,t){ if(t) return esc(t); if(!d) return "—"; return dmy(d); }
+async function vMom(){
+  $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
+  try{ MOM_DATA=await api("mom/list"); }catch(e){ $("#main").innerHTML=`<div class="card muted">${esc(e.message)}</div>`; return; }
+  if(window.MOM_BOOT_OPEN){ const id=window.MOM_BOOT_OPEN; window.MOM_BOOT_OPEN=""; try{ MOM_EDIT=await api("mom/"+id); }catch(e){} }
+  const d=MOM_DATA;
+  const tab=(k,l)=>`<button class="btn ${MOM_TAB===k?"gold":"ghost"}" data-mtab="${k}">${l}</button>`;
+  $("#main").innerHTML=`<div class="card">
+    <div class="flex" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Meeting minutes <span class="muted" style="font-weight:500;font-size:12px">one format for every project — issued minutes are e-mailed to all staff</span></h2>
+      <div class="right flex" style="gap:6px">${tab("list","Minutes")}${tab("actions","Action tracker")}${tab("dist","Distribution list")}${momCan.edit()?`<button class="btn gold" id="momNew">+ New minutes</button>`:""}</div></div>
+    <div id="momBody" style="margin-top:12px"></div></div>`;
+  $("#main").querySelectorAll("[data-mtab]").forEach(b=>b.onclick=()=>{ MOM_TAB=b.dataset.mtab; MOM_EDIT=null; vMom(); });
+  const nb=$("#momNew"); if(nb) nb.onclick=()=>momNewDialog();
+  const body=$("#momBody");
+  if(MOM_EDIT){ renderMomForm(body,MOM_EDIT); return; }
+  if(MOM_TAB==="actions") return renderMomActions(body);
+  if(MOM_TAB==="dist") return renderMomDist(body);
+  renderMomList(body);
+}
+function renderMomList(el){
+  const d=MOM_DATA; const projs=[...new Set(d.moms.map(m=>m.project||"Internal management"))].sort();
+  const filt=window.MOM_FILTER||"";
+  const rows=d.moms.filter(m=>!filt||(m.project||"Internal management")===filt);
+  el.innerHTML=`<div class="flex" style="flex-wrap:wrap;gap:8px"><select id="momFilter" style="max-width:320px"><option value="">All projects</option>${projs.map(p=>`<option ${p===filt?"selected":""}>${esc(p)}</option>`).join("")}</select>
+     <span class="muted" style="font-size:12px">${d.moms.length} minutes · ${d.moms.filter(m=>m.status==="Issued").length} issued · ${d.moms.reduce((t,m)=>t+m.open,0)} open actions</span></div>
+   <div style="overflow-x:auto;margin-top:8px"><table><tr><th>Reference</th><th>Date</th><th>Project</th><th>Meeting</th><th class="num">Attendees</th><th class="num">Actions</th><th class="num">Open</th><th>Status</th><th>Sent</th><th></th></tr>
+   ${rows.map(m=>`<tr class="click" data-open="${esc(m.id)}"><td><b>${esc(m.ref)}</b></td><td style="white-space:nowrap">${dmy(m.date)}</td><td>${esc(m.project||"Internal management")}</td><td>${esc(m.title)}</td><td class="num">${m.attendees}</td><td class="num">${m.actions}</td><td class="num">${m.open?`<b style="color:${m.overdue?"var(--red)":"var(--gold)"}">${m.open}</b>${m.overdue?` <span class="muted">(${m.overdue} overdue)</span>`:""}`:"0"}</td><td>${momPill(m.status)}</td><td style="font-size:12px">${m.sentTo?`${m.sentTo} recipients<br><span class="muted">${dmy(m.issuedAt)}</span>`:"—"}</td><td><a href="#" data-print="${esc(m.id)}">view / print</a></td></tr>`).join("")||`<tr><td colspan="10" class="muted">No minutes yet — press <b>+ New minutes</b>.</td></tr>`}
+   </table></div>
+   <div class="note" style="margin-top:10px"><b>How it works:</b> prepare the minutes (organizer or project team) → <b>Issue &amp; send</b> (CEO / PM / organizer) e-mails the signed PDF to the ${d.distribution.length}-address staff list and locks the record → every <b>Monday 08:00</b> the system e-mails a digest of all open actions by project. Open actions of the previous meeting are carried automatically into section 1 of the next minutes for the same project.</div>`;
+  $("#momFilter").onchange=e=>{ window.MOM_FILTER=e.target.value; renderMomList(el); };
+  el.querySelectorAll("[data-open]").forEach(r=>r.onclick=e=>{ if(e.target.closest("a")) return; openMom(r.dataset.open); });
+  el.querySelectorAll("[data-print]").forEach(a=>a.onclick=e=>{ e.preventDefault(); openMomDoc(a.dataset.print,false); });
+}
+async function openMomDoc(id,doPrint){
+  try{ const html=await apiText("mom/"+id+"/html"); const w=window.open("","_blank"); if(!w){ toast("Allow pop-ups to view the document"); return; } w.document.open(); w.document.write(html); w.document.close(); if(doPrint) waitPaginateThenPrint(w); }catch(e){ toast(e.message); }
+}
+async function openMom(id){ try{ MOM_EDIT=await api("mom/"+id); MOM_OPEN_ID=id; vMom(); }catch(e){ toast(e.message); } }
+function momNewDialog(){
+  const projs=(MOM_DATA&&MOM_DATA.projects)||[];
+  const dlg=document.createElement("dialog"); dlg.style.cssText="border:0;border-radius:12px;padding:20px;width:min(480px,92vw)";
+  dlg.innerHTML=`<h3 style="margin:0 0 10px">New minutes</h3><label>Project</label><select id="nmProj"><option value="">Internal management (office &amp; site operations)</option>${projs.map(p=>`<option>${esc(p)}</option>`).join("")}</select>
+   <label style="margin-top:8px">Meeting date</label><input id="nmDate" type="date" value="${new Date().toISOString().slice(0,10)}">
+   <div class="muted" style="font-size:11.5px;margin-top:8px">The previous minutes of the same project are used to prefill attendees and to carry open actions into section 1.</div>
+   <div class="flex" style="justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn ghost" id="nmCancel">Cancel</button><button class="btn gold" id="nmGo">Create</button></div>`;
+  document.body.appendChild(dlg); dlg.showModal();
+  dlg.querySelector("#nmCancel").onclick=()=>{ dlg.close(); dlg.remove(); };
+  dlg.querySelector("#nmGo").onclick=async()=>{ const project=dlg.querySelector("#nmProj").value, date=dlg.querySelector("#nmDate").value; dlg.close(); dlg.remove();
+    try{ const pre=await api("mom/new?project="+encodeURIComponent(project)); MOM_EDIT={ id:"", ref:pre.refPreview+" (assigned on save)", status:"Draft", project, date, time:"", title:pre.title, venue:pre.venue, chair:"Eng. Mohammed Abuassba, CEO", minutesBy:pre.minutesBy||"", distributionText:"All office staff, site engineers and site supervisors", projectLead:pre.projectLead||"", attendees:pre.attendees||[], items:pre.items||[], notes:pre.notes||[], nextMeeting:"", log:[] }; vMom(); }catch(e){ toast(e.message); } };
+}
+function renderMomForm(el,m){
+  const ro=m.status==="Issued"&&!momCan.issue();
+  const ATT=(m.attendees||[]).map(a=>({...a})); const IT=(m.items||[]).map(i=>({...i})); const NOTES=(m.notes&&m.notes.length?m.notes:(MOM_DATA.notesDefault||[])).slice();
+  const dis=ro?"disabled":"";
+  const draw=()=>{
+    const attRows=ATT.map((a,i)=>`<tr><td>${i+1}</td><td><input data-att="${i}" data-f="name" value="${esc(a.name||"")}" ${dis} placeholder="Name"></td><td><input data-att="${i}" data-f="designation" value="${esc(a.designation||"")}" ${dis} placeholder="Designation"></td><td><input data-att="${i}" data-f="company" value="${esc(a.company||"")}" ${dis} placeholder="Company / site"></td><td>${ro?"":`<a href="#" data-attrm="${i}" style="color:var(--red)">✕</a>`}</td></tr>`).join("");
+    let sec=0,sub=0; const itRows=IT.map((it,i)=>{ let no; if(it.type==="section"){ sec++; sub=0; no=String(sec); } else { sub++; no=sec?sec+"."+sub:String(sub); }
+      return it.type==="section"
+        ? `<tr style="background:#D9E2F3"><td><b>${no}</b></td><td colspan="3"><input data-it="${i}" data-f="text" value="${esc(it.text||"")}" ${dis} placeholder="Section heading, e.g. Working Hours" style="font-weight:700;background:transparent;border-color:transparent"></td><td style="white-space:nowrap">${ro?"":`<a href="#" data-itup="${i}">↑</a> <a href="#" data-itdn="${i}">↓</a> <a href="#" data-itrm="${i}" style="color:var(--red)">✕</a>`}</td></tr>`
+        : `<tr><td>${no}</td><td><textarea data-it="${i}" data-f="text" rows="2" ${dis} placeholder="Discussion / decision">${esc(it.text||"")}</textarea></td><td><input data-it="${i}" data-f="actionBy" value="${esc(it.actionBy||"")}" ${dis} placeholder="Action by (leave empty = information only)"></td><td><input data-it="${i}" data-f="due" type="date" value="${esc(it.due||"")}" ${dis}><input data-it="${i}" data-f="dueText" value="${esc(it.dueText||"")}" ${dis} placeholder="or text, e.g. Immediate – daily" style="margin-top:4px"><select data-it="${i}" data-f="status" ${dis} style="margin-top:4px">${["Open","In progress","Done","Closed"].map(s=>`<option ${s===(it.status||"Open")?"selected":""}>${s}</option>`).join("")}</select></td><td style="white-space:nowrap">${ro?"":`<a href="#" data-itup="${i}">↑</a> <a href="#" data-itdn="${i}">↓</a> <a href="#" data-itrm="${i}" style="color:var(--red)">✕</a>`}</td></tr>`; }).join("");
+    el.innerHTML=`<div class="flex" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">${esc(m.ref)}</h3>${momPill(m.status)}${m.issuedAt?`<span class="muted" style="font-size:12px">issued ${dmy(m.issuedAt)} by ${esc(m.issuedBy||"")}${m.sentTo?` · sent to ${m.sentTo.length}`:""}</span>`:""}<button class="btn ghost right" id="momBack">← Back to list</button></div>
+     <div class="grid" style="margin-top:10px">
+      <div style="grid-column:1/-1"><label>Meeting title</label><input id="mm_title" value="${esc(m.title||"")}" ${dis}></div>
+      <div><label>Project</label><input id="mm_proj" value="${esc(m.project||"")}" ${dis} placeholder="blank = Internal management" list="mm_projs"><datalist id="mm_projs">${(MOM_DATA.projects||[]).map(p=>`<option value="${esc(p)}">`).join("")}</datalist></div>
+      <div><label>Date</label><input id="mm_date" type="date" value="${esc(m.date||"")}" ${dis}></div>
+      <div><label>Time</label><input id="mm_time" value="${esc(m.time||"")}" ${dis} placeholder="e.g. 10:00 – 11:30"></div>
+      <div><label>Venue</label><input id="mm_venue" value="${esc(m.venue||"")}" ${dis}></div>
+      <div><label>Chaired by</label><input id="mm_chair" value="${esc(m.chair||"")}" ${dis}></div>
+      <div><label>Minutes by</label><input id="mm_by" value="${esc(m.minutesBy||"")}" ${dis} placeholder="Organizer / secretary"></div>
+      <div><label>Project / site lead (acknowledges)</label><input id="mm_lead" value="${esc(m.projectLead||"")}" ${dis}></div>
+      <div><label>Distribution (as printed)</label><input id="mm_dist" value="${esc(m.distributionText||"")}" ${dis}></div>
+      <div><label>Next meeting</label><input id="mm_next" value="${esc(m.nextMeeting||"")}" ${dis} placeholder="e.g. Saturday 12/09/2026, 10:00, Head Office"></div>
+     </div>
+     <h3>1. Attendees</h3>
+     <div style="overflow-x:auto"><table><tr><th style="width:36px">No.</th><th>Name</th><th>Designation</th><th>Company / site</th><th></th></tr>${attRows}</table></div>
+     ${ro?"":`<button class="btn ghost" id="mm_addAtt" style="margin-top:6px">+ Attendee</button>`}
+     <h3>2. Minutes, decisions and actions</h3>
+     <div style="overflow-x:auto"><table><tr><th style="width:44px">Item</th><th>Discussion / decision</th><th style="width:200px">Action by</th><th style="width:190px">Due / status</th><th></th></tr>${itRows||`<tr><td colspan="5" class="muted">No items yet.</td></tr>`}</table></div>
+     ${ro?"":`<div class="flex" style="gap:6px;margin-top:6px"><button class="btn ghost" id="mm_addSec">+ Section</button><button class="btn ghost" id="mm_addItem">+ Item</button><span class="muted" style="font-size:11.5px">Items with an <b>Action by</b> appear automatically in “3. Summary of actions (by deadline)”.</span></div>`}
+     <h3>4. General notes</h3>
+     <div id="mm_notes">${NOTES.map((n,i)=>`<div class="flex" style="gap:6px;margin-bottom:4px"><input data-note="${i}" value="${esc(n)}" ${dis}>${ro?"":`<a href="#" data-noterm="${i}" style="color:var(--red)">✕</a>`}</div>`).join("")}</div>
+     ${ro?"":`<button class="btn ghost" id="mm_addNote">+ Note</button>`}
+     <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:16px" id="mm_actions"></div>
+     ${(m.log||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">History (${m.log.length})</summary><div style="font-size:11.5px">${m.log.slice().reverse().map(l=>`<div>${dmy(l.at)} · ${esc(l.by)} — ${esc(l.action)}</div>`).join("")}</div></details>`:""}`;
+    // wiring
+    $("#momBack").onclick=()=>{ MOM_EDIT=null; vMom(); };
+    el.querySelectorAll("[data-att]").forEach(i=>i.oninput=()=>{ ATT[+i.dataset.att][i.dataset.f]=i.value; });
+    el.querySelectorAll("[data-attrm]").forEach(a=>a.onclick=e=>{ e.preventDefault(); ATT.splice(+a.dataset.attrm,1); draw(); });
+    const aa=$("#mm_addAtt"); if(aa) aa.onclick=()=>{ ATT.push({name:"",designation:"",company:""}); draw(); setTimeout(()=>{ const last=el.querySelectorAll('[data-att][data-f="name"]'); if(last.length) last[last.length-1].focus(); },0); };
+    el.querySelectorAll("[data-it]").forEach(i=>i.oninput=()=>{ IT[+i.dataset.it][i.dataset.f]=i.value; });
+    el.querySelectorAll("[data-itrm]").forEach(a=>a.onclick=e=>{ e.preventDefault(); IT.splice(+a.dataset.itrm,1); draw(); });
+    el.querySelectorAll("[data-itup]").forEach(a=>a.onclick=e=>{ e.preventDefault(); const i=+a.dataset.itup; if(i>0){ [IT[i-1],IT[i]]=[IT[i],IT[i-1]]; draw(); } });
+    el.querySelectorAll("[data-itdn]").forEach(a=>a.onclick=e=>{ e.preventDefault(); const i=+a.dataset.itdn; if(i<IT.length-1){ [IT[i+1],IT[i]]=[IT[i],IT[i+1]]; draw(); } });
+    const as=$("#mm_addSec"); if(as) as.onclick=()=>{ IT.push({type:"section",text:""}); draw(); };
+    const ai=$("#mm_addItem"); if(ai) ai.onclick=()=>{ IT.push({type:"item",text:"",actionBy:"",due:"",dueText:"",status:"Open"}); draw(); };
+    el.querySelectorAll("[data-note]").forEach(i=>i.oninput=()=>{ NOTES[+i.dataset.note]=i.value; });
+    el.querySelectorAll("[data-noterm]").forEach(a=>a.onclick=e=>{ e.preventDefault(); NOTES.splice(+a.dataset.noterm,1); draw(); });
+    const an=$("#mm_addNote"); if(an) an.onclick=()=>{ NOTES.push(""); draw(); };
+    const gather=()=>({ id:m.id||undefined, title:$("#mm_title").value.trim(), project:$("#mm_proj").value.trim(), date:$("#mm_date").value, time:$("#mm_time").value.trim(), venue:$("#mm_venue").value.trim(), chair:$("#mm_chair").value.trim(), minutesBy:$("#mm_by").value.trim(), projectLead:$("#mm_lead").value.trim(), distributionText:$("#mm_dist").value.trim(), nextMeeting:$("#mm_next").value.trim(), attendees:ATT, items:IT, notes:NOTES.filter(n=>n&&n.trim()) });
+    const save=async(silent)=>{ const r=await api("mom",{method:"POST",body:gather()}); if(!silent) toast("Saved "+r.ref); return r.id; };
+    const act=$("#mm_actions"); let h="";
+    if(!ro) h+=`<button class="btn gold" id="mm_save">Save</button>`;
+    if(m.id) h+=`<button class="btn ghost" id="mm_view">View / print</button><button class="btn ghost" id="mm_pdf">⤓ PDF</button>`;
+    if(m.id&&momCan.issue()) h+=`<button class="btn green" id="mm_issue">${m.status==="Issued"?"Re-send to staff":"Issue & send to staff"} (${MOM_DATA.distribution.length})</button>`;
+    if(m.id&&ME.role==="CEO"&&m.status!=="Issued") h+=`<button class="btn danger right" id="mm_del">Delete draft</button>`;
+    act.innerHTML=h;
+    const on=(id,fn)=>{ const b=$("#"+id); if(b) b.onclick=fn; };
+    on("mm_save",async()=>{ try{ const id=await save(); await openMom(id); }catch(e){ toast(e.message); } });
+    on("mm_view",async()=>{ try{ if(!ro) await save(true); openMomDoc(m.id,false); }catch(e){ toast(e.message); } });
+    on("mm_pdf",async()=>{ try{ if(!ro) await save(true); toast("Preparing PDF…"); const html=await apiText("mom/"+m.id+"/html"); const b64=await htmlToPdfBase64(html); const a=document.createElement("a"); a.href="data:application/pdf;base64,"+b64; a.download=m.ref.replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf"; a.click(); }catch(e){ toast(e.message); } });
+    on("mm_issue",async()=>{ if(!confirm(`Issue ${m.ref} and e-mail the signed PDF to ${MOM_DATA.distribution.length} staff addresses?\n\n${MOM_DATA.distribution.join(", ")}`)) return;
+      try{ if(!ro) await save(true); toast("Preparing PDF…"); let pdfBase64="",pdfName=m.ref.replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf";
+        // Mark issued first so the PDF carries the signature & stamp.
+        const html=await apiText("mom/"+m.id+"/html?issued=1"); try{ pdfBase64=await htmlToPdfBase64(html,{budget:5e6}); }catch(e){ pdfBase64=""; }
+        toast("Sending…"); const r=await api("mom/"+m.id+"/issue",{method:"POST",body:{pdfBase64,pdfName}}); toast(`Issued — sent to ${r.count} recipients (${r.status})`); await openMom(m.id); }catch(e){ toast(e.message); } });
+    on("mm_del",async()=>{ if(!confirm("Delete this draft?")) return; try{ await api("mom/"+m.id,{method:"DELETE"}); MOM_EDIT=null; vMom(); }catch(e){ toast(e.message); } });
+  };
+  draw();
+}
+async function renderMomActions(el){
+  let d; try{ d=await api("mom/actions"); }catch(e){ el.innerHTML=`<div class="muted">${esc(e.message)}</div>`; return; }
+  const open=d.actions.filter(a=>a.status!=="Done"&&a.status!=="Closed");
+  const projs=[...new Set(d.actions.map(a=>a.project))].sort(); const filt=window.MOM_AFILTER||""; const showDone=!!window.MOM_SHOWDONE;
+  const rows=d.actions.filter(a=>(!filt||a.project===filt)&&(showDone||(a.status!=="Done"&&a.status!=="Closed")));
+  el.innerHTML=`<div class="kpis">${lvKpi(open.length,"Open actions",open.length?"#b45309":"#375623")}${lvKpi(open.filter(a=>a.overdue).length,"Overdue","#C00000")}${lvKpi(projs.length,"Projects with minutes")}</div>
+   <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:10px"><select id="momAF" style="max-width:320px"><option value="">All projects</option>${projs.map(p=>`<option ${p===filt?"selected":""}>${esc(p)}</option>`).join("")}</select><label style="display:inline-flex;align-items:center;gap:6px;margin:0;text-transform:none;font-weight:500"><input type="checkbox" id="momSD" ${showDone?"checked":""} style="width:auto"> show completed</label></div>
+   <div style="overflow-x:auto;margin-top:8px"><table><tr><th>Due</th><th>Action</th><th>Responsible</th><th>Project</th><th>Minutes</th><th>Status</th></tr>
+   ${rows.map(a=>`<tr ${a.overdue?'style="background:#fff5f5"':""}><td style="white-space:nowrap">${a.overdue?'<b style="color:var(--red)">':""}${momDue(a.due,a.dueText)}${a.overdue?"</b>":""}</td><td>${esc(a.text)}</td><td>${esc(a.actionBy)}</td><td>${esc(a.project)}</td><td><a href="#" data-mom="${esc(a.momId)}">${esc(a.ref)}</a> · ${a.item}</td><td>${momCan.edit()?`<select data-st="${esc(a.momId)}|${a.item}" style="min-width:120px">${["Open","In progress","Done","Closed"].map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>`:esc(a.status)}</td></tr>`).join("")||`<tr><td colspan="6" class="muted">No actions.</td></tr>`}
+   </table></div>`;
+  $("#momAF").onchange=e=>{ window.MOM_AFILTER=e.target.value; renderMomActions(el); };
+  $("#momSD").onchange=e=>{ window.MOM_SHOWDONE=e.target.checked; renderMomActions(el); };
+  el.querySelectorAll("[data-mom]").forEach(a=>a.onclick=e=>{ e.preventDefault(); openMom(a.dataset.mom); });
+  el.querySelectorAll("[data-st]").forEach(sel=>sel.onchange=async()=>{ const [id,item]=sel.dataset.st.split("|"); try{ await api("mom/"+id+"/action",{method:"POST",body:{item,status:sel.value}}); toast("Updated"); renderMomActions(el); }catch(e){ toast(e.message); } });
+}
+function renderMomDist(el){
+  const d=MOM_DATA; const ceo=ME.role==="CEO";
+  el.innerHTML=`<div class="grid" style="grid-template-columns:1.2fr 1fr"><div><label>Staff distribution list (one e-mail per line)</label><textarea id="momDistTxt" rows="14" ${ceo?"":"disabled"}>${esc(d.distribution.join("\n"))}</textarea>
+     ${ceo?`<button class="btn gold" id="momDistSave" style="margin-top:8px">Save list</button>`:`<div class="muted" style="font-size:11.5px;margin-top:6px">Only the CEO can change the list.</div>`}</div>
+    <div><div class="note"><b>Who receives the minutes</b><br>${d.distribution.map(e=>`${esc(e)}${d.organizers.includes(e)?' <span class="pill st-Issued" style="font-size:10px">organizer</span>':""}`).join("<br>")}
+     <div class="muted" style="margin-top:8px">Organizers are the <b>To</b> address; everyone else is <b>CC</b>. Issued minutes go out immediately with the signed PDF attached; the open-actions digest goes out every Monday 08:00 (Dubai). Sender: the Zoho mailbox set in Settings → Email notifications.</div></div></div></div>`;
+  const b=$("#momDistSave"); if(b) b.onclick=async()=>{ try{ const r=await api("mom/settings",{method:"POST",body:{distribution:$("#momDistTxt").value}}); toast(`Saved — ${r.distribution.length} recipients`); vMom(); }catch(e){ toast(e.message); } };
+}
+
 async function vAnnounce(){
   if(!["CEO","HR","Marketing"].includes(ME.role)){ $("#main").innerHTML=`<div class="card muted">Announcements are available to the CEO, HR &amp; Admin and Marketing.</div>`; return; }
   $("#main").innerHTML=`<div class="card"><div class="muted">Loading…</div></div>`;
@@ -5816,6 +5964,7 @@ function compCertForm(r){
     }catch(e){ toast(e.message); } };
 }
 if(location.hash==="#marketing"){ VIEW="marketing"; MKT_TAB="connect"; history.replaceState(null,"",location.pathname); }
+if(/^#mom(=|$)/.test(location.hash)){ VIEW="mom"; const mid=location.hash.split("=")[1]; if(mid) MOM_OPEN_ID=mid; history.replaceState(null,"",location.pathname); window.MOM_BOOT_OPEN=mid||""; }
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();
 </script>
 </body>
