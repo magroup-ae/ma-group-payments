@@ -37,7 +37,12 @@
   aside.sb .sb-top .nm span { display:block; font-weight:500; font-size:10.5px; color:#c9d4e6; letter-spacing:.6px; }
   aside.sb .sb-scroll { flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:8px 0 12px; }
   aside.sb .sb-scroll::-webkit-scrollbar { width:6px } aside.sb .sb-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,.22); border-radius:3px }
-  aside.sb .grp { color:#8fa4c4; font-size:9px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; padding:9px 16px 3px; white-space:nowrap; }
+  aside.sb .grp { color:#8fa4c4; font-size:9px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; padding:9px 16px 3px; white-space:nowrap; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+  aside.sb .grp:hover { color:#c9d4e6; }
+  aside.sb .grp .chev { margin-left:auto; font-size:12px; line-height:1; color:#8fa4c4; width:14px; text-align:center; }
+  aside.sb .grp.closed { padding-bottom:6px; }
+  body.sb-collapsed aside.sb .grp .chev { display:none; }
+  body.sb-collapsed aside.sb .grp-items[hidden] { display:block !important; }
   aside.sb button.nv { width:100%; border:0; background:none; color:#dfe6f2; display:flex; align-items:center; gap:11px; padding:7px 16px; cursor:pointer;
     font-size:13px; font-weight:600; text-align:left; border-left:3px solid transparent; white-space:nowrap; }
   aside.sb button.nv:hover { background:rgba(255,255,255,.08); color:#fff; }
@@ -564,14 +569,16 @@ function render(){
   if(!GROUPS.some(([,items])=>items.some(([k])=>k===VIEW))) VIEW=({HR:"ops",Marketing:"marketing"})[r]||GROUPS[0][1][0][0];
   const titleOf=(()=>{ for(const [,items] of GROUPS) for(const [k,l] of items) if(k===VIEW) return l; return "MA Group"; })();
   const collapsed=localStorage.getItem("ma_sb")==="1";
+  let SB_CLOSED={}; try{ SB_CLOSED=JSON.parse(localStorage.getItem("ma_sbg")||"{}")||{}; }catch(e){}
   document.body.classList.toggle("sb-collapsed",collapsed);
   document.body.classList.remove("sb-open");
   root.innerHTML = `
   <aside class="sb">
     <div class="sb-top"><img src="logo.png" alt=""><div class="nm">MA GROUP<span>MANAGEMENT SYSTEM</span></div></div>
     <div class="sb-scroll">
-      ${GROUPS.map(([g,items])=>`${g?`<div class="grp">${esc(g)}</div>`:`<div style="height:6px"></div>`}
-        ${items.map(([k,l])=>`<button class="nv ${VIEW===k?"on":""}" data-v="${k}" title="${esc(l)}"><span class="ic">${ICONS[k]||""}</span><span class="lb">${esc(l)}</span></button>`).join("")}`).join("")}
+      ${GROUPS.map(([g,items])=>{ const has=items.some(([k])=>k===VIEW); const closed=g&&!has&&!!SB_CLOSED[g];
+        return `${g?`<div class="grp ${closed?"closed":""}" data-grp="${esc(g)}" title="${closed?"Expand":"Minimize"} ${esc(g)}"><span>${esc(g)}</span><span class="chev">${closed?"+":"−"}</span></div>`:`<div style="height:6px"></div>`}
+        <div class="grp-items" ${closed?'hidden':''}>${items.map(([k,l])=>`<button class="nv ${VIEW===k?"on":""}" data-v="${k}" title="${esc(l)}"><span class="ic">${ICONS[k]||""}</span><span class="lb">${esc(l)}</span></button>`).join("")}</div>`; }).join("")}
     </div>
     <div class="sb-foot"><b title="${esc(ME.name)}">${esc(ME.name)}</b><span class="txt">${esc(ME.title||ME.role)}<br>
       <a href="#" id="pinBtn">change PIN</a> · <a href="#" id="outBtn">sign out</a></span></div>
@@ -583,6 +590,8 @@ function render(){
     <div class="u"><b>${esc(ME.name)}</b> · ${esc(ME.title||ME.role)}</div>
   </header>
   <div class="shell"><main id="main"></main></div>`;
+  // Minimize / expand a menu category (remembered per browser). The category of the current page always stays open.
+  root.querySelectorAll("aside.sb .grp[data-grp]").forEach(h=>h.onclick=()=>{ const g=h.dataset.grp; const box=h.nextElementSibling; const nowClosed=!box.hidden; box.hidden=nowClosed; h.classList.toggle("closed",nowClosed); h.querySelector(".chev").textContent=nowClosed?"+":"−"; h.title=(nowClosed?"Expand ":"Minimize ")+g; SB_CLOSED[g]=nowClosed; if(!nowClosed) delete SB_CLOSED[g]; try{ localStorage.setItem("ma_sbg",JSON.stringify(SB_CLOSED)); }catch(e){} });
   root.querySelectorAll("aside.sb button.nv").forEach(b=>b.onclick=async ()=>{
     if(b.dataset.v==="settings"){ if(!(await unlockSettings())) return; }
     document.body.classList.remove("sb-open"); VIEW=b.dataset.v;CUR=null;render(); });
