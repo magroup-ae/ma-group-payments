@@ -14724,6 +14724,8 @@ async function runScheduledPosts(s) {
     for (const ch of post.channels || []) {
       if (post.published && post.published[ch]) continue;
       try {
+        // LinkedIn is executed by the browser assistant (system queue) while the page API is not approved.
+        if (ch === "linkedin" && process.env.LINKEDIN_VIA_BROWSER === "1") continue;
         if (["linkedin", "instagram", "facebook"].includes(ch)) { const r = await publishToChannel(s, post, ch); post.published = post.published || {}; post.published[ch] = { at: now(), id: r.id || r.post_id || "" }; if (post.failed) delete post.failed[ch]; mktLog(post, { channel: ch, ok: true, id: r.id || "" }); }
         else if (post.audienceId) { const r = await broadcastPost(s, post, ch, {}); mktLog(post, { channel: ch, ok: true, sent: r.sent, failed: r.failed }); }
       } catch (e) { post.failed = post.failed || {}; post.failed[ch] = { at: now(), error: e.message }; mktLog(post, { channel: ch, ok: false, error: e.message }); }
@@ -16108,7 +16110,7 @@ var api_default = async (req, context) => {
     if (!p || !p.mediaKey || url.searchParams.get("k") !== p.mediaKey) return err("Not found", 404);
     const m = (p.media || [])[+idx || 0]; if (!m || !m.data) return err("Not found", 404);
     const buf = Buffer.from(String(m.data).split(",").pop(), "base64");
-    return new Response(buf, { headers: { "content-type": m.type || "image/jpeg", "cache-control": "public, max-age=86400", "content-length": String(buf.length) } });
+    return new Response(buf, { headers: { "content-type": m.type || "image/jpeg", "cache-control": "public, max-age=86400", "content-length": String(buf.length), "access-control-allow-origin": "*" } });
   }
   // LinkedIn OAuth callback (public): exchange the code, store the token, return to the app.
   if (path === "mkt/linkedin/callback" && req.method === "GET") {
@@ -19071,6 +19073,49 @@ var api_default = async (req, context) => {
   }
   // LinkedIn page analytics snapshot pushed by the scheduled assistant (read from the LinkedIn
   // admin panel in the CEO's browser). Shown on Live channels → LinkedIn until the API is approved.
+  // Queue for the browser assistant: approved & scheduled posts due by the end of today (Dubai)
+  // that still need publishing on the given channel. Media come as public URLs.
+  if (path === "mkt/queue" && req.method === "GET") {
+    if (!can("marketing")) return err("No rights", 403);
+    const ch = url.searchParams.get("channel") || "linkedin";
+    const horizonH = Math.min(72, Math.max(0, +(url.searchParams.get("hours") || 18)));
+    const until = new Date(Date.now() + horizonH * 36e5).toISOString();
+    const base = mktEnv().siteUrl;
+    const posts = (await listPosts()).filter((p) => p.status === "Scheduled" && (p.channels || []).includes(ch) && !(p.published && p.published[ch]) && (!p.scheduledAt || p.scheduledAt <= until))
+      .sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+    return json({ channel: ch, now: now(), until, count: posts.length, posts: posts.map((p) => ({
+      id: p.id, title: p.title, type: p.type, scheduledAt: p.scheduledAt, author: p.liAuthor === "personal" ? "personal" : "page", text: postText(p), link: p.link || "",
+      media: (p.media || []).map((m, i) => ({ i, name: m.name, type: m.type, url: `${base}/api/mkt/media/${p.id}/${i}?k=${p.mediaKey}` })),
+      approvedBy: p.approvedBy || "", campaign: p.campaign || "", project: p.project || ""
+    })) });
+  }
+  // The assistant reports a post it published in the browser (or a failure).
+  if (/^mkt\/post\/[^/]+\/external$/.test(path) && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const post = await s.get("mkt/post/" + id, { type: "json" }); if (!post) return err("Post not found", 404);
+    const ch = MKT_CHANNELS.some((x) => x.code === b.channel) ? b.channel : "linkedin";
+    post.published = post.published || {}; post.failed = post.failed || {};
+    if (b.ok === false) { post.failed[ch] = { at: now(), error: String(b.error || "assistant could not publish").slice(0, 400) }; mktLog(post, { channel: ch, ok: false, error: post.failed[ch].error, by: me.name }); }
+    else { if (!b.url) return err("url is required"); post.published[ch] = { at: b.at ? String(b.at) : now(), id: String(b.url), url: String(b.url), via: "Claude assistant (browser)", author: post.liAuthor === "personal" ? "personal profile" : "company page" }; delete post.failed[ch]; mktLog(post, { channel: ch, ok: true, id: String(b.url), by: me.name }); }
+    mktRollStatus(post); post.updatedAt = now(); post.updatedBy = me.name;
+    await s.setJSON("mkt/post/" + id, post);
+    return json({ ok: true, status: post.status });
+  }
+  // Append one picture to a post (assistant uploads carousel slides one call at a time).
+  if (/^mkt\/post\/[^/]+\/media$/.test(path) && req.method === "POST") {
+    if (!can("marketing")) return err("No rights", 403);
+    const id = path.split("/")[2]; const b = await req.json();
+    const post = await s.get("mkt/post/" + id, { type: "json" }); if (!post) return err("Post not found", 404);
+    if (post.status === "Published") return err("Post already published", 403);
+    if (!b.data || !/^data:(image\/(jpeg|png)|video\/mp4|application\/pdf);base64,/.test(b.data)) return err("data must be a base64 data: URI (jpeg/png/mp4/pdf)");
+    const size = Math.round(String(b.data).length * 0.75); if (size > 4.5e6) return err("File larger than 4.5 MB");
+    post.media = post.media || []; if (post.media.length >= 10) return err("Maximum 10 pictures");
+    post.media.push({ name: String(b.name || `slide-${post.media.length + 1}`), type: String(b.data).slice(5, String(b.data).indexOf(";")), size, data: b.data });
+    post.updatedAt = now(); post.updatedBy = me.name;
+    await s.setJSON("mkt/post/" + id, post);
+    return json({ ok: true, count: post.media.length });
+  }
   if (path === "mkt/linkedin/snapshot" && req.method === "POST") {
     if (!can("marketing")) return err("No rights", 403);
     const b = await req.json();
@@ -19120,7 +19165,7 @@ var api_default = async (req, context) => {
     if (!b.title) return err("Give the post a title");
     if (!channels.length) return err("Choose at least one channel");
     const media = [];
-    for (const m of (Array.isArray(b.media) ? b.media : ex?.media || []).slice(0, 4)) {
+    for (const m of (Array.isArray(b.media) ? b.media : ex?.media || []).slice(0, 10)) {
       if (!m) continue;
       if (m.keep && ex) { const old = (ex.media || [])[m.i]; if (old) media.push(old); continue; }
       if (!m.data || !/^data:(image\/(jpeg|png)|video\/mp4|application\/pdf);base64,/.test(m.data)) continue;
@@ -19134,6 +19179,7 @@ var api_default = async (req, context) => {
       channels, body: String(b.body || ""), hashtags: String(b.hashtags || ""), link: String(b.link || ""), emailSubject: String(b.emailSubject || ""),
       audienceId: String(b.audienceId || ""), waTemplate: String(b.waTemplate || ""), waLang: String(b.waLang || "en"), waParams: Array.isArray(b.waParams) ? b.waParams.map(String).filter(Boolean) : [],
       scheduledAt: b.scheduledAt ? String(b.scheduledAt) : "", status: st, media, mediaKey: ex?.mediaKey || randomBytes(8).toString("hex"),
+      liAuthor: b.liAuthor === "personal" ? "personal" : "page", source: ex?.source || String(b.source || (me.id === "assistant" ? "assistant" : "system")),
       published: ex?.published || {}, failed: ex?.failed || {}, log: ex?.log || [],
       createdBy: ex?.createdBy || me.name, createdAt: ex?.createdAt || now(), updatedAt: now(), updatedBy: me.name
     };
