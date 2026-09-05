@@ -567,6 +567,8 @@ function render(){
   ].map(([g,items])=>[g,items.filter(Boolean).filter(([k])=>allowed(k))]).filter(([,items])=>items.length);
   // Land department users on their first page instead of the finance dashboard.
   if(!GROUPS.some(([,items])=>items.some(([k])=>k===VIEW))) VIEW=({HR:"ops",Marketing:"marketing"})[r]||GROUPS[0][1][0][0];
+  // Remember the page (and marketing / minutes sub-tab) so a refresh reopens the same place.
+  try{ sessionStorage.setItem("ma_view",VIEW); sessionStorage.setItem("ma_sub",JSON.stringify({mkt:typeof MKT_TAB!=="undefined"?MKT_TAB:"",mom:typeof MOM_TAB!=="undefined"?MOM_TAB:"",momId:(typeof MOM_EDIT!=="undefined"&&MOM_EDIT&&MOM_EDIT.id)||""})); if(location.hash!=="#"+VIEW) history.replaceState(null,"",location.pathname+"#"+VIEW); }catch(e){}
   const titleOf=(()=>{ for(const [,items] of GROUPS) for(const [k,l] of items) if(k===VIEW) return l; return "MA Group"; })();
   const collapsed=localStorage.getItem("ma_sb")==="1";
   let SB_CLOSED={}; try{ SB_CLOSED=JSON.parse(localStorage.getItem("ma_sbg")||"{}")||{}; }catch(e){}
@@ -5972,8 +5974,17 @@ function compCertForm(r){
       toast("Sent to "+res.to+(cc.length?" (cc "+cc.length+")":"")+" — "+pdfs.length+" PDF"+(pdfs.length===1?"":"s")+" attached"); compCertForm(await api("compcert/"+r.id));
     }catch(e){ toast(e.message); } };
 }
-if(location.hash==="#marketing"){ VIEW="marketing"; MKT_TAB="connect"; history.replaceState(null,"",location.pathname); }
-if(/^#mom(=|$)/.test(location.hash)){ VIEW="mom"; const mid=location.hash.split("=")[1]; if(mid) MOM_OPEN_ID=mid; history.replaceState(null,"",location.pathname); window.MOM_BOOT_OPEN=mid||""; }
+// Restore the page after a refresh: #<page> in the address (also used for e-mail deep links) or the last page of this tab.
+(function(){
+  const KNOWN=["dash","clients","ccerts","vos","projects","mom","certs","sups","procure","awards","cheques","reg","bank","expenses","pnl","budget","ops","assets","hocerts","marketing","announce","settings"];
+  const h=location.hash||""; let sub={}; try{ sub=JSON.parse(sessionStorage.getItem("ma_sub")||"{}")||{}; }catch(e){}
+  if(h==="#marketing"&&!sessionStorage.getItem("ma_view")){ VIEW="marketing"; MKT_TAB="connect"; return; }
+  if(/^#mom=/.test(h)){ VIEW="mom"; const mid=h.split("=")[1]; MOM_OPEN_ID=mid; window.MOM_BOOT_OPEN=mid||""; return; }
+  const fromHash=h.replace(/^#/,""); const saved=sessionStorage.getItem("ma_view")||"";
+  let v=KNOWN.includes(fromHash)?fromHash:(KNOWN.includes(saved)?saved:"");
+  if(v==="settings") v="dash"; // Settings needs the PIN re-check after a reload
+  if(v){ VIEW=v; if(v==="marketing"&&sub.mkt) MKT_TAB=sub.mkt; if(v==="mom"){ if(sub.mom) MOM_TAB=sub.mom; if(sub.momId) window.MOM_BOOT_OPEN=sub.momId; } }
+})();
 (async ()=>{ if(TOKEN){ try{ await load(); render(); return; }catch(e){} } renderLogin(); })();
 </script>
 </body>
